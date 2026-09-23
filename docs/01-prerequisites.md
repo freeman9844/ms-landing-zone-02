@@ -46,7 +46,7 @@ credential helper 또는 `gh auth login`을 사용하세요. PAT를 clone URL에
 
 ```bash
 # 저장소 루트 아래의 land2/가 현재 워크숍 경로입니다.
-git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git \
+git clone https://github.com/jungwoonlee_microsoft/ms-security-landingzone-workshop01.git \
   "$HOME/ms-security-landingzone-workshop01"
 cd "$HOME/ms-security-landingzone-workshop01/land2"
 # 구독 이름과 UUID를 함께 확인합니다. 이 명령은 구독 선택이나 리소스 생성을 하지 않습니다.

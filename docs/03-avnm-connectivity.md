@@ -252,7 +252,6 @@ if [[ "$count" == "0" ]]; then
     --description "AVNM managed beginner hub and spoke" \
     --applies-to-groups "$groups" \
     --hubs "$hubs" \
-    --connect-capabilities '{"peeringEnforcement":"Unenforced"}' \
     --connectivity-topology HubAndSpoke \
     --delete-existing-peering False \
     --is-global False \
@@ -267,7 +266,6 @@ elif [[ "$count" == "1" ]]; then
     .[0].provisioningState == "Succeeded" and
     ((.[0].deleteExistingPeering == "False") or (.[0].deleteExistingPeering == false)) and
     ((.[0].isGlobal == "False") or (.[0].isGlobal == false)) and
-    ((.[0].connectivityCapabilities.peeringEnforcement // "") == "Unenforced") and
     (((.[0].hubs // []) | length) == 1) and
     (((.[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
     (.[0].hubs[0].resourceType == "Microsoft.Network/virtualNetworks") and

@@ -73,8 +73,16 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("--scope-accesses Connectivity SecurityAdmin", text)
         self.assertNotIn("routing-config create", text)
         self.assertNotIn("security-admin-config create", text)
+        self.assertNotIn("--connect-capabilities", text)
+        self.assertNotIn("peeringEnforcement", text)
+        self.assertNotIn("peering-enforcement", text)
 
-    def test_prerequisites_use_the_workshop_subdirectory_path(self):
+    def test_prerequisites_clone_the_workshop_repository_into_land2_path(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
+        self.assertIn(
+            'git clone https://github.com/jungwoonlee_microsoft/ms-security-landingzone-workshop01.git \\',
+            text,
+        )
         self.assertIn('cd "$HOME/ms-security-landingzone-workshop01/land2"', text)
+        self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)

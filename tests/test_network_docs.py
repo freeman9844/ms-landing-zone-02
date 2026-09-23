@@ -142,7 +142,6 @@ def connectivity_config(state=STATE):
         "deleteExistingPeering": "False",
         "isGlobal": "False",
         "provisioningState": "Succeeded",
-        "connectivityCapabilities": {"peeringEnforcement": "Unenforced"},
         "hubs": [{
             "resourceId": netid("hub", "virtualNetworks", vnet("hub", state), state),
             "resourceType": "Microsoft.Network/virtualNetworks",
@@ -304,8 +303,6 @@ def avnm_cases():
                 "--description", "AVNM managed beginner hub and spoke",
                 "--applies-to-groups", groups,
                 "--hubs", hubs,
-                "--connect-capabilities",
-                '{"peeringEnforcement":"Unenforced"}',
                 "--connectivity-topology", "HubAndSpoke",
                 "--delete-existing-peering", "False",
                 "--is-global", "False",
