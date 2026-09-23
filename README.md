@@ -1,5 +1,8 @@
 # 처음 시작하는 Azure Landing Zone: Hub & Spoke 워크숍
 
+Azure Virtual Network Manager를 사용하는 독립 저장소
+`jungwoonlee_microsoft/ms-landing-zone-02`의 루트에서 실행합니다.
+
 > Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 160–190분** 동안
 > Cloud Shell과 Portal로 Hub & Spoke를 만들고, NSG·중앙 Firewall·경로·로그를 확인한 뒤 안전하게 정리합니다.
 

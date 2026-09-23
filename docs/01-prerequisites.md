@@ -45,10 +45,10 @@ credential helper 또는 `gh auth login`을 사용하세요. PAT를 clone URL에
 4. 접근 권한이 있는 GitHub 계정으로 다음 저장소를 복제합니다.
 
 ```bash
-# 저장소 루트 아래의 land2/가 현재 워크숍 경로입니다.
-git clone https://github.com/jungwoonlee_microsoft/ms-security-landingzone-workshop01.git \
-  "$HOME/ms-security-landingzone-workshop01"
-cd "$HOME/ms-security-landingzone-workshop01/land2"
+# 이 독립 저장소의 루트가 현재 워크숍 경로입니다.
+git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \
+  "$HOME/ms-landing-zone-02"
+cd "$HOME/ms-landing-zone-02"
 # 구독 이름과 UUID를 함께 확인합니다. 이 명령은 구독 선택이나 리소스 생성을 하지 않습니다.
 az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o table
 ```
@@ -228,7 +228,7 @@ az extension show --name virtual-network-manager \
 
 ```bash
 # 처음 clone한 폴더로 돌아갑니다. 다른 위치에 받았다면 해당 경로로 이동하세요.
-cd "$HOME/ms-security-landingzone-workshop01/land2" &&
+cd "$HOME/ms-landing-zone-02" &&
 source scripts/workshop-common.sh &&
 # 새 파일이 아니라 기존 실습 JSON을 선택해야 같은 자원을 이어서 관리할 수 있습니다.
 read -rp "저장된 상태 파일 경로: " STATE_FILE &&

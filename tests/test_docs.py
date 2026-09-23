@@ -77,12 +77,13 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("peeringEnforcement", text)
         self.assertNotIn("peering-enforcement", text)
 
-    def test_prerequisites_clone_the_workshop_repository_into_land2_path(self):
+    def test_prerequisites_clone_the_standalone_workshop_repository(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         self.assertIn(
-            'git clone https://github.com/jungwoonlee_microsoft/ms-security-landingzone-workshop01.git \\',
+            'git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \\',
             text,
         )
-        self.assertIn('cd "$HOME/ms-security-landingzone-workshop01/land2"', text)
+        self.assertIn('cd "$HOME/ms-landing-zone-02"', text)
+        self.assertNotIn("ms-security-landingzone-workshop01", text)
         self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)

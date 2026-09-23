@@ -155,7 +155,7 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 모듈 03 mock은 AVNM manager/group/static member/connectivity configuration/commit/effective-configuration
 블록의 호출 순서와 인수를 확인합니다.
 상태·복구 테스트는 schema 2/topology 거부, generated-name 불안정성에 영향받지 않는
-full-ID 비교, 현재 저장소 경로 `$HOME/ms-security-landingzone-workshop01/land2` 복구 동작을 회귀 검사합니다.
+full-ID 비교, 독립 저장소 경로 `$HOME/ms-landing-zone-02` 복구 동작을 회귀 검사합니다.
 `bash tests/validate.sh`의 최종 요약은 `PASS: local validation only; no Azure resources were deployed.`여야 합니다.
 소문자·혼합 대소문자 ID와 workspace 참조는 허용하되, 다른 구독·RG·종류·이름 및 추가 경로는 거부하는 회귀 검사도 포함합니다.
 검증/정리 스크립트 호출은 문서 테스트에서 인수와 실패 전파를 확인하고 기존 스크립트 테스트를 함께 실행합니다.
