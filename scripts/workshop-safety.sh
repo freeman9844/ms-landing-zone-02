@@ -9,6 +9,27 @@ assert_resource_id() {
     { fail "Resource ID mismatch: expected=$expected actual=$actual"; return 1; }
 }
 
+peering_name_for_remote() {
+  local local_rg="${1:-}" local_vnet="${2:-}" remote_id="${3:-}" peerings
+  [[ -n "$local_rg" && -n "$local_vnet" && -n "$remote_id" ]] ||
+    { fail "Peering lookup requires local RG, local VNet, and remote VNet ID."; return 1; }
+  peerings=$(az network vnet peering list -g "$local_rg" --vnet-name "$local_vnet" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -er --arg remote "$remote_id" '
+    [.[] | select(
+      (.remoteVirtualNetwork.id | type == "string") and
+      ((.remoteVirtualNetwork.id | ascii_downcase) == ($remote | ascii_downcase))
+    )]
+    | if length == 1 and ((.[0].name | type == "string") and (.[0].name | length > 0))
+      then .[0].name
+      else error("Expected exactly one peering for remote VNet")
+      end
+  ' <<< "$peerings" || {
+    fail "Expected exactly one peering to remote VNet: $remote_id"
+    return 1
+  }
+}
+
 # 임의의 사설 IP가 아니라 지정한 Subnet 안의 IPv4 호스트 주소인지 확인합니다.
 # 네트워크/브로드캐스트 주소도 거부합니다. Azure의 모든 주소 예약·할당 규칙을 재현하는 검사는 아닙니다.
 assert_ipv4_in_subnet() {

@@ -3,20 +3,68 @@
 # NSG 규칙을 직접 바꾸지 않습니다. 교재의 해당 변경을 적용한 뒤 Cloud Shell/로컬 CLI에서 실행합니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/verify-common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
 [[ $# == 2 && "$2" =~ ^(baseline|nsg-denied|restored)$ ]] ||
   { fail "Usage: verify-core.sh STATE_FILE baseline|nsg-denied|restored"; exit 1; }
 load_run "$1"
 assert_subscription
 # baseline과 restored는 같은 정상 통신을 기대합니다. restored 인수 자체가 NSG 규칙을 복구하지는 않습니다.
-# Hub 두 개, 각 Spoke 한 개의 연결이 모두 Connected여야 합니다. 추가 Peering도 학습 전제를 바꿉니다.
+# AVNM effective configuration과 Hub↔Spoke Peering 집합이 정확해야 다음 NSG·HTTP 증거를 해석할 수 있습니다.
+hub_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+spokea_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+spokeb_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
 for zone in hub spokea spokeb; do
+  local_expected='[]'
   zone_context "$zone"
   assert_owned_rg "$RG"
-  peerings=$(az network vnet peering list -g "$RG" --vnet-name "$VNET" -o json)
-  expected=1
-  [[ "$zone" != hub ]] || expected=2
-  jq -e --argjson n "$expected" 'length == $n and all(.[]; .peeringState == "Connected")' \
-    <<< "$peerings" >/dev/null || { fail "Unexpected/disconnected peerings: $zone"; exit 1; }
+  effective=$(az network manager list-effective-connectivity-config \
+    --resource-group "$RG" --virtual-network-name "$VNET" -o json \
+    --subscription "$SUBSCRIPTION_ID") || exit 1
+  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_vnet_id" --arg group "$NETWORK_GROUP_ID" '
+    def falsey: . == false or . == "False";
+    (.value | type == "array" and length == 1) and
+    (.value[0] as $cfg |
+      ($cfg.id | type == "string") and
+      (($cfg.id | ascii_downcase) == ($config | ascii_downcase)) and
+      $cfg.connectivityTopology == "HubAndSpoke" and
+      $cfg.provisioningState == "Succeeded" and
+      ($cfg.deleteExistingPeering | falsey) and
+      ($cfg.isGlobal | falsey) and
+      (($cfg.hubs // []) | length == 1) and
+      ($cfg.hubs[0].resourceId | type == "string") and
+      (($cfg.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      (($cfg.appliesToGroups // []) | length == 1) and
+      ($cfg.appliesToGroups[0].networkGroupId | type == "string") and
+      (($cfg.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
+      $cfg.appliesToGroups[0].groupConnectivity == "None" and
+      ($cfg.appliesToGroups[0].isGlobal | falsey) and
+      ($cfg.appliesToGroups[0].useHubGateway | falsey)
+    )
+  ' <<< "$effective" >/dev/null || { fail "Unexpected effective AVNM connectivity: $zone"; exit 1; }
+  case "$zone" in
+    hub) local_expected=$(jq -cn --arg a "$spokea_vnet_id" --arg b "$spokeb_vnet_id" '[$a, $b]') ;;
+    spokea|spokeb) local_expected=$(jq -cn --arg hub "$hub_vnet_id" '[$hub]') ;;
+  esac
+  peerings=$(az network vnet peering list -g "$RG" --vnet-name "$VNET" -o json \
+    --subscription "$SUBSCRIPTION_ID") || exit 1
+  jq -e --argjson expected "$local_expected" '
+    type == "array" and
+    length == ($expected | length) and
+    all(.[]; . as $peering |
+      (($peering.name | type == "string") and ($peering.name | length > 0)) and
+      ($peering.remoteVirtualNetwork.id | type == "string") and
+      ([ $expected[] | ascii_downcase ] | index($peering.remoteVirtualNetwork.id | ascii_downcase)) != null
+    ) and
+    ([ $expected[] as $remote |
+      [ .[] | select(
+        (.remoteVirtualNetwork.id | type == "string") and
+        ((.remoteVirtualNetwork.id | ascii_downcase) == ($remote | ascii_downcase))
+      ) ] as $matches
+      | ($matches | length == 1) and
+        (($matches[0].name | type == "string") and ($matches[0].name | length > 0)) and
+        ($matches[0].peeringState == "Connected")
+    ] | all)
+  ' <<< "$peerings" >/dev/null || { fail "Unexpected/disconnected peerings: $zone"; exit 1; }
 done
 hub=$(vm_ip hub)
 a=$(vm_ip spokea)

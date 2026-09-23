@@ -77,6 +77,66 @@ class SafetyTests(unittest.TestCase):
         self.assertIn("ALIVE", result.stdout)
         return result
 
+    def test_peering_lookup_returns_the_only_complete_remote_id_match(self):
+        remote = netid("spokea", "virtualNetworks", vnet("spokea"))
+        calls = [az([
+            "network", "vnet", "peering", "list",
+            "-g", rg("hub"),
+            "--vnet-name", vnet("hub"),
+            "-o", "json",
+        ], [
+            {"name": "generated-a", "remoteVirtualNetwork": {"id": remote}},
+            {"name": "foreign", "remoteVirtualNetwork": {"id": "foreign"}},
+        ])]
+        result = self.execute(
+            f'peering_name_for_remote "{rg("hub")}" "{vnet("hub")}" "{remote}"',
+            calls,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("generated-a", result.stdout)
+
+    def test_peering_lookup_rejects_zero_or_duplicate_matches(self):
+        remote = netid("spokea", "virtualNetworks", vnet("spokea"))
+        for peerings in (
+            [],
+            [{"name": "child-id", "remoteVirtualNetwork": {"id": remote + "/subnets/snet-workload"}}],
+            [
+                {"name": "one", "remoteVirtualNetwork": {"id": remote}},
+                {"name": "two", "remoteVirtualNetwork": {"id": remote.swapcase()}},
+            ],
+        ):
+            with self.subTest(peerings=peerings):
+                calls = [az([
+                    "network", "vnet", "peering", "list",
+                    "-g", rg("hub"),
+                    "--vnet-name", vnet("hub"),
+                    "-o", "json",
+                ], peerings)]
+                result = self.execute(
+                    f'peering_name_for_remote "{rg("hub")}" "{vnet("hub")}" "{remote}"',
+                    calls,
+                )
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_peering_lookup_rejects_missing_or_empty_match_name(self):
+        remote = netid("spokea", "virtualNetworks", vnet("spokea"))
+        for match in (
+            {"remoteVirtualNetwork": {"id": remote}},
+            {"name": "", "remoteVirtualNetwork": {"id": remote}},
+        ):
+            with self.subTest(match=match):
+                calls = [az([
+                    "network", "vnet", "peering", "list",
+                    "-g", rg("hub"),
+                    "--vnet-name", vnet("hub"),
+                    "-o", "json",
+                ], [match])]
+                result = self.execute(
+                    f'peering_name_for_remote "{rg("hub")}" "{vnet("hub")}" "{remote}"',
+                    calls,
+                )
+                self.assertNotEqual(result.returncode, 0)
+
     def test_resource_id_comparison_accepts_only_case_differences(self):
         for actual in (LAW.lower(), LAW.swapcase(), LAW):
             result = self.execute(f'assert_resource_id "{actual}" "{LAW}"')
