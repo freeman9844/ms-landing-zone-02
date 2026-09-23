@@ -17,10 +17,12 @@ for zone in hub spokea spokeb; do
   local_expected='[]'
   zone_context "$zone"
   assert_owned_rg "$RG"
+  current_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/$VNET"
   effective=$(az network manager list-effective-connectivity-config \
     --resource-group "$RG" --virtual-network-name "$VNET" -o json \
     --subscription "$SUBSCRIPTION_ID") || exit 1
-  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_vnet_id" --arg group "$NETWORK_GROUP_ID" '
+  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_vnet_id" \
+    --arg group "$NETWORK_GROUP_ID" --arg target "$current_vnet_id" '
     def falsey: . == false or . == "False";
     (.value | type == "array" and length == 1) and
     (.value[0] as $cfg |
@@ -33,6 +35,8 @@ for zone in hub spokea spokeb; do
       (($cfg.hubs // []) | length == 1) and
       ($cfg.hubs[0].resourceId | type == "string") and
       (($cfg.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      ($cfg.targetVirtualNetwork.id | type == "string") and
+      (($cfg.targetVirtualNetwork.id | ascii_downcase) == ($target | ascii_downcase)) and
       (($cfg.appliesToGroups // []) | length == 1) and
       ($cfg.appliesToGroups[0].networkGroupId | type == "string") and
       (($cfg.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and

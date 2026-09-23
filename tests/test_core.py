@@ -142,6 +142,17 @@ class CoreGateTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("effective", result.stderr)
 
+    def test_effective_configuration_requires_current_zone_target_vnet_id(self):
+        payload = copy.deepcopy(effective_configuration("hub"))
+        payload["value"][0]["targetVirtualNetwork"]["id"] = netid("spokea", "virtualNetworks", vnet("spokea"))
+        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+            account(),
+            group("hub"),
+            self.effective_call("hub", payload),
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("effective", result.stderr)
+
     def test_effective_configuration_requires_exact_hub_and_group_ids(self):
         cases = (
             ("hub", ["value", 0, "hubs", 0, "resourceId"],
@@ -168,6 +179,7 @@ class CoreGateTests(unittest.TestCase):
         payload = copy.deepcopy(effective_configuration("hub"))
         payload["value"][0]["deleteExistingPeering"] = False
         payload["value"][0]["isGlobal"] = False
+        payload["value"][0]["targetVirtualNetwork"]["id"] = payload["value"][0]["targetVirtualNetwork"]["id"].swapcase()
         payload["value"][0]["appliesToGroups"][0]["isGlobal"] = False
         payload["value"][0]["appliesToGroups"][0]["useHubGateway"] = False
         peerings = copy.deepcopy(avnm_peerings("hub"))
