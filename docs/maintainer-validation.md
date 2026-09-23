@@ -261,6 +261,25 @@ Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 �
 - [ ] generated Peering 이름을 가정하지 않고 remote VNet full ID 기준으로 검증했다.
 - [ ] cleanup으로 정확한 세 RG만 삭제하고 공유 Network Watcher 보존을 확인했다.
 
+### 2026-09-23 AVNM 실제 리허설 시도 — 실행 생성 전 차단
+
+2026-09-23 18:30–18:35 KST에 Korea Central 새 실행을 시작하기 전 도구와 구독 접근을 확인했습니다.
+선택된 구독은 `ME-MngEnvMCAP974883-jungwoonlee-1`
+(`e9c89382-b9fd-4856-8ae4-647988d62a44`)이었습니다.
+
+- Azure CLI `2.90.0`, Bicep `0.45.15`, Firewall extension `2.2.1`,
+  log-analytics extension `1.0.0b2`, Checkov `3.3.19`를 기록했습니다.
+- `virtual-network-manager` extension은 설치되어 있지 않아 버전을 기록하지 못했습니다.
+- Azure MCP 구독 조회는 자격 증명 획득 실패와 `login.microsoftonline.com` 네트워크 접근 불가로 실패했습니다.
+  Azure CLI의 읽기 전용 `az group list` 접근 확인도 응답을 반환하지 않아 5분 후 중단했습니다.
+- 따라서 인증·네트워크와 필수 CLI capability가 준비되지 않은 blocker로 판단해 `new_run`을 호출하지 않았습니다.
+  `RUN_ID`, 상태 파일, 소유 RG 이름은 생성되지 않았고 Azure 자원 생성·변경도 시도하지 않았습니다.
+- 모듈 01–06과 실제 검증은 실행하지 않았으므로 위 AVNM 체크리스트는 모두 미완료로 유지합니다.
+- 실행과 소유 RG가 없으므로 `scripts/cleanup.sh`를 호출할 상태 파일이 없었습니다.
+  세 RG의 `false` 조회 증거도 만들 수 없어 이번 시도는 완료가 아니라 **blocked**입니다.
+- 비밀이 없는 환경 및 blocker 증거는
+  `evidence/rehearsal-blocked-20260923T182607+0900/`에 보관했습니다(Git 제외).
+
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기
 전에는 해당 조직의 공유 정책을 따릅니다.
