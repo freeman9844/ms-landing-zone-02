@@ -81,8 +81,11 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
   Azure API 호출 전에 거부해야 합니다.
 - 참가자 문서에는 수동 VNet peering 생성 CLI가 남아 있으면 안 됩니다. 모듈 06의 `peering update`
   는 AVNM이 만든 기존 Peering의 `allowForwardedTraffic`만 바꾸는 용도로 유지합니다.
-- 모듈 03의 완료 조건은 commit 성공 메시지가 아니라 **세 VNet의 effective connectivity configuration**과
-  실제 Hub↔Spoke Peering 상태입니다.
+- 모듈 03의 완료 조건은 commit 성공 메시지가 아니라 **두 Spoke의 effective connectivity
+  configuration**과 실제 Hub↔Spoke Peering 상태입니다. 별도로 지정한 Hub는 정적 Network
+  Group 밖에 있어 effective 목록이 비어 있으며, 실제 CLI 응답에는
+  `targetVirtualNetwork.id`가 없습니다. 로컬 VNet을 대상으로 조회하고 전체 remote VNet ID로
+  양방향 Peering을 검사합니다.
 - AVNM이 만든 Peering 이름은 안정적인 계약이 아닙니다. 테스트와 스크립트는 remote VNet의 **전체 resource ID**
   로 정확히 하나를 찾아야 하며, suffix 비교나 생성 규칙 추정에 의존하지 않습니다.
 - 실행 경로는 Connectivity-only입니다. 참가자 문서와 예제에는 Security Admin configuration,
@@ -250,16 +253,17 @@ Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 �
 
 ### AVNM 변형 리허설 체크리스트
 
-아래 항목은 **현재 AVNM 교재**의 Task 7에서 실제 관측값으로 채워야 합니다. 아직 완료로 표시하지 않습니다.
+아래 항목은 **현재 AVNM 교재**의 실제 관측값입니다. 로컬 터미널의 인증된
+Azure CLI로 진행했으며 브라우저 Cloud Shell 재접속은 시험하지 않았습니다.
 
 - [ ] Cloud Shell의 Azure CLI·Bicep·`virtual-network-manager` extension·Checkov 버전을 기록했다.
-- [ ] 모듈 03에서 AVNM, Network Group, 정적 Spoke A/B membership, Connectivity Configuration을 만들었다.
-- [ ] `koreacentral` commit 뒤 세 VNet의 effective connectivity configuration이 모두 기대한 configuration ID를 가리켰다.
-- [ ] Hub에는 Connected Peering 2개, 각 Spoke에는 Connected Peering 1개가 생겼고 Spoke A↔B 직접 Peering은 없었다.
-- [ ] 모듈 04에서 Hub→Spoke 정상 HTTP, NSG 차단/복구, Spoke A→B 실패를 다시 확인했다.
-- [ ] 모듈 05–06에서 Firewall, 진단, `allowForwardedTraffic`, 왕복 UDR, Allow/Deny 로그, egress, Spoke NAT 제거를 확인했다.
-- [ ] generated Peering 이름을 가정하지 않고 remote VNet full ID 기준으로 검증했다.
-- [ ] cleanup으로 정확한 세 RG만 삭제하고 공유 Network Watcher 보존을 확인했다.
+- [x] 모듈 03에서 AVNM, Network Group, 정적 Spoke A/B membership, Connectivity Configuration을 만들었다.
+- [x] `koreacentral` commit 뒤 두 Spoke의 effective connectivity configuration이 기대한 ID를 가리키고 Hub의 목록이 비어 있었다.
+- [x] Hub에는 Connected Peering 2개, 각 Spoke에는 Connected Peering 1개가 생겼고 Spoke A↔B 직접 Peering은 없었다.
+- [x] 모듈 04에서 Hub→Spoke 정상 HTTP, NSG 차단/복구, Spoke A→B 실패를 다시 확인했다.
+- [x] 모듈 05–06에서 Firewall, 진단, `allowForwardedTraffic`, 왕복 UDR, Allow/Deny 로그, egress, Spoke NAT 제거를 확인했다.
+- [x] generated Peering 이름을 가정하지 않고 remote VNet full ID 기준으로 검증했다.
+- [x] cleanup으로 정확한 세 RG만 삭제하고 공유 Network Watcher 보존을 확인했다.
 
 ### 2026-09-23 AVNM 실제 리허설 시도 — 실행 생성 전 차단
 
@@ -294,6 +298,48 @@ Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 �
 0 failed / 3 skipped로 통과했습니다. 현재 참가자 경로와 스크립트에는 수동
 `az network vnet peering create` 또는 제외된 AVNM 설정 명령이 없으며,
 이 결과는 Azure 리허설을 대신하지 않습니다.
+
+### 2026-09-23 실제 AVNM Azure 리허설 — 로컬 CLI 실행
+
+19:08 KST에 인증 경로가 복구되어 읽기 전용 `az group list`가 성공했습니다.
+`virtual-network-manager` extension `3.0.2`를 설치한 뒤 Korea Central에서
+`f0ccc3b0d3c8` 실행을 시작했습니다. 처음에는 정적 멤버 생성 직후 목록의 전파가
+지연되어 Connectivity Configuration의 사전 검사가 실패했습니다. 재조회 후
+configuration 생성과 commit은 성공했고 deployment status는 `Deployed`였습니다.
+별도 Hub의 effective 목록은 빈 배열, 두 Spoke는 올바른 configuration ID였습니다.
+실제 응답에는 `targetVirtualNetwork.id`가 없어서 20:00 KST에 사용자가 승인한
+검증 기준(두 Spoke effective + 양방향 전체 ID Peering)으로 교재·검증기를 바로잡았습니다.
+이 첫 실행은 모듈 04로 넘어가지 않고 `cleanup.sh`로 삭제했으며 세 RG 모두 `false`를
+조회했습니다. 증거: `evidence/rehearsal-f0ccc3b0d3c8/` (Git 제외).
+
+새 `0c392ad416c9` 실행에서 모듈 01의 preflight와 모듈 02–06의 참가자 블록을 순서대로
+실행했습니다. 첫 정적 멤버 목록 조회는 역시 전파 전 상태여서 같은 블록을 재실행했고,
+commit 직후 Spoke A effective 검사는 약 15초 후 통과했습니다. 문서의 전파 대기 검사를
+보강했으며, 조회 API 오류·예상 밖 멤버 ID는 성공으로 취급하지 않습니다.
+모듈 04에서 baseline/NSG deny/restore 검증 3회, 모듈 06에서 Firewall
+Allow/Deny/restore 및 NAT 제거 후 검증이 모두 `PASS`였습니다.
+AVNM 생성 Peering은 Hub 2개·각 Spoke 1개이며 별도 Spoke 간 Peering은 없었습니다.
+Firewall Allow/Deny 로그는 해당 시점의 요청 후 조회했고 인터넷 `/0` 경로와 출구 IP는
+Firewall로 확인했습니다.
+
+| 실제 관측 구간 | 소요 |
+|---|---:|
+| 지원 VM/NAT 배포 | 약 71초 |
+| Firewall IP 구성 | 약 475초 |
+| Firewall Allow 로그 수집까지 검증 | 약 423초 |
+| Firewall Deny 로그 수집까지 검증 | 약 300초 |
+| Firewall Allow 복구 로그 수집까지 검증 | 약 314초 |
+| NAT 제거 후 최종 검증 | 약 288초 |
+| 세 RG 삭제 및 부재 조회 | 약 16분 38초 |
+
+Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
+`2.2.1`, log-analytics extension `1.0.0b2`, Checkov `3.3.19`를 로컬에서 사용했습니다.
+지역 용량·Policy·provider 등록 오류는 없었고, 위의 초기 전파 지연은 명시적으로
+처리했습니다. `cleanup.sh` 완료 후 정확한 세 RG를 별도 조회해 `false` 세 개를
+기록했고 기존 Korea Central Network Watcher는 `Succeeded`로 남았습니다.
+증거: `evidence/rehearsal-0c392ad416c9/` (Git 제외). 브라우저 Cloud Shell에서
+동일 명령을 실행하거나 세션 재연결을 시험했다는 의미는 아닙니다.
+로컬 최종 검사는 139 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
 
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기
