@@ -32,6 +32,7 @@ printf '%s\n' \
             {"schemaVersion": 1},
             {"topology": "manual-hub-spoke"},
             {"topology": None},
+            {"location": "westus2"},
         ):
             with self.subTest(change=change):
                 data = dict(STATE, **change)
@@ -72,7 +73,7 @@ load_run state.json && zone_context hub &&
     def test_switching_state_drops_zone_targets_from_previous_run(self):
         result = run(SOURCE + f'''
 load_run state.json && zone_context spokea &&
-  create_run abc123 {SUB} eastus >/dev/null &&
+  create_run abc123 {SUB} koreacentral >/dev/null &&
   load_run .workshop-state/abc123.json || exit 90
 for name in RG SUBNET PREFIX VNET VM NSG; do
   [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
@@ -80,7 +81,7 @@ done
 zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG"
 ''')
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertEqual(result.stdout, "abc123 eastus rg-lzbegin-spokeb-abc123\n")
+        self.assertEqual(result.stdout, "abc123 koreacentral rg-lzbegin-spokeb-abc123\n")
 
     def new_group_calls(self, values=("false", "false", "false")):
         return [call(["group", "exists", "--name",
@@ -139,9 +140,14 @@ printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("runId", result.stderr)
 
+    def test_create_run_rejects_other_valid_azure_location(self):
+        result = run(SOURCE + f'create_run abc123 {SUB} westus2')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("koreacentral", result.stderr)
+
     def test_existing_state_is_not_overwritten(self):
         result = run(SOURCE + f'create_run abc123 {SUB} koreacentral && '
-                     f'create_run abc123 {SUB} eastus')
+                     f'create_run abc123 {SUB} koreacentral')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exists", result.stderr)
 

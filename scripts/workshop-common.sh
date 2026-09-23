@@ -15,7 +15,7 @@ create_run() (
   [[ "$run_id" =~ ^[a-z0-9]{6,12}$ ]] || { fail "runId: use 6-12 lowercase letters/digits."; return 1; }
   [[ "$subscription" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
     { fail "subscriptionId must be a UUID."; return 1; }
-  [[ "$location" =~ ^[a-z][a-z0-9]+$ ]] || { fail "Invalid Azure location."; return 1; }
+  [[ "$location" == "koreacentral" ]] || { fail "Invalid Azure location. Use koreacentral."; return 1; }
   # 상태 파일은 본인만 읽고 쓸 수 있게 하며, 기존 파일을 덮어쓰지 않습니다.
   umask 077
   mkdir -p .workshop-state || return 1
@@ -93,7 +93,7 @@ load_run() {
     select(type == "object" and .schemaVersion == 2 and .topology == "avnm-hub-spoke")
     | select(.runId | type == "string" and test("^[a-z0-9]{6,12}$"))
     | select(.subscriptionId | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
-    | select(.location | type == "string" and test("^[a-z][a-z0-9]+$"))
+    | select(.location == "koreacentral")
     | select((.resourceGroups | keys) == ["hub", "spokea", "spokeb"])
     | select(.resourceGroups.hub == ("rg-lzbegin-hub-" + .runId))
     | select(.resourceGroups.spokea == ("rg-lzbegin-spokea-" + .runId))
