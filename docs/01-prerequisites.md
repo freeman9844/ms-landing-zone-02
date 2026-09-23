@@ -45,9 +45,10 @@ credential helper 또는 `gh auth login`을 사용하세요. PAT를 clone URL에
 4. 접근 권한이 있는 GitHub 계정으로 다음 저장소를 복제합니다.
 
 ```bash
-# 교재와 스크립트를 같은 폴더에 받아야 이후 상대 경로가 올바르게 동작합니다.
-git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git
-cd ms-landing-zone-01
+# 저장소 루트 아래의 land2/가 현재 워크숍 경로입니다.
+git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git \
+  "$HOME/ms-security-landingzone-workshop01"
+cd "$HOME/ms-security-landingzone-workshop01/land2"
 # 구독 이름과 UUID를 함께 확인합니다. 이 명령은 구독 선택이나 리소스 생성을 하지 않습니다.
 az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o table
 ```
@@ -168,7 +169,7 @@ Provider는 Azure 서비스의 리소스 종류를 구독에서 사용할 수 �
 👁️ **설명**
 
 `virtual-network-manager` Azure CLI 확장이 있어야 AVNM 관련 명령을 실행할 수 있습니다.
-정적 membership은 Azure Policy 정의나 할당 역할이 필요하지 않습니다.
+정적 Network Group membership은 Azure Policy 정의나 할당 역할이 필요하지 않습니다.
 대신 이 워크숍의 기존 구독 `Contributor` 요구사항은 그대로 유지됩니다.
 `preflight.sh`는 확장을 설치하거나 업데이트하지 않고, 이미 설치되어 있는지만 읽기 전용으로 확인합니다.
 

@@ -23,9 +23,8 @@ export HOME="$PWD/empty-home"
 
     def test_successful_recovery_accepts_uploaded_json_without_state_directory(self):
         script = '''
-mkdir -p home
-ln -s "$PWD" home/ms-security-landingzone-workshop01
-ln -s . land2
+mkdir -p home/ms-security-landingzone-workshop01
+ln -s "$PWD" home/ms-security-landingzone-workshop01/land2
 export HOME="$PWD/home"
 '''
         script += recovery_block()
@@ -39,8 +38,8 @@ export HOME="$PWD/home"
     def test_cancelled_input_stops_before_loading_or_selecting_a_subscription(self):
         script = '''
 mkdir -p home .workshop-state
-ln -s "$PWD" home/ms-security-landingzone-workshop01
-ln -s . land2
+mkdir -p home/ms-security-landingzone-workshop01
+ln -s "$PWD" home/ms-security-landingzone-workshop01/land2
 export HOME="$PWD/home"
 '''
         script += recovery_block()
@@ -53,8 +52,8 @@ export HOME="$PWD/home"
 source scripts/workshop-common.sh
 load_run state.json && zone_context spokea || exit 90
 mkdir -p home .workshop-state
-ln -s "$PWD" home/ms-security-landingzone-workshop01
-ln -s . land2
+mkdir -p home/ms-security-landingzone-workshop01
+ln -s "$PWD" home/ms-security-landingzone-workshop01/land2
 export HOME="$PWD/home"
 '''
         script += recovery_block()
@@ -89,9 +88,8 @@ export HOME="$PWD/home"
 
     def test_failed_subscription_selection_is_not_hidden_by_account_check(self):
         script = '''
-mkdir -p home
-ln -s "$PWD" home/ms-security-landingzone-workshop01
-ln -s . land2
+mkdir -p home/ms-security-landingzone-workshop01
+ln -s "$PWD" home/ms-security-landingzone-workshop01/land2
 export HOME="$PWD/home"
 '''
         script += recovery_block()

@@ -4,7 +4,7 @@
 
 ## 목표
 
-구독, 리소스 그룹, 리전, VNet을 구분하고 Landing Zone이 필요한 이유를 설명합니다.
+구독, 리소스 그룹, 리전, VNet, AVNM의 역할을 구분하고 Landing Zone이 필요한 이유를 설명합니다.
 
 ## 1. Azure를 처음 만날 때
 
@@ -38,10 +38,30 @@ Azure는 Subnet마다 앞의 네 주소와 마지막 주소를 예약하므로 `
 | Spoke B | `10.20.0.0/16` | `10.20.1.0/24` | 두 번째 워크로드 |
 
 겹치지 않는 주소를 쓰면 어느 네트워크로 보내야 하는지 구분할 수 있습니다.
-**Peering**은 두 VNet의 연결입니다. Hub와 각각 연결해도 Spoke끼리 자동으로
-연결되지 않습니다. 이 **비전이성(non-transitivity)**을 모듈 04에서 확인합니다.
+이번 실습에서는 참가자가 네 방향 Peering을 직접 만들지 않고,
+**AVNM(Azure Virtual Network Manager)**가 Hub↔Spoke Peering을 중앙에서 관리합니다.
+Hub와 각각 연결해도 Spoke끼리 자동으로 연결되지는 않습니다. 이
+**비전이성(non-transitivity)**을 모듈 04에서 확인합니다.
 
-## 3. 자주 혼동하는 보안 기능
+## 3. AVNM이 연결을 관리하는 방법
+
+👁️ **설명**
+
+AVNM은 여러 VNet의 연결 구성을 **관리 계층(control plane)**에서 선언하고 배포하는 서비스입니다.
+이 워크숍에서는 세 가지 용어를 먼저 구분합니다.
+
+| 용어 | 이번 실습에서 하는 일 |
+|---|---|
+| AVNM | 구독 범위의 연결 구성을 중앙 관리합니다. |
+| Network Group | Spoke A와 Spoke B를 정적으로 묶어 Connectivity 대상 집합을 만듭니다. |
+| Connectivity Configuration | Hub VNet과 Spoke Network Group을 Hub-and-Spoke 토폴로지로 연결하라고 선언합니다. |
+
+Connectivity Configuration은 만든 즉시 적용되지 않습니다. **Korea Central에 commit/deploy**해야
+실제 Hub↔Spoke Peering이 생성됩니다. 즉, 리전 대상 배포가 빠지면 선언만 있고 연결은 없습니다.
+또한 AVNM은 데이터 경로의 라우터가 아닙니다. 모듈 06에서 UDR과 Firewall을 추가하기 전까지
+Spoke A→B 패킷을 대신 전달하지 않습니다.
+
+## 4. 자주 혼동하는 보안 기능
 
 👁️ **설명**
 
@@ -55,6 +75,8 @@ Azure는 Subnet마다 앞의 네 주소와 마지막 주소를 예약하므로 `
 통신은 **목적지까지 가는 경로**, **통과하는 보안 규칙**, **대상 VM에서 실행 중인 서비스**가
 모두 맞아야 성공합니다. 문이 열려 있어도 길이 없거나 목적지의 서버가 꺼져 있으면 실패합니다.
 NSG의 Allow는 길을 만들지 않고, Peering의 Connected는 TCP 8080 서비스를 시작하지 않습니다.
+AVNM의 Connected 상태도 마찬가지로 **연결 구성의 적용 결과**일 뿐, Spoke 간 transit 경로를 자동으로
+만들어 주지는 않습니다.
 
 인터넷에서 VM으로 들어오는 **인바운드**와 VM이 먼저 인터넷에 연결하는 **아웃바운드**도
 구분하세요. NAT Gateway는 후자의 출구입니다. NAT의 공인 IP가 있다고 인터넷 사용자가
@@ -93,6 +115,7 @@ Portal 메뉴 이름은 언어와 업데이트에 따라 달라질 수 있습니
 ## 완료 체크
 
 - 구독과 RG의 차이를 설명할 수 있습니다.
+- AVNM, Network Group, Connectivity Configuration의 역할을 설명할 수 있습니다.
 - RBAC와 NSG가 다른 문제를 해결한다는 것을 이해했습니다.
 - 이번 실습이 운영 Landing Zone 전체가 아니라는 것을 이해했습니다.
 

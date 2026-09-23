@@ -46,8 +46,9 @@ Peering과 진단 설정의 ID, NSG/Firewall 규칙의 NIC IP는 명시적인 �
 검사 실패 시 자원을 변경하지 않고 참가자 셸도 종료하지 않는지 확인합니다.
 생성 응답은 JSON으로 보여 주고 각 단계 바로 아래에 확인할 필드를 설명합니다.
 
-Peering 네 생성/세 조회, NAT 배포/개별 연결/조회, NSG 변경/검증,
-Firewall 자원/collection/진단, UDR 테이블/각 route/연결/검증은 별도 블록입니다.
+AVNM manager/group/static member/connectivity configuration/commit/effective-configuration,
+NAT 배포/개별 연결/조회, NSG 변경/검증, Firewall 자원/collection/진단,
+UDR 테이블/각 route/연결/검증은 별도 블록입니다.
 두 Spoke 테이블과 네 전달 Peering을 완성한 뒤 각 Subnet 연결 직전에 현재 준비 상태를 검사합니다.
 NAT 제거는 Spoke별 **분리 → NAT 삭제 → Public IP 삭제** 여섯 작업이며 매 작업 안에
 새 통신 검증·현재 소유/참조 확인·삭제 확인 입력이 있습니다. 마지막 제거 후 검증도 별도입니다.
@@ -72,6 +73,22 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
 이 파일명과 옵션은 기존 호출 호환성을 위해 유지하며 선택 과정이라는 의미는 아닙니다.
 `docs/superpowers/`의 설계·계획은 최초 제작 당시의 이력이며 현재 진행 순서의 기준은 README입니다.
 
+## AVNM 변형 유지 계약
+
+- 참가자 경로의 모듈 03은 `docs/03-avnm-connectivity.md` 하나로 고정합니다. 이전 수동-peering 모듈 파일은
+  역사적 이력일 뿐 현재 경로에 다시 넣지 않습니다.
+- 상태 파일은 `schemaVersion: 2`, `topology: "avnm-hub-spoke"`만 허용합니다. 다른 schema/topology는
+  Azure API 호출 전에 거부해야 합니다.
+- 참가자 문서에는 수동 VNet peering 생성 CLI가 남아 있으면 안 됩니다. 모듈 06의 `peering update`
+  는 AVNM이 만든 기존 Peering의 `allowForwardedTraffic`만 바꾸는 용도로 유지합니다.
+- 모듈 03의 완료 조건은 commit 성공 메시지가 아니라 **세 VNet의 effective connectivity configuration**과
+  실제 Hub↔Spoke Peering 상태입니다.
+- AVNM이 만든 Peering 이름은 안정적인 계약이 아닙니다. 테스트와 스크립트는 remote VNet의 **전체 resource ID**
+  로 정확히 하나를 찾아야 하며, suffix 비교나 생성 규칙 추정에 의존하지 않습니다.
+- 실행 경로는 Connectivity-only입니다. 참가자 문서와 예제에는 Security Admin configuration,
+  AVNM Routing configuration, 동적 membership 실행, direct connectivity, global mesh, hub gateway,
+  peering enforcement, peering deletion이 들어가면 안 됩니다.
+
 ## 스크립트 읽는 순서
 
 `scripts/`의 한글 주석은 실행 위치, 검증 근거와 실패 시 중단 이유를 설명합니다.
@@ -80,8 +97,8 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
-| `workshop-common.sh` | 상태 JSON 생성·복구, 구독·RG 소유 확인, 구역별 이름 선택 |
-| `workshop-safety.sh` | 전체 ID 대소문자 비교, IP 범위, Firewall/진단/Allow 준비, 양쪽 경로·Peering, 단계별 NAT 소유/참조의 읽기 전용 검사 |
+| `workshop-common.sh` | 상태 JSON 생성·복구, schema 2/topology 검증, 구독·RG 소유 확인, AVNM 이름 파생 |
+| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, Firewall/진단/Allow 준비, 양쪽 경로·Peering, 단계별 NAT 소유/참조의 읽기 전용 검사 |
 | `preflight.sh` | 읽기 전용 사전 점검, 기존 VM 재사용, SKU 제한과 quota 판정 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
@@ -130,6 +147,13 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 신규 활성화와 공유 RG 보존도 로컬 회귀 검사에 포함됩니다.
 모듈 02–07의 개별 블록은 공통 준비 뒤 독립 실행하며, 실패한 조회/잘못된 응답,
 소유권 불일치, 승인 거절, 전환 준비 누락, NAT 삭제 순서/범위를 검사합니다.
+`tests/test_docs.py`는 README와 활성 참가자 모듈에서 이전 수동-peering 링크와
+수동 peering 생성 CLI가 남지 않았는지, AVNM 범위가 Connectivity-only인지 확인합니다.
+모듈 03 mock은 AVNM manager/group/static member/connectivity configuration/commit/effective-configuration
+블록의 호출 순서와 인수를 확인합니다.
+상태·복구 테스트는 schema 2/topology 거부, generated-name 불안정성에 영향받지 않는
+full-ID 비교, 현재 저장소 경로 `$HOME/ms-security-landingzone-workshop01/land2` 복구 동작을 회귀 검사합니다.
+`bash tests/validate.sh`의 최종 요약은 `PASS: local validation only; no Azure resources were deployed.`여야 합니다.
 소문자·혼합 대소문자 ID와 workspace 참조는 허용하되, 다른 구독·RG·종류·이름 및 추가 경로는 거부하는 회귀 검사도 포함합니다.
 검증/정리 스크립트 호출은 문서 테스트에서 인수와 실패 전파를 확인하고 기존 스크립트 테스트를 함께 실행합니다.
 복구 회귀 검사는 이미 준비된 셸에서 잘못된 상태를 읽은 뒤 대상 변수가 남지 않는지 직접 확인합니다.
@@ -146,6 +170,8 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 `NotAvailableForSubscription`으로 제한되어, 사용자 승인 후 같은 2 vCPU/4 GiB의
 `Standard_B2als_v2`로 교재와 템플릿을 변경했습니다. SKU 허용과 quota는 구독별로 다시 확인합니다.
 Azure CLI/Checkov 버전은 검사 시 `az version`, `checkov --version`으로 기록합니다.
+Task 6의 로컬 검증에서는 누락된 Checkov를 승인된 방법인 `uv tool install checkov`로 설치했고,
+재실행에 사용한 버전은 `checkov 3.3.19`였습니다.
 Cloud Shell에서 실제 같은 명령을 재현해야 하며, CLI 도움말 확인만으로 API 실행을 검증했다고 하지 않습니다.
 
 ## 보안 검사 예외
@@ -166,15 +192,18 @@ Trusted Launch·Secure Boot·vTPM, 비특권 응답 서비스는 적용합니다
 
 ## 실제 Azure 리허설
 
+### 2026-09-21 수동 Peering 원본 워크숍 이력
+
 **2026-09-21 실제 Azure 리허설 수행.** 사용자 비용 승인 후 Korea Central의 새 실습 RG 세 개에서
-당시 기본 과정과 Firewall 확장을 실행했습니다. 현재의 단일 과정 재편 전 기록입니다. 실행 환경은 **Linux Bash / Azure CLI 2.90.0 /
-Bicep 0.45.15 / Firewall extension 2.2.1 / log-analytics 1.0.0b2**입니다.
+당시 **수동 Peering 기반 원본 워크숍**과 Firewall 확장을 실행했습니다. 현재의 AVNM 변형에 대한
+실행 증거가 아니라 source workshop의 역사적 참고 기록입니다. 실행 환경은
+**Linux Bash / Azure CLI 2.90.0 / Bicep 0.45.15 / Firewall extension 2.2.1 / log-analytics 1.0.0b2**입니다.
 브라우저 Cloud Shell/Portal에서 직접 조작한 결과는 아닙니다.
-아래 체크는 이번 실행에서 확보한 증거의 범위이며, 다른 환경의 배포 성공을 보장하지 않습니다.
+아래 체크는 당시 실행에서 확보한 증거의 범위이며, AVNM 변형의 배포 성공을 보장하지 않습니다.
 
 - [x] 테스트 구독, 비용 승인, 실제 생성·변경 권한, provider 등록, VM SKU/이미지/6 vCPU 및 지역 용량 확인
 - [ ] Cloud Shell의 Azure CLI·Bicep·extension 버전 기록
-- [x] 모듈 02–03 CLI 진행, 네 방향 Peering, Subnet outbound/NSG 상태 확인
+- [x] 모듈 02–03 CLI 진행, 수동 네 방향 Peering, Subnet outbound/NSG 상태 확인
 - [x] 수정한 Bicep what-if에서 VM이 포함되고 기존 VNet/Subnet 삭제·덮어쓰기 없음 확인
 - [x] VM 3대와 NAT 3개, VM NIC Public IP 없음 확인
 - [x] Run Command가 세 VM에서 응답하며 두 guest service가 로컬 정상 응답
@@ -204,7 +233,7 @@ Bicep 0.45.15 / Firewall extension 2.2.1 / log-analytics 1.0.0b2**입니다.
 
 | 실행 구간 | 이번 관측 시간 |
 |---|---:|
-| 네트워크 생성 / Peering | 약 95초 / 39초 |
+| 네트워크 생성 / 수동 Peering | 약 95초 / 39초 |
 | 수정 후 VM·NAT 배포 및 연결 / 두 서비스 준비 | 약 113초 / 69초 |
 | 기본 통신 / NSG 차단 / 복구 검증 | 약 190초 / 191초 / 148초 |
 | Firewall 생성 / 규칙 생성 / 진단 설정 | 약 531초 / 507초 / 9초 |
@@ -218,6 +247,19 @@ Bicep 0.45.15 / Firewall extension 2.2.1 / log-analytics 1.0.0b2**입니다.
 Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 실패 cleanup, 브라우저 실습은 남은 항목입니다.
 이번 실행의 세 RG는 모두 삭제 완료했으며 기존 공유 Network Watcher는 `Succeeded`로 유지됩니다.
 실행 기록은 로컬 `evidence/rehearsal-18560e683452/`에 보관했습니다(Git 제외).
+
+### AVNM 변형 리허설 체크리스트
+
+아래 항목은 **현재 AVNM 교재**의 Task 7에서 실제 관측값으로 채워야 합니다. 아직 완료로 표시하지 않습니다.
+
+- [ ] Cloud Shell의 Azure CLI·Bicep·`virtual-network-manager` extension·Checkov 버전을 기록했다.
+- [ ] 모듈 03에서 AVNM, Network Group, 정적 Spoke A/B membership, Connectivity Configuration을 만들었다.
+- [ ] `koreacentral` commit 뒤 세 VNet의 effective connectivity configuration이 모두 기대한 configuration ID를 가리켰다.
+- [ ] Hub에는 Connected Peering 2개, 각 Spoke에는 Connected Peering 1개가 생겼고 Spoke A↔B 직접 Peering은 없었다.
+- [ ] 모듈 04에서 Hub→Spoke 정상 HTTP, NSG 차단/복구, Spoke A→B 실패를 다시 확인했다.
+- [ ] 모듈 05–06에서 Firewall, 진단, `allowForwardedTraffic`, 왕복 UDR, Allow/Deny 로그, egress, Spoke NAT 제거를 확인했다.
+- [ ] generated Peering 이름을 가정하지 않고 remote VNet full ID 기준으로 검증했다.
+- [ ] cleanup으로 정확한 세 RG만 삭제하고 공유 Network Watcher 보존을 확인했다.
 
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기

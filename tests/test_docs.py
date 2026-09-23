@@ -55,3 +55,26 @@ class DocsTests(unittest.TestCase):
                         slug = re.sub(r"[^\w\s-]", "", heading.lower()).replace(" ", "-")
                         anchors.add(slug)
                     self.assertIn(unquote(fragment), anchors, f"{path}: broken anchor {target}")
+
+    def test_active_workshop_never_creates_manual_peerings(self):
+        paths = [ROOT / "README.md", *(ROOT / "docs" / name for name in MODULES)]
+        for path in paths:
+            self.assertNotIn("az network vnet peering create", path.read_text(), path)
+
+    def test_avnm_scope_stays_connectivity_only(self):
+        text = "\n".join(
+            (ROOT / relative).read_text()
+            for relative in [
+                "README.md",
+                "docs/01-prerequisites.md",
+                "docs/03-avnm-connectivity.md",
+            ]
+        )
+        self.assertNotIn("--scope-accesses Connectivity SecurityAdmin", text)
+        self.assertNotIn("routing-config create", text)
+        self.assertNotIn("security-admin-config create", text)
+
+    def test_prerequisites_use_the_workshop_subdirectory_path(self):
+        text = (ROOT / "docs/01-prerequisites.md").read_text()
+        self.assertIn('cd "$HOME/ms-security-landingzone-workshop01/land2"', text)
+        self.assertNotIn("cd ms-landing-zone-01", text)

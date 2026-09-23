@@ -24,6 +24,9 @@
 ## 무엇을 배우나요?
 
 구독·리소스 그룹·리전을 구분하고, 겹치지 않는 네트워크를 설계합니다.
+모듈 03에서는 AVNM(Azure Virtual Network Manager), Network Group, Connectivity Configuration을
+사용해 Korea Central에 Hub↔Spoke 연결을 배포합니다. AVNM은 연결 구성을 중앙 관리하지만
+패킷을 대신 전달하는 데이터 플레인 라우터나 방화벽은 아닙니다.
 Hub와 두 Spoke를 연결하고, 공인 IP 없는 VM으로 정상 통신과 NSG 차단을 비교합니다.
 이어서 Firewall을 거치는 왕복 경로와 실제 Allow/Deny 로그를 확인합니다.
 **모듈 00–07을 순서대로 진행하는 하나의 과정**이며, Firewall과 최종 정리까지 모두 포함합니다.
@@ -122,6 +125,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 | NAT Gateway | 3개 | 검증 후 Spoke 2개 제거, Hub 1개 유지 | 유휴 상태에도 시간 과금 |
 | Standard Public IP | NAT용 3개 | Firewall용 1개 추가 후 Spoke용 2개 제거 | 연결·할당 상태에 따라 비용 발생 |
 | Azure Firewall Standard | 없음 | 1개 | 배포·유휴 시간 및 처리량 과금 |
+| Azure Virtual Network Manager | 없음 | 1개 | 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있음 |
 | Log Analytics | 없음 | 1개 | 수집량과 보존에 따른 비용 |
 | Peering·전송 | 사용량 기반 | 사용량 기반 | 반복/대량 부하 검사는 하지 않기 |
 
@@ -130,6 +134,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 [VM](https://azure.microsoft.com/pricing/details/virtual-machines/linux/),
 [NAT](https://azure.microsoft.com/pricing/details/azure-nat-gateway/),
 [Firewall](https://azure.microsoft.com/pricing/details/azure-firewall/),
+[Virtual Network Manager](https://azure.microsoft.com/pricing/details/azure-virtual-network-manager/),
 [Monitor](https://azure.microsoft.com/pricing/details/monitor/)에서 리전·시간을 확인하세요.
 
 **완료·실패 여부와 관계없이 [cleanup](docs/07-cleanup-production.md)을 실행하세요.**
@@ -149,11 +154,11 @@ Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01
 - Firewall 규칙의 `AzureCloud:443`은 자사 tenant 전용 허용이 아닙니다.
 - 기본 VM은 관리형 디스크의 플랫폼 암호화를 사용합니다. host encryption·guest ADE와
   VM extension 금지 권고에는 [명시적인 교육용 예외](docs/maintainer-validation.md#보안-검사-예외)가 있습니다.
-- **2026-09-21 Linux CLI에서 네트워크·NSG·Firewall·경로 검증의 실제 Azure 리허설을 수행했습니다.**
+- **2026-09-21 Linux CLI 기록은 수동 Peering 기반 원본 워크숍의 역사적 리허설 증거입니다.**
   발견한 배포 결함을 수정하고 통신·차단·복구 및 Spoke NAT 제거 후 경로를 확인했습니다.
   브라우저 Cloud Shell/Portal 조작과 다른 구독의 용량·정책은 검증 범위가 아닙니다.
-  이 기록은 단일 과정으로 재편하기 전의 실행이며, 개편한 교재의 재리허설을 뜻하지 않습니다.
-  개최 전 [리허설 결과와 남은 체크리스트](docs/maintainer-validation.md#실제-azure-리허설)를 확인하세요.
+  이 기록은 단일 과정으로 재편하기 전의 실행이며, 현재 AVNM 변형의 실행 증거가 아닙니다.
+  개최 전 [역사적 기록과 AVNM 리허설 체크리스트](docs/maintainer-validation.md#avnm-변형-리허설-체크리스트)를 확인하세요.
 
 ## 태깅 범례와 트러블슈팅
 

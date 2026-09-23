@@ -174,11 +174,15 @@ JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 �
 | 이번 실습 | 운영 환경에서 추가할 설계 |
 |---|---|
 | 단일 구독과 RG 3개 | 관리 그룹, Connectivity/Management 구독, 워크로드별 구독 |
+| Connectivity-only AVNM | 운영에서는 Connectivity와 Security Admin Rules를 분리해 거버넌스 범위를 설계 |
+| Spoke A/B의 정적 Network Group membership | 운영에서는 Azure Policy 기반 동적 membership도 검토하되 별도 검증 후 도입 |
+| Hub-and-Spoke Connectivity Configuration 1개 | 필요 시 다중 region/scope와 선택적 peering enforcement를 검토 |
 | Hub 테스트 VM | 공유 네트워크 기능만 Hub에 배치, 실제 앱은 Spoke |
 | 실습용 Contributor 권한 | 최소 역할, PIM, 역할 분리, 정기 access review |
 | 이름과 태그 | Azure Policy 상속, 예외 승인, 배포 표준 |
 | 사설 HTTP | 인증·인가·TLS, 인증서 수명 주기 |
 | NAT에서 중앙 Firewall로 전환 | 외부 통신 요구사항 분석, 관리 경로 분리, HA·DR·하이브리드 연결 |
+| 두 Spoke의 수동 UDR | **Preview**인 AVNM Routing Configuration 또는 중앙 경로 자동화는 별도 검증 후 도입 |
 | Firewall 로그 | 중앙 진단 정책, 경고, 보존·비용 정책 |
 | 관리형 디스크 기본 암호화 | 규제 요구에 따른 host encryption·키 관리·백업 |
 
@@ -186,6 +190,8 @@ JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 �
 
 이 교재의 Run Command용 `AzureCloud:443` 허용은 다른 Azure 고객의 공인 주소도
 포함할 수 있습니다. 운영용 tenant 제한 정책으로 복사하지 마세요.
+또한 위 표의 동적 membership, peering enforcement, AVNM Routing Preview, Security Admin Rules는
+**운영 설계 검토 항목**이지 현재 워크숍의 대체 실행 경로가 아닙니다.
 
 ## 트러블슈팅
 
