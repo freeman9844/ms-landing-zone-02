@@ -102,7 +102,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 | 00 | [Azure 첫걸음](docs/00-azure-basics.md) | 구독·RG·리전·Landing Zone의 목적 설명 | 15분 |
 | 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·quota 확인 | 15분 |
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
-| 03 | [Peering](docs/03-peering.md) | 네 방향 연결과 비전이성 이해 | 20분 |
+| 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | Network Group과 Hub-and-Spoke 연결 배포 | 20분 |
 | 04 | [통신과 NSG](docs/04-connectivity-nsg.md) | private VM 정상/차단/복구 및 경로 확인 | 30분 |
 | 05 | [중앙 Firewall](docs/05-firewall.md) | 중앙 Firewall와 진단 준비 | 20–30분 |
 | 06 | [경로와 보안 검증](docs/06-routing-validation.md) | 왕복 UDR·Allow/Deny 로그·egress 검증 및 Spoke NAT 제거 | 30–45분 |
@@ -170,7 +170,7 @@ Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01
 | 증상 | 이동 |
 |---|---|
 | 권한·quota·상태 파일·소스 인증 | [사전 준비](docs/01-prerequisites.md#트러블슈팅) |
-| 주소·Peering 상태 | [네트워크](docs/02-network-foundation.md#트러블슈팅), [Peering](docs/03-peering.md#트러블슈팅) |
+| 주소·Peering 상태 | [네트워크](docs/02-network-foundation.md#트러블슈팅), [AVNM 연결 관리](docs/03-avnm-connectivity.md#트러블슈팅) |
 | Run Command·HTTP·NSG | [통신과 NSG](docs/04-connectivity-nsg.md#트러블슈팅) |
 | Firewall·진단·로그 지연 | [Firewall 준비](docs/05-firewall.md#트러블슈팅), [경로와 보안 검증](docs/06-routing-validation.md#트러블슈팅) |
 | 중도 실패·삭제 지연 | [정리](docs/07-cleanup-production.md#트러블슈팅) |

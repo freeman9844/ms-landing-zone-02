@@ -173,9 +173,11 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def test_ordinary_actions_check_ownership_once_for_a_prepared_session(self):
         cases = dict(self.cases())
-        cases[3] = test_network_docs.peering_cases()
+        cases[3] = test_network_docs.avnm_cases()
         for module, names in (
-            (3, ("peering-hub-to-spokea", "peering-spokea-to-hub", "inspect-peering-hub")),
+            (3, ("avnm-create", "network-group-create", "member-spokea",
+                 "member-spokeb", "connectivity-config-create",
+                 "connectivity-commit", "effective-hub")),
             (4, ("support-preview", "attach-nat-hub", "allow-hub-spokea")),
             (5, ("inspect-firewall", "firewall-http-rule", "inspect-firewall-rules")),
             (6, ("forward-hub-to-spokea", "forward-spokea-to-hub", "route-table-spokea")),
@@ -191,7 +193,7 @@ class StepwiseDocsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_preparation_rejects_foreign_groups_and_lookup_failures(self):
-        for module, action in ((3, "peering-hub-to-spokea"), (4, "support-deploy"),
+        for module, action in ((3, "avnm-create"), (4, "support-deploy"),
                                (5, "firewall-workspace"), (6, "forward-hub-to-spokea")):
             steps = blocks(DOCS[module])
             for index in (1, 2, 3):
@@ -439,7 +441,7 @@ key.with_suffix('.pub').write_text('fixture-public-key')
         cases = [
             (2, "foundation-hub-rg", test_network_docs.foundation_cases()["foundation-hub-rg"]),
             (2, "foundation-hub-vnet", test_network_docs.foundation_cases()["foundation-hub-vnet"]),
-            (3, "peering-hub-to-spokea", test_network_docs.peering_cases()["peering-hub-to-spokea"]),
+            (3, "avnm-create", test_network_docs.avnm_cases()["avnm-create"]),
             (4, "watcher-group", support_cases()["watcher-group"]),
             (4, "support-deploy", support_cases()["support-deploy"]),
             (4, "attach-nat-hub", support_cases()["attach-nat-hub"]),

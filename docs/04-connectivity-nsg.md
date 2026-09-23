@@ -663,6 +663,6 @@ Hub→Spoke의 경로와 HTTP 허용 규칙이 유지되고, 임시 `test-deny-h
 
 ## 다음 단계
 
-- [이전: Peering](03-peering.md)
+- [이전: AVNM 연결 관리](03-avnm-connectivity.md)
 - [다음: 중앙 Firewall](05-firewall.md)
 - [중단 시 정리](07-cleanup-production.md)

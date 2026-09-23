@@ -86,21 +86,239 @@ def foundation_cases():
     return cases
 
 
-def peering_cases():
-    cases = {}
-    for local, remote in (("hub", "spokea"), ("spokea", "hub"), ("hub", "spokeb"), ("spokeb", "hub")):
-        remote_id = netid(remote, "virtualNetworks", vnet(remote))
-        cases[f"peering-{local}-to-{remote}"] = [
-            az(["network", "vnet", "show", "-g", rg(remote), "-n", vnet(remote),
-                "--query", "id", "-o", "tsv"], remote_id),
-            az(["network", "vnet", "peering", "create", "-g", rg(local), "--vnet-name", vnet(local),
-                "-n", f"{local}-to-{remote}", "--remote-vnet", remote_id, "--allow-vnet-access", "true",
-                "--allow-forwarded-traffic", "false", "--allow-gateway-transit", "false", "-o", "json"])]
-    for zone in ("hub", "spokea", "spokeb"):
-        cases[f"inspect-peering-{zone}"] = [
-            az(["network", "vnet", "peering", "list", "-g", rg(zone), "--vnet-name", vnet(zone),
-                            "--query", "[].{Name:name,State:peeringState,Remote:remoteVirtualNetwork.id}", "-o", "table"])]
-    return cases
+def avnm_id():
+    return netid("hub", "networkManagers", "avnm-lzbegin-demo123")
+
+
+def network_group_id():
+    return avnm_id() + "/networkGroups/ng-lzbegin-spokes-demo123"
+
+
+def connectivity_config_id():
+    return avnm_id() + "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123"
+
+
+def static_member(name, zone):
+    return {
+        "name": name,
+        "id": network_group_id() + f"/staticMembers/{name}",
+        "resourceId": netid(zone, "virtualNetworks", vnet(zone)),
+        "provisioningState": "Succeeded",
+    }
+
+
+def connectivity_config():
+    return {
+        "name": "cc-lzbegin-hub-spoke-demo123",
+        "id": connectivity_config_id(),
+        "connectivityTopology": "HubAndSpoke",
+        "deleteExistingPeering": "False",
+        "isGlobal": "False",
+        "provisioningState": "Succeeded",
+        "connectivityCapabilities": {"peeringEnforcement": "Unenforced"},
+        "hubs": [{
+            "resourceId": netid("hub", "virtualNetworks", vnet("hub")),
+            "resourceType": "Microsoft.Network/virtualNetworks",
+        }],
+        "appliesToGroups": [{
+            "networkGroupId": network_group_id(),
+            "groupConnectivity": "None",
+            "isGlobal": "False",
+            "useHubGateway": "False",
+        }],
+    }
+
+
+def effective_configuration(zone):
+    return {"value": [dict(connectivity_config(), targetVirtualNetwork={
+        "id": netid(zone, "virtualNetworks", vnet(zone)),
+    })]}
+
+
+def avnm_peerings(zone):
+    peerings = {
+        "hub": [
+            {"name": "avnm-hub-a", "peeringState": "Connected",
+             "remoteVirtualNetwork": {"id": netid("spokea", "virtualNetworks", vnet("spokea"))}},
+            {"name": "avnm-hub-b", "peeringState": "Connected",
+             "remoteVirtualNetwork": {"id": netid("spokeb", "virtualNetworks", vnet("spokeb"))}},
+        ],
+        "spokea": [
+            {"name": "avnm-a-hub", "peeringState": "Connected",
+             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub"))}},
+        ],
+        "spokeb": [
+            {"name": "avnm-b-hub", "peeringState": "Connected",
+             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub"))}},
+        ],
+    }
+    return peerings[zone]
+
+
+def avnm_cases():
+    hub = netid("hub", "virtualNetworks", vnet("hub"))
+    spokea = netid("spokea", "virtualNetworks", vnet("spokea"))
+    spokeb = netid("spokeb", "virtualNetworks", vnet("spokeb"))
+    hubs = json.dumps([{
+        "resourceId": hub,
+        "resourceType": "Microsoft.Network/virtualNetworks",
+    }], separators=(",", ":"))
+    groups = json.dumps([{
+        "networkGroupId": network_group_id(),
+        "groupConnectivity": "None",
+        "isGlobal": False,
+        "useHubGateway": False,
+    }], separators=(",", ":"))
+    return {
+        "avnm-create": [
+            az(["network", "manager", "list", "--resource-group", rg("hub"), "-o", "json"], []),
+            az([
+                "network", "manager", "create",
+                "--location", "koreacentral",
+                "--name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "--scope-accesses", "Connectivity",
+                "--network-manager-scopes",
+                f"subscriptions=/subscriptions/{SUB}",
+                "--description", "Beginner Hub and Spoke connectivity",
+                "-o", "json",
+            ]),
+        ],
+        "network-group-create": [
+            az([
+                "network", "manager", "group", "list",
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], []),
+            az([
+                "network", "manager", "group", "create",
+                "--name", "ng-lzbegin-spokes-demo123",
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "--description", "Workshop spoke virtual networks",
+                "-o", "json",
+            ]),
+        ],
+        "member-spokea": [
+            az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], []),
+            az([
+                "network", "manager", "group", "static-member", "create",
+                "--name", "spokea",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "--resource-id", spokea,
+                "-o", "json",
+            ]),
+        ],
+        "member-spokeb": [
+            az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [static_member("spokea", "spokea")]),
+            az([
+                "network", "manager", "group", "static-member", "create",
+                "--name", "spokeb",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "--resource-id", spokeb,
+                "-o", "json",
+            ]),
+        ],
+        "connectivity-config-create": [
+            az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
+            az([
+                "network", "vnet", "show",
+                "-g", rg("hub"),
+                "-n", vnet("hub"),
+                "--query", "id",
+                "-o", "tsv",
+            ], hub),
+            az([
+                "network", "manager", "connect-config", "list",
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], []),
+            az([
+                "network", "manager", "connect-config", "create",
+                "--configuration-name", "cc-lzbegin-hub-spoke-demo123",
+                "--description", "AVNM managed beginner hub and spoke",
+                "--applies-to-groups", groups,
+                "--hubs", hubs,
+                "--connect-capabilities",
+                '{"peeringEnforcement":"Unenforced"}',
+                "--connectivity-topology", "HubAndSpoke",
+                "--delete-existing-peering", "False",
+                "--is-global", "False",
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ]),
+        ],
+        "connectivity-commit": [az([
+            "network", "manager", "post-commit",
+            "--network-manager-name", "avnm-lzbegin-demo123",
+            "--commit-type", "Connectivity",
+            "--configuration-ids", connectivity_config_id(),
+            "--target-locations", "koreacentral",
+            "--resource-group", rg("hub"),
+            "-o", "json",
+        ])],
+        "effective-hub": [az([
+            "network", "manager", "list-effective-connectivity-config",
+            "--resource-group", rg("hub"),
+            "--virtual-network-name", vnet("hub"),
+            "-o", "json",
+        ], effective_configuration("hub"))],
+        "effective-spokea": [az([
+            "network", "manager", "list-effective-connectivity-config",
+            "--resource-group", rg("spokea"),
+            "--virtual-network-name", vnet("spokea"),
+            "-o", "json",
+        ], effective_configuration("spokea"))],
+        "effective-spokeb": [az([
+            "network", "manager", "list-effective-connectivity-config",
+            "--resource-group", rg("spokeb"),
+            "--virtual-network-name", vnet("spokeb"),
+            "-o", "json",
+        ], effective_configuration("spokeb"))],
+        "inspect-avnm-peerings-hub": [az([
+            "network", "vnet", "peering", "list",
+            "-g", rg("hub"),
+            "--vnet-name", vnet("hub"),
+            "-o", "json",
+        ], avnm_peerings("hub"))],
+        "inspect-avnm-peerings-spokea": [az([
+            "network", "vnet", "peering", "list",
+            "-g", rg("spokea"),
+            "--vnet-name", vnet("spokea"),
+            "-o", "json",
+        ], avnm_peerings("spokea"))],
+        "inspect-avnm-peerings-spokeb": [az([
+            "network", "vnet", "peering", "list",
+            "-g", rg("spokeb"),
+            "--vnet-name", vnet("spokeb"),
+            "-o", "json",
+        ], avnm_peerings("spokeb"))],
+    }
 
 
 def recase_ids(calls, transform):
@@ -234,15 +452,15 @@ printf 'SHELL_ALIVE\\n'
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
                 self.assertIn("PREPARE_STATUS=1\nSHELL_ALIVE", result.stdout)
 
-    def test_foundation_and_peering_actions_are_independent_and_subscription_scoped(self):
-        for module, cases in ((2, foundation_cases()), (3, peering_cases())):
+    def test_foundation_and_avnm_actions_are_independent_and_subscription_scoped(self):
+        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
             for name, calls in cases.items():
                 with self.subTest(module=module, step=name):
                     result = self.execute(module, name, calls)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_foundation_and_peering_actions_stop_on_each_failed_lookup(self):
-        for module, cases in ((2, foundation_cases()), (3, peering_cases())):
+    def test_foundation_and_avnm_actions_stop_on_each_failed_lookup(self):
+        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
             for name, calls in cases.items():
                 for index in range(len(calls) - 1):
                     with self.subTest(step=name, failure=index):
@@ -297,17 +515,201 @@ printf 'SHELL_ALIVE\\n'
         for module in (3, 5):
             self.assertNotIn("source scripts/workshop-safety.sh", DOCS[module].read_text())
 
-    def test_peering_accepts_id_casing_and_preserves_discovered_remote_id(self):
-        for name, calls in peering_cases().items():
-            if not name.startswith("peering-"):
-                continue
+    def test_avnm_reused_resources_accept_id_casing_variants(self):
+        valid = connectivity_config()
+        reused = {
+            "avnm-create": [az([
+                "network", "manager", "list",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [{
+                "name": "avnm-lzbegin-demo123",
+                "id": avnm_id(),
+                "networkManagerScopeAccesses": ["Connectivity"],
+                "networkManagerScopes": {
+                    "subscriptions": [f"/subscriptions/{SUB}"],
+                },
+                "provisioningState": "Succeeded",
+            }])],
+            "network-group-create": [az([
+                "network", "manager", "group", "list",
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [{
+                "name": "ng-lzbegin-spokes-demo123",
+                "id": network_group_id(),
+                "description": "Workshop spoke virtual networks",
+                "provisioningState": "Succeeded",
+            }])],
+            "member-spokea": [az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [static_member("spokea", "spokea")])],
+            "member-spokeb": [az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", "ng-lzbegin-spokes-demo123",
+                "--network-manager", "avnm-lzbegin-demo123",
+                "--resource-group", rg("hub"),
+                "-o", "json",
+            ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])],
+            "connectivity-config-create": [
+                az([
+                    "network", "manager", "group", "static-member", "list",
+                    "--network-group", "ng-lzbegin-spokes-demo123",
+                    "--network-manager", "avnm-lzbegin-demo123",
+                    "--resource-group", rg("hub"),
+                    "-o", "json",
+                ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
+                az([
+                    "network", "vnet", "show",
+                    "-g", rg("hub"),
+                    "-n", vnet("hub"),
+                    "--query", "id",
+                    "-o", "tsv",
+                ], netid("hub", "virtualNetworks", vnet("hub"))),
+                az([
+                    "network", "manager", "connect-config", "list",
+                    "--network-manager-name", "avnm-lzbegin-demo123",
+                    "--resource-group", rg("hub"),
+                    "-o", "json",
+                ], [valid]),
+            ],
+            "effective-hub": [az([
+                "network", "manager", "list-effective-connectivity-config",
+                "--resource-group", rg("hub"),
+                "--virtual-network-name", vnet("hub"),
+                "-o", "json",
+            ], effective_configuration("hub"))],
+            "effective-spokea": [az([
+                "network", "manager", "list-effective-connectivity-config",
+                "--resource-group", rg("spokea"),
+                "--virtual-network-name", vnet("spokea"),
+                "-o", "json",
+            ], effective_configuration("spokea"))],
+            "effective-spokeb": [az([
+                "network", "manager", "list-effective-connectivity-config",
+                "--resource-group", rg("spokeb"),
+                "--virtual-network-name", vnet("spokeb"),
+                "-o", "json",
+            ], effective_configuration("spokeb"))],
+            "inspect-avnm-peerings-hub": [az([
+                "network", "vnet", "peering", "list",
+                "-g", rg("hub"),
+                "--vnet-name", vnet("hub"),
+                "-o", "json",
+            ], avnm_peerings("hub"))],
+            "inspect-avnm-peerings-spokea": [az([
+                "network", "vnet", "peering", "list",
+                "-g", rg("spokea"),
+                "--vnet-name", vnet("spokea"),
+                "-o", "json",
+            ], avnm_peerings("spokea"))],
+            "inspect-avnm-peerings-spokeb": [az([
+                "network", "vnet", "peering", "list",
+                "-g", rg("spokeb"),
+                "--vnet-name", vnet("spokeb"),
+                "-o", "json",
+            ], avnm_peerings("spokeb"))],
+        }
+        for name, calls in reused.items():
             for transform in (str.lower, str.swapcase):
                 with self.subTest(step=name, casing=transform.__name__):
                     result = self.execute(3, name, recase_ids(calls, transform))
                     self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_foundation_and_peering_propagate_final_cli_errors(self):
-        for module, cases in ((2, foundation_cases()), (3, peering_cases())):
+    def test_existing_manager_rejects_security_admin_scope(self):
+        calls = [az([
+            "network", "manager", "list",
+            "--resource-group", rg("hub"),
+            "-o", "json",
+        ], [{
+            "name": "avnm-lzbegin-demo123",
+            "id": avnm_id(),
+            "networkManagerScopeAccesses": ["SecurityAdmin"],
+            "networkManagerScopes": {
+                "subscriptions": [f"/subscriptions/{SUB}"],
+            },
+            "provisioningState": "Succeeded",
+        }])]
+        result = self.execute(3, "avnm-create", calls)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_existing_configuration_rejects_mesh_or_destructive_flags(self):
+        valid = {
+            "name": "cc-lzbegin-hub-spoke-demo123",
+            "id": connectivity_config_id(),
+            "connectivityTopology": "HubAndSpoke",
+            "deleteExistingPeering": "False",
+            "isGlobal": "False",
+            "provisioningState": "Succeeded",
+            "hubs": connectivity_config()["hubs"],
+            "appliesToGroups": connectivity_config()["appliesToGroups"],
+        }
+        for field, value in (
+            ("connectivityTopology", "Mesh"),
+            ("deleteExistingPeering", "True"),
+            ("isGlobal", "True"),
+        ):
+            with self.subTest(field=field):
+                data = dict(valid, **{field: value})
+                calls = [
+                    az([
+                        "network", "manager", "group", "static-member", "list",
+                        "--network-group", "ng-lzbegin-spokes-demo123",
+                        "--network-manager", "avnm-lzbegin-demo123",
+                        "--resource-group", rg("hub"),
+                        "-o", "json",
+                    ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
+                    az([
+                        "network", "vnet", "show",
+                        "-g", rg("hub"),
+                        "-n", vnet("hub"),
+                        "--query", "id",
+                        "-o", "tsv",
+                    ], netid("hub", "virtualNetworks", vnet("hub"))),
+                    az([
+                        "network", "manager", "connect-config", "list",
+                        "--network-manager-name", "avnm-lzbegin-demo123",
+                        "--resource-group", rg("hub"),
+                        "-o", "json",
+                    ], [data]),
+                ]
+                result = self.execute(3, "connectivity-config-create", calls)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_member_lists_reject_unapproved_topology_membership(self):
+        valid = [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]
+        scenarios = (
+            ("hub-present", [*valid, static_member("hub", "hub")]),
+            ("missing-spokea", [static_member("spokeb", "spokeb")]),
+            ("missing-spokeb", [static_member("spokea", "spokea")]),
+            ("foreign-subscription", [dict(static_member("spokea", "spokea"),
+                                           resourceId=netid("spokea", "virtualNetworks", vnet("spokea")).replace(
+                                               SUB, "99999999-9999-9999-9999-999999999999")),
+                                     static_member("spokeb", "spokeb")]),
+            ("foreign-rg", [dict(static_member("spokea", "spokea"),
+                                 resourceId=netid("spokea", "virtualNetworks", vnet("spokea")).replace(
+                                     rg("spokea"), rg("spokea") + "-foreign")),
+                            static_member("spokeb", "spokeb")]),
+        )
+        for label, members in scenarios:
+            with self.subTest(case=label):
+                calls = [az([
+                    "network", "manager", "group", "static-member", "list",
+                    "--network-group", "ng-lzbegin-spokes-demo123",
+                    "--network-manager", "avnm-lzbegin-demo123",
+                    "--resource-group", rg("hub"),
+                    "-o", "json",
+                ], members)]
+                result = self.execute(3, "connectivity-config-create", calls)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_foundation_and_avnm_propagate_final_cli_errors(self):
+        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
             for name, calls in cases.items():
                 with self.subTest(module=module, step=name):
                     failed = copy.deepcopy(calls)

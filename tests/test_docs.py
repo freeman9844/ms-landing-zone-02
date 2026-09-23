@@ -6,7 +6,7 @@ from harness import ROOT
 
 MODULES = [
     "00-azure-basics.md", "01-prerequisites.md", "02-network-foundation.md",
-    "03-peering.md", "04-connectivity-nsg.md", "05-firewall.md",
+    "03-avnm-connectivity.md", "04-connectivity-nsg.md", "05-firewall.md",
     "06-routing-validation.md", "07-cleanup-production.md",
 ]
 

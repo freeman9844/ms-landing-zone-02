@@ -551,5 +551,5 @@ RG 태그가 하위 리소스로 자동 상속되는 것은 아닙니다.
 ## 다음 단계
 
 - [이전: 실습 준비](01-prerequisites.md)
-- [다음: Peering](03-peering.md)
+- [다음: AVNM 연결 관리](03-avnm-connectivity.md)
 - [중단 시 정리](07-cleanup-production.md)
