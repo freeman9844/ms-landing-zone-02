@@ -280,6 +280,21 @@ Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 �
 - 비밀이 없는 환경 및 blocker 증거는
   `evidence/rehearsal-blocked-20260923T182607+0900/`에 보관했습니다(Git 제외).
 
+### 2026-09-23 AVNM 리허설 재시도 — 인증 경로 여전히 차단
+
+18:52 KST에 같은 구독의 읽기 전용 접근을 다시 확인했습니다. `az account show`는 저장된
+계정 정보만 반환했으므로 실제 접근 증거로 사용하지 않았습니다. Azure MCP의 RG 조회는
+자격 증명 획득 실패(401), Azure CLI의 `az group list`는
+`login.microsoftonline.com` 연결 시 `No route to host`로 실패했고, 별도 HTTPS
+접속도 시간 초과되었습니다. `virtual-network-manager` extension도 설치되지 않았습니다.
+따라서 새 run/state/RG를 생성하지 않았고, 실제 배포·검증·cleanup 및 세 RG 부재
+증명은 여전히 미완료입니다. 기존 AVNM 체크리스트는 완료로 표시하지 않습니다.
+
+재시도 중 `bash tests/validate.sh`는 137개 테스트와 Checkov 7 passed /
+0 failed / 3 skipped로 통과했습니다. 현재 참가자 경로와 스크립트에는 수동
+`az network vnet peering create` 또는 제외된 AVNM 설정 명령이 없으며,
+이 결과는 Azure 리허설을 대신하지 않습니다.
+
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기
 전에는 해당 조직의 공유 정책을 따릅니다.
