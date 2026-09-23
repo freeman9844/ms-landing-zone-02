@@ -260,8 +260,8 @@ if [[ "$count" == "0" ]]; then
     --resource-group "$RG_HUB" \
     -o json --subscription "$SUBSCRIPTION_ID"
 elif [[ "$count" == "1" ]]; then
-  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-    .[0].name == "cc-lzbegin-hub-spoke-demo123" and
+  jq -e --arg name "$CONNECTIVITY_CONFIG" --arg id "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
+    .[0].name == $name and
     ((.[0].id | ascii_downcase) == ($id | ascii_downcase)) and
     .[0].connectivityTopology == "HubAndSpoke" and
     .[0].provisioningState == "Succeeded" and

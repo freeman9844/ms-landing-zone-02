@@ -17,24 +17,51 @@ TAGS = ["--tags", "workshop=lz-beginner", "environment=lab", "runId=demo123", "m
 OWNED = {"runId": "demo123", "workshop": "lz-beginner", "environment": "lab", "managedBy": "workshop"}
 
 
-def rg(zone):
-    return STATE["resourceGroups"][zone]
+def workshop_state(run_id="demo123", subscription=SUB):
+    return {
+        "schemaVersion": 2,
+        "topology": "avnm-hub-spoke",
+        "runId": run_id,
+        "subscriptionId": subscription,
+        "location": "koreacentral",
+        "resourceGroups": {
+            "hub": f"rg-lzbegin-hub-{run_id}",
+            "spokea": f"rg-lzbegin-spokea-{run_id}",
+            "spokeb": f"rg-lzbegin-spokeb-{run_id}",
+        },
+    }
 
 
-def rid(zone, kind, name):
-    return f"/subscriptions/{SUB}/resourceGroups/{rg(zone)}/providers/{kind}/{name}"
+def rg(zone, state=STATE):
+    return state["resourceGroups"][zone]
 
 
-def netid(zone, kind, name):
-    return rid(zone, "Microsoft.Network/" + kind, name)
+def rid(zone, kind, name, state=STATE):
+    return f"/subscriptions/{SUB}/resourceGroups/{rg(zone, state)}/providers/{kind}/{name}"
+
+
+def netid(zone, kind, name, state=STATE):
+    return rid(zone, "Microsoft.Network/" + kind, name, state)
 
 
 def az(args, value="", code=0):
     return call([*args, "--subscription", SUB], value, code)
 
 
-def vnet(zone):
-    return f"vnet-lzbegin-{zone}-demo123"
+def vnet(zone, state=STATE):
+    return f"vnet-lzbegin-{zone}-{state['runId']}"
+
+
+def avnm_name(state=STATE):
+    return f"avnm-lzbegin-{state['runId']}"
+
+
+def network_group_name(state=STATE):
+    return f"ng-lzbegin-spokes-{state['runId']}"
+
+
+def connectivity_config_name(state=STATE):
+    return f"cc-lzbegin-hub-spoke-{state['runId']}"
 
 
 def subnet_args(zone):
@@ -86,42 +113,42 @@ def foundation_cases():
     return cases
 
 
-def avnm_id():
-    return netid("hub", "networkManagers", "avnm-lzbegin-demo123")
+def avnm_id(state=STATE):
+    return netid("hub", "networkManagers", avnm_name(state), state)
 
 
-def network_group_id():
-    return avnm_id() + "/networkGroups/ng-lzbegin-spokes-demo123"
+def network_group_id(state=STATE):
+    return avnm_id(state) + f"/networkGroups/{network_group_name(state)}"
 
 
-def connectivity_config_id():
-    return avnm_id() + "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123"
+def connectivity_config_id(state=STATE):
+    return avnm_id(state) + f"/connectivityConfigurations/{connectivity_config_name(state)}"
 
 
-def static_member(name, zone):
+def static_member(name, zone, state=STATE):
     return {
         "name": name,
-        "id": network_group_id() + f"/staticMembers/{name}",
-        "resourceId": netid(zone, "virtualNetworks", vnet(zone)),
+        "id": network_group_id(state) + f"/staticMembers/{name}",
+        "resourceId": netid(zone, "virtualNetworks", vnet(zone, state), state),
         "provisioningState": "Succeeded",
     }
 
 
-def connectivity_config():
+def connectivity_config(state=STATE):
     return {
-        "name": "cc-lzbegin-hub-spoke-demo123",
-        "id": connectivity_config_id(),
+        "name": connectivity_config_name(state),
+        "id": connectivity_config_id(state),
         "connectivityTopology": "HubAndSpoke",
         "deleteExistingPeering": "False",
         "isGlobal": "False",
         "provisioningState": "Succeeded",
         "connectivityCapabilities": {"peeringEnforcement": "Unenforced"},
         "hubs": [{
-            "resourceId": netid("hub", "virtualNetworks", vnet("hub")),
+            "resourceId": netid("hub", "virtualNetworks", vnet("hub", state), state),
             "resourceType": "Microsoft.Network/virtualNetworks",
         }],
         "appliesToGroups": [{
-            "networkGroupId": network_group_id(),
+            "networkGroupId": network_group_id(state),
             "groupConnectivity": "None",
             "isGlobal": "False",
             "useHubGateway": "False",
@@ -129,30 +156,44 @@ def connectivity_config():
     }
 
 
-def effective_configuration(zone):
-    return {"value": [dict(connectivity_config(), targetVirtualNetwork={
-        "id": netid(zone, "virtualNetworks", vnet(zone)),
+def effective_configuration(zone, state=STATE):
+    return {"value": [dict(connectivity_config(state), targetVirtualNetwork={
+        "id": netid(zone, "virtualNetworks", vnet(zone, state), state),
     })]}
 
 
-def avnm_peerings(zone):
+def avnm_peerings(zone, state=STATE):
     peerings = {
         "hub": [
             {"name": "avnm-hub-a", "peeringState": "Connected",
-             "remoteVirtualNetwork": {"id": netid("spokea", "virtualNetworks", vnet("spokea"))}},
+             "remoteVirtualNetwork": {"id": netid("spokea", "virtualNetworks", vnet("spokea", state), state)}},
             {"name": "avnm-hub-b", "peeringState": "Connected",
-             "remoteVirtualNetwork": {"id": netid("spokeb", "virtualNetworks", vnet("spokeb"))}},
+             "remoteVirtualNetwork": {"id": netid("spokeb", "virtualNetworks", vnet("spokeb", state), state)}},
         ],
         "spokea": [
             {"name": "avnm-a-hub", "peeringState": "Connected",
-             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub"))}},
+             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub", state), state)}},
         ],
         "spokeb": [
             {"name": "avnm-b-hub", "peeringState": "Connected",
-             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub"))}},
+             "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub", state), state)}},
         ],
     }
     return peerings[zone]
+
+
+def owned_group_call(zone, state=STATE):
+    name = rg(zone, state)
+    return call(["group", "show", "--name", name, "-o", "json"], {
+        "name": name,
+        "id": f"/subscriptions/{SUB}/resourceGroups/{name}",
+        "tags": {
+            "workshop": "lz-beginner",
+            "environment": "lab",
+            "runId": state["runId"],
+            "managedBy": "workshop",
+        },
+    })
 
 
 def avnm_cases():
@@ -355,22 +396,22 @@ def foreign_ids(resource_id):
     yield resource_id + "/unexpected-child"
 
 
-def preparation_calls(module):
+def preparation_calls(module, state=STATE):
     calls = [account()]
     if module in (3, 4, 5, 6):
-        calls.extend(group(zone) for zone in ("hub", "spokea", "spokeb"))
+        calls.extend(owned_group_call(zone, state) for zone in ("hub", "spokea", "spokeb"))
     return calls
 
 
 class NetworkDocsTests(unittest.TestCase):
-    def execute(self, module, name, calls=(), input_text=None, files=None, prefix=""):
+    def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=STATE):
         steps = blocks(DOCS[module])
         self.assertIn(f"prepare-{module:02}", steps, "Module needs one common preparation block")
         self.assertIn(name, steps, "Missing separate teaching action")
         script = 'export STATE_FILE=state.json\n' + steps[f"prepare-{module:02}"] + "\n"
         script += 'prepared=$?\nif [[ "$prepared" == 0 ]]; then\n' + prefix + steps[name] + '\nelse\nfalse\nfi\n'
         script += 'status=$?\nprintf "SHELL_ALIVE\\n"\nexit "$status"'
-        result = run(script, [*preparation_calls(module), *calls], input_text=input_text, files=files)
+        result = run(script, [*preparation_calls(module, state), *calls], input_text=input_text, files=files)
         self.assertIn("SHELL_ALIVE", result.stdout, result.stderr)
         return result
 
@@ -620,6 +661,39 @@ printf 'SHELL_ALIVE\\n'
                 with self.subTest(step=name, casing=transform.__name__):
                     result = self.execute(3, name, recase_ids(calls, transform))
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_existing_configuration_reuse_accepts_non_demo_run_id(self):
+        state = workshop_state("rerun456")
+        calls = [
+            az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", network_group_name(state),
+                "--network-manager", avnm_name(state),
+                "--resource-group", rg("hub", state),
+                "-o", "json",
+            ], [static_member("spokea", "spokea", state), static_member("spokeb", "spokeb", state)]),
+            az([
+                "network", "vnet", "show",
+                "-g", rg("hub", state),
+                "-n", vnet("hub", state),
+                "--query", "id",
+                "-o", "tsv",
+            ], netid("hub", "virtualNetworks", vnet("hub", state), state)),
+            az([
+                "network", "manager", "connect-config", "list",
+                "--network-manager-name", avnm_name(state),
+                "--resource-group", rg("hub", state),
+                "-o", "json",
+            ], [connectivity_config(state)]),
+        ]
+        result = self.execute(
+            3,
+            "connectivity-config-create",
+            calls,
+            files={"state.json": json.dumps(state)},
+            state=state,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_existing_manager_rejects_security_admin_scope(self):
         calls = [az([
