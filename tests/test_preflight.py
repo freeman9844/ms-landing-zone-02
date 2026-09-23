@@ -7,6 +7,7 @@ def ready_calls(existing=(), extension=False, current=0, limit=10, power="VM run
     calls = [
         account(),
         call(["account", "list-locations", "--query", "[].name", "-o", "json"], ["koreacentral"]),
+        call(["extension", "show", "--name", "virtual-network-manager", "--query", "version", "-o", "tsv"], "1.0.0"),
         call(["provider", "show", "--namespace", "Microsoft.Network", "--query", "registrationState", "-o", "tsv"], "Registered"),
         call(["provider", "show", "--namespace", "Microsoft.Compute", "--query", "registrationState", "-o", "tsv"], "Registered"),
     ]
@@ -66,6 +67,13 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS", result.stdout)
 
+    def test_missing_avnm_extension_fails_before_resource_checks(self):
+        calls = ready_calls()[:3]
+        calls[-1].update(returncode=1, stdout="", stderr="extension not installed")
+        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json', calls)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("virtual-network-manager", result.stderr)
+
     def test_rerun_with_all_vms_needs_no_new_capacity(self):
         result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json',
                      ready_calls(existing=("hub", "spokea", "spokeb")))
@@ -77,7 +85,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_extension_rejects_missing_vm(self):
-        calls = ready_calls(extension=True)[:6]
+        calls = ready_calls(extension=True)[:7]
         result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --extension', calls)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing", result.stderr)
@@ -85,13 +93,13 @@ class PreflightTests(unittest.TestCase):
     def test_existing_unready_vm_is_not_counted_as_allocated_capacity(self):
         for power in ("VM deallocated", "VM stopped"):
             with self.subTest(power=power):
-                calls = ready_calls(existing=("hub",), power=power)[:7]
+                calls = ready_calls(existing=("hub",), power=power)[:8]
                 result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json', calls)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ready", result.stderr)
 
     def test_foreign_group_is_not_used_to_discount_quota(self):
-        calls = ready_calls(existing=("hub",))[:6]
+        calls = ready_calls(existing=("hub",))[:7]
         data = json.loads(calls[-1]["stdout"])
         data["tags"]["runId"] = "someoneelse"
         calls[-1]["stdout"] = json.dumps(data)
@@ -105,11 +113,18 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("PASS", result.stdout)
 
     def test_missing_provider_stops_before_quota(self):
-        calls = ready_calls()[:3]
+        calls = ready_calls()[:4]
         calls[-1]["stdout"] = "NotRegistered"
         result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json', calls)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Microsoft.Network", result.stderr)
+
+    def test_empty_avnm_extension_version_is_rejected(self):
+        calls = ready_calls()
+        calls[2]["stdout"] = ""
+        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json', calls[:3])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("virtual-network-manager", result.stderr)
 
     def test_capacity_shortfall_is_error(self):
         calls = ready_calls()

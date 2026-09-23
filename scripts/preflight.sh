@@ -11,6 +11,10 @@ assert_subscription
 locations=$(az account list-locations --query '[].name' -o json)
 jq -e --arg loc "$LOCATION" 'index($loc) != null' <<< "$locations" >/dev/null ||
   { fail "Location is not available to this subscription: $LOCATION"; exit 1; }
+avnm_extension=$(az extension show --name virtual-network-manager --query version -o tsv) ||
+  { fail "virtual-network-manager Azure CLI extension is not installed."; exit 1; }
+[[ -n "$avnm_extension" ]] ||
+  { fail "virtual-network-manager Azure CLI extension version is empty."; exit 1; }
 # Firewall 단계에서는 로그 저장소용 Provider도 필요합니다. 미등록이면 자동 등록하지 않고 중단합니다.
 providers=(Microsoft.Network Microsoft.Compute)
 [[ "${2:-}" != --extension ]] || providers+=(Microsoft.OperationalInsights)
