@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
 load_run "$1"
 assert_subscription
 # baseline과 restored는 같은 정상 통신을 기대합니다. restored 인수 자체가 NSG 규칙을 복구하지는 않습니다.
-# AVNM effective configuration과 Hub↔Spoke Peering 집합이 정확해야 다음 NSG·HTTP 증거를 해석할 수 있습니다.
+# Spoke effective configuration과 Hub↔Spoke Peering 집합이 정확해야 다음 NSG·HTTP 증거를 해석할 수 있습니다.
 hub_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
 spokea_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
 spokeb_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
@@ -24,7 +24,9 @@ for zone in hub spokea spokeb; do
   jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_vnet_id" \
     --arg group "$NETWORK_GROUP_ID" --arg target "$current_vnet_id" '
     def falsey: . == false or . == "False";
-    (.value | type == "array" and length == 1) and
+    (.value | type == "array") and
+    ($zone == "hub" and (.value | length == 0) or (.value | length == 1)) and
+    ($zone == "hub" and (.value | length == 0) or
     (.value[0] as $cfg |
       ($cfg.id | type == "string") and
       (($cfg.id | ascii_downcase) == ($config | ascii_downcase)) and
@@ -35,16 +37,17 @@ for zone in hub spokea spokeb; do
       (($cfg.hubs // []) | length == 1) and
       ($cfg.hubs[0].resourceId | type == "string") and
       (($cfg.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
-      ($cfg.targetVirtualNetwork.id | type == "string") and
-      (($cfg.targetVirtualNetwork.id | ascii_downcase) == ($target | ascii_downcase)) and
+      ($cfg.targetVirtualNetwork.id == null or
+        (($cfg.targetVirtualNetwork.id | type == "string") and
+         (($cfg.targetVirtualNetwork.id | ascii_downcase) == ($target | ascii_downcase)))) and
       (($cfg.appliesToGroups // []) | length == 1) and
       ($cfg.appliesToGroups[0].networkGroupId | type == "string") and
       (($cfg.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
       $cfg.appliesToGroups[0].groupConnectivity == "None" and
       ($cfg.appliesToGroups[0].isGlobal | falsey) and
       ($cfg.appliesToGroups[0].useHubGateway | falsey)
-    )
-  ' <<< "$effective" >/dev/null || { fail "Unexpected effective AVNM connectivity: $zone"; exit 1; }
+    ))
+  ' --arg zone "$zone" <<< "$effective" >/dev/null || { fail "Unexpected effective AVNM connectivity: $zone"; exit 1; }
   case "$zone" in
     hub) local_expected=$(jq -cn --arg a "$spokea_vnet_id" --arg b "$spokeb_vnet_id" '[$a, $b]') ;;
     spokea|spokeb) local_expected=$(jq -cn --arg hub "$hub_vnet_id" '[$hub]') ;;

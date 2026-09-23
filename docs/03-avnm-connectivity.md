@@ -217,20 +217,36 @@ fi
 
 <!-- exec:connectivity-config-create -->
 ```bash
-members=$(az network manager group static-member list \
-  --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
 spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
 spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
-jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
-  type == "array" and
-  length == 2 and
-  ([.[].name] | sort == ["spokea", "spokeb"]) and
-  ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
-  all(.[]; .provisioningState == "Succeeded")
-' <<<"$members" >/dev/null &&
+wait_static_members() {
+  local members ready
+  for ((attempt=1; attempt<=12; attempt++)); do
+    members=$(az network manager group static-member list \
+      --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
+      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") ||
+      { fail "Cannot read static members."; return 1; }
+    ready=$(jq -r --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
+      type == "array" and length == 2 and
+      ([.[].name] | sort == ["spokea", "spokeb"]) and
+      ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
+      all(.[]; .provisioningState == "Succeeded")
+    ' <<<"$members") || { fail "Invalid static-member response."; return 1; }
+    [[ "$ready" == true ]] && return 0
+    jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
+      type == "array" and length <= 2 and
+      ([.[].name] | unique | length) == length and
+      all(.[]; (.name == "spokea" and
+        ((.resourceId | ascii_downcase) == ($spokea | ascii_downcase))) or
+        (.name == "spokeb" and
+        ((.resourceId | ascii_downcase) == ($spokeb | ascii_downcase))))
+    ' <<<"$members" >/dev/null ||
+      { fail "Unexpected static-member identity; do not retry."; return 1; }
+    ((attempt == 12)) || sleep 10
+  done
+  fail "Spoke A/B static members were not ready after two minutes."
+}
+wait_static_members &&
 hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
   --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
 expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
@@ -309,12 +325,13 @@ az network manager post-commit \
 
 commit 요청이 성공하면 다음 단계에서 각 VNet의 effective configuration과 실제 Peering을 확인합니다.
 
-## 7. Hub의 effective connectivity 확인
+## 7. Hub의 effective connectivity 응답 확인
 
 👁️ **설명**
 
-Hub VNet에 실제로 어떤 connectivity configuration이 적용되었는지 읽습니다. 단순히 commit 성공만 보고
-다음 모듈로 가지 않습니다. configuration ID, topology, hub, group이 정확해야 합니다.
+Hub는 정적 Spoke Network Group의 멤버가 아니라 별도로 지정한 대상입니다. 이 구성에서 Hub의
+effective 목록은 비어 있어도 정상입니다. 배포 상태와 실제 Hub Peering 두 개를 다음 블록에서
+확인하고, Spoke A/B의 effective configuration과 함께 판정합니다.
 
 🟢 **실행**
 
@@ -324,26 +341,14 @@ effective=$(az network manager list-effective-connectivity-config \
   --resource-group "$RG_HUB" \
   --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
-expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-  (.value | type == "array") and
-  (.value | length == 1) and
-  ((.value[0].id | ascii_downcase) == ($config | ascii_downcase)) and
-  .value[0].connectivityTopology == "HubAndSpoke" and
-  .value[0].provisioningState == "Succeeded" and
-  ((.value[0].deleteExistingPeering == "False") or (.value[0].deleteExistingPeering == false)) and
-  ((.value[0].isGlobal == "False") or (.value[0].isGlobal == false)) and
-  (((.value[0].hubs // []) | length) == 1) and
-  (((.value[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
-  (((.value[0].appliesToGroups // []) | length) == 1) and
-  (((.value[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase))
-' <<<"$effective" >/dev/null &&
+jq -e '(.value | type == "array") and (.value | length == 0)' <<<"$effective" >/dev/null &&
 printf '%s\n' "$effective"
 ```
 
 📋 **확인**
 
-정확히 하나의 `HubAndSpoke` configuration이 보여야 합니다.
+Hub는 group member가 아니므로 `value: []`여야 합니다. 배포 성공 여부는 Spoke effective
+configuration과 뒤의 양방향 Peering 검사로 판단합니다.
 
 ## 8. Spoke A의 effective connectivity 확인
 

@@ -325,7 +325,7 @@ def avnm_cases():
             "--resource-group", rg("hub"),
             "--virtual-network-name", vnet("hub"),
             "-o", "json",
-        ], effective_configuration("hub"))],
+        ], {"value": []})],
         "effective-spokea": [az([
             "network", "manager", "list-effective-connectivity-config",
             "--resource-group", rg("spokea"),
@@ -401,6 +401,14 @@ def preparation_calls(module, state=STATE):
 
 
 class NetworkDocsTests(unittest.TestCase):
+    def test_configuration_waits_for_both_static_members_before_create(self):
+        calls = avnm_cases()["connectivity-config-create"]
+        result = self.execute(3, "connectivity-config-create", [
+            dict(calls[0], stdout=json.dumps([static_member("spokea", "spokea")])),
+            *calls,
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=STATE):
         steps = blocks(DOCS[module])
         self.assertIn(f"prepare-{module:02}", steps, "Module needs one common preparation block")
@@ -621,7 +629,7 @@ printf 'SHELL_ALIVE\\n'
                 "--resource-group", rg("hub"),
                 "--virtual-network-name", vnet("hub"),
                 "-o", "json",
-            ], effective_configuration("hub"))],
+            ], {"value": []})],
             "effective-spokea": [az([
                 "network", "manager", "list-effective-connectivity-config",
                 "--resource-group", rg("spokea"),
@@ -776,6 +784,8 @@ printf 'SHELL_ALIVE\\n'
                     "--resource-group", rg("hub"),
                     "-o", "json",
                 ], members)]
+                if label.startswith("missing-"):
+                    calls *= 12
                 result = self.execute(3, "connectivity-config-create", calls)
                 self.assertNotEqual(result.returncode, 0)
 

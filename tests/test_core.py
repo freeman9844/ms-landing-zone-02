@@ -71,6 +71,28 @@ class HttpProofTests(unittest.TestCase):
 
 
 class CoreGateTests(unittest.TestCase):
+    def test_live_hub_outside_spoke_group_and_effective_without_target_reach_route_checks(self):
+        spokea = copy.deepcopy(effective_configuration("spokea"))
+        spokeb = copy.deepcopy(effective_configuration("spokeb"))
+        del spokea["value"][0]["targetVirtualNetwork"]
+        del spokeb["value"][0]["targetVirtualNetwork"]
+        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+            account(),
+            group("hub"),
+            self.effective_call("hub", {"value": []}),
+            self.peering_list_call("hub"),
+            group("spokea"),
+            self.effective_call("spokea", spokea),
+            self.peering_list_call("spokea"),
+            group("spokeb"),
+            self.effective_call("spokeb", spokeb),
+            self.peering_list_call("spokeb"),
+            call(["network", "nic", "show", "-g", rg("hub"), "-n", "nic-lzbegin-hub-demo123",
+                  "--query", "ipConfigurations[0].privateIPAddress", "-o", "tsv"], "invalid"),
+        ])
+        self.assertNotIn("Unexpected effective AVNM connectivity", result.stderr)
+        self.assertIn("invalid VM IP", result.stderr)
+
     def effective_call(self, zone, payload=None):
         return az([
             "network", "manager", "list-effective-connectivity-config",
@@ -116,6 +138,9 @@ class CoreGateTests(unittest.TestCase):
             account(),
             group("hub"),
             self.effective_call("hub", {"value": []}),
+            self.peering_list_call("hub"),
+            group("spokea"),
+            self.effective_call("spokea", {"value": []}),
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("effective", result.stderr)
