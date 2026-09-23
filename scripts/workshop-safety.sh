@@ -88,9 +88,9 @@ firewall_ready_ip() {
   printf '%s\n' "$ip"
 }
 
-# 첫 Subnet 전환 전에도 두 테이블의 왕복 /16·기본 /0 및 네 방향 전달 허용을 검사합니다.
+# 첫 Subnet 전환 전에도 두 테이블의 왕복 /16·기본 /0 및 원격 VNet ID로 찾은 네 방향 전달 허용을 검사합니다.
 assert_route_tables_ready() {
-  local ip="$1" zone rg remote table data local_zone remote_zone local_rg remote_rg peering
+  local ip="$1" zone rg remote table data local_zone remote_zone local_rg remote_rg local_vnet remote_id peering_name peering
   assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
   for zone in spokea spokeb; do
     # 목적지 접두사는 상대 Spoke입니다. next hop IP는 두 방향 모두 같은 Firewall이어야 합니다.
@@ -116,10 +116,13 @@ assert_route_tables_ready() {
       else
         local_rg="$rg"; remote_zone=hub; remote_rg="$RG_HUB"
       fi
-      peering=$(az network vnet peering show -g "$local_rg" --vnet-name "vnet-lzbegin-$local_zone-$RUN_ID" \
-        -n "$local_zone-to-$remote_zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+      local_vnet="vnet-lzbegin-$local_zone-$RUN_ID"
+      remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$remote_zone-$RUN_ID"
+      peering_name=$(peering_name_for_remote "$local_rg" "$local_vnet" "$remote_id") || return 1
+      peering=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
+        -n "$peering_name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
       # Connected와 전달 허용뿐 아니라 상대 VNet ID도 대조합니다. Peering만으로 경로가 생기지는 않습니다.
-      jq -e --arg remote "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$remote_zone-$RUN_ID" '
+      jq -e --arg remote "$remote_id" '
         .peeringState == "Connected" and .allowForwardedTraffic == true and
         .allowVirtualNetworkAccess == true and
         (.remoteVirtualNetwork.id | ascii_downcase) == ($remote | ascii_downcase)

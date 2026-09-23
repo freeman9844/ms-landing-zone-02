@@ -1,7 +1,7 @@
 import copy
 import json
 import unittest
-from harness import run, group
+from harness import run, group, SUB
 from test_network_docs import az, rg, netid, rid, vnet, subnet_args, OWNED, recase_ids, foreign_ids
 
 FW = netid("hub", "azureFirewalls", "fw-lzbegin-demo123")
@@ -28,6 +28,30 @@ def ready_calls():
                                 for name in ("management", "lab-http", "egress-check")]})]
 
 
+def generated_peering_name(local, remote):
+    return f"avnm-{local}-{remote}"
+
+
+def peering_list_call(local, remote, peerings=None):
+    remote_id = netid(remote, "virtualNetworks", vnet(remote))
+    if peerings is None:
+        peerings = [{
+            "name": generated_peering_name(local, remote),
+            "remoteVirtualNetwork": {"id": remote_id},
+        }]
+    return az(["network", "vnet", "peering", "list", "-g", rg(local), "--vnet-name", vnet(local), "-o", "json"],
+              peerings)
+
+
+def peering_show_call(local, remote, data=None, name=None):
+    remote_id = netid(remote, "virtualNetworks", vnet(remote))
+    if data is None:
+        data = {"peeringState": "Connected", "allowForwardedTraffic": True,
+                "allowVirtualNetworkAccess": True, "remoteVirtualNetwork": {"id": remote_id}}
+    return az(["network", "vnet", "peering", "show", "-g", rg(local), "--vnet-name", vnet(local),
+               "-n", name or generated_peering_name(local, remote), "-o", "json"], data)
+
+
 def tables_calls():
     calls = []
     for zone, prefix in (("spokea", "10.20.0.0/16"), ("spokeb", "10.10.0.0/16")):
@@ -39,11 +63,8 @@ def tables_calls():
                                       {"name": "to-internet", "addressPrefix": "0.0.0.0/0",
                                        "nextHopType": "VirtualAppliance", "nextHopIpAddress": FW_IP}]})]
         for local, remote in (("hub", zone), (zone, "hub")):
-            calls.append(az(["network", "vnet", "peering", "show", "-g", rg(local),
-                             "--vnet-name", vnet(local), "-n", f"{local}-to-{remote}", "-o", "json"],
-                            {"peeringState": "Connected", "allowForwardedTraffic": True,
-                             "allowVirtualNetworkAccess": True,
-                             "remoteVirtualNetwork": {"id": netid(remote, "virtualNetworks", vnet(remote))}}))
+            calls.append(peering_list_call(local, remote))
+            calls.append(peering_show_call(local, remote))
     return calls
 
 
@@ -229,17 +250,19 @@ class SafetyTests(unittest.TestCase):
     def test_both_tables_and_all_four_forwarded_peerings_are_required(self):
         result = self.execute(f'assert_route_tables_ready "{FW_IP}"', tables_calls())
         self.assertEqual(result.returncode, 0, result.stderr)
-        for index, callspec in enumerate(tables_calls()):
-            if index % 4 == 0:
-                continue
+        for index in (1, 7):
             calls = tables_calls()[:index + 1]
-            data = json.loads(callspec["stdout"])
-            if index % 4 == 1:
-                data["routes"][0]["addressPrefix"] = "10.0.0.0/16"
-            else:
-                data["allowForwardedTraffic"] = False
+            data = json.loads(calls[-1]["stdout"])
+            data["routes"][0]["addressPrefix"] = "10.0.0.0/16"
             calls[-1]["stdout"] = json.dumps(data)
-            with self.subTest(index=index):
+            with self.subTest(route_index=index):
+                self.assertNotEqual(self.execute(f'assert_route_tables_ready "{FW_IP}"', calls).returncode, 0)
+        for index in (3, 5, 9, 11):
+            calls = tables_calls()[:index + 1]
+            data = json.loads(calls[-1]["stdout"])
+            data["allowForwardedTraffic"] = False
+            calls[-1]["stdout"] = json.dumps(data)
+            with self.subTest(peering_index=index):
                 self.assertNotEqual(self.execute(f'assert_route_tables_ready "{FW_IP}"', calls).returncode, 0)
 
     def test_removal_checks_order_exact_scope_and_resource_tags(self):
@@ -282,7 +305,7 @@ class SafetyTests(unittest.TestCase):
                     self.assertNotEqual(self.execute(f"assert_spoke_nat_removal {zone} {stage}", calls).returncode, 0)
 
     def test_route_table_gate_rejects_wrong_hops_extra_routes_and_wrong_peers(self):
-        for index in (1, 5):
+        for index in (1, 7):
             calls = tables_calls()[:index + 1]
             data = json.loads(calls[-1]["stdout"])
             data["routes"].append({"name": "unexpected", "addressPrefix": "10.0.0.0/8", "nextHopType": "None"})
@@ -301,14 +324,42 @@ class SafetyTests(unittest.TestCase):
                 data[key] = value
                 calls[-1]["stdout"] = json.dumps(data)
                 self.assertNotEqual(self.execute(f'assert_route_tables_ready "{FW_IP}"', calls).returncode, 0)
-        for index in (2, 3, 6, 7):
-            for key, value in (("peeringState", "Initiated"), ("allowVirtualNetworkAccess", False),
+        for index in (3, 5, 9, 11):
+            for key, value in (("peeringState", "Disconnected"), ("allowVirtualNetworkAccess", False),
                                ("remoteVirtualNetwork", {"id": "foreign"})):
                 calls = tables_calls()[:index + 1]
                 data = json.loads(calls[-1]["stdout"])
                 data[key] = value
                 calls[-1]["stdout"] = json.dumps(data)
                 self.assertNotEqual(self.execute(f'assert_route_tables_ready "{FW_IP}"', calls).returncode, 0)
+
+    def test_route_table_gate_rejects_duplicate_foreign_and_child_peering_matches(self):
+        list_indices = {
+            ("hub", "spokea"): 2,
+            ("spokea", "hub"): 4,
+            ("hub", "spokeb"): 8,
+            ("spokeb", "hub"): 10,
+        }
+        for (local, remote), index in list_indices.items():
+            remote_id = netid(remote, "virtualNetworks", vnet(remote))
+            for label, peerings in (
+                ("duplicate", [
+                    {"name": "one", "remoteVirtualNetwork": {"id": remote_id}},
+                    {"name": "two", "remoteVirtualNetwork": {"id": remote_id.swapcase()}},
+                ]),
+                ("foreign-subscription", [{
+                    "name": "foreign",
+                    "remoteVirtualNetwork": {"id": remote_id.replace(SUB, "99999999-9999-9999-9999-999999999999")},
+                }]),
+                ("child-path", [{
+                    "name": "child",
+                    "remoteVirtualNetwork": {"id": remote_id + "/subnets/snet-foreign"},
+                }]),
+            ):
+                with self.subTest(local=local, remote=remote, label=label):
+                    calls = tables_calls()[:index + 1]
+                    calls[-1]["stdout"] = json.dumps(peerings)
+                    self.assertNotEqual(self.execute(f'assert_route_tables_ready "{FW_IP}"', calls).returncode, 0)
 
     def test_removal_rejects_attached_nat_or_existing_nat_before_ip_delete(self):
         for zone in ("spokea", "spokeb"):

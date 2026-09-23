@@ -92,78 +92,95 @@ Hub→A, A→Hub, Hub→B, B→Hub 네 방향에서 전달 허용을 설정합�
 
 👁️ **설명**
 
-Hub 쪽 `hub-to-spokea` Peering의 전달 트래픽 허용을 켭니다.
+Hub에서 Spoke A의 **전체 VNet ID**를 먼저 읽고, 그 ID를 가리키는 현재 AVNM 생성 Peering 이름을
+찾은 뒤 전달 트래픽 허용을 켭니다. 이름을 직접 합성하지 않습니다.
 직접 연결만 사용하던 설정을 Firewall이 중계하는 경로에 맞춰 준비합니다.
 
 🟢 **실행**
 
 <!-- exec:forward-hub-to-spokea -->
 ```bash
+remote_id=$(az network vnet show -g "$RG_SPOKEA" -n "vnet-lzbegin-spokea-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+peering_name=$(peering_name_for_remote \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" "$remote_id") &&
 az network vnet peering update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
-  -n hub-to-spokea --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-`hub-to-spokea`의 `allowForwardedTraffic=true`. 이 옵션만으로 UDR이 생기지는 않습니다.
+조회된 Hub→Spoke A Peering의 `allowForwardedTraffic=true`. 이 옵션만으로 UDR이 생기지는 않습니다.
 
 ### 2-2. A → Hub
 
 👁️ **설명**
 
-A 쪽에서도 Hub Peering의 전달 트래픽을 허용합니다.
+A 쪽에서도 Hub의 **전체 VNet ID**를 기준으로 현재 Peering 이름을 찾아 전달 트래픽을 허용합니다.
 Hub에서 Firewall을 거쳐 전달되는 패킷을 받을 수 있도록 반대 방향 설정도 변경합니다.
-두 방향의 설정을 혼동하지 않도록 명령의 RG·VNet·Peering 이름이 모두 A를 가리키는지 확인하세요.
+두 방향의 설정을 혼동하지 않도록 명령의 RG·VNet과 조회 대상 remote ID가 모두 A↔Hub를 가리키는지 확인하세요.
 
 🟢 **실행**
 
 <!-- exec:forward-spokea-to-hub -->
 ```bash
+remote_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+peering_name=$(peering_name_for_remote \
+  "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" "$remote_id") &&
 az network vnet peering update -g "$RG_SPOKEA" --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
-  -n spokea-to-hub --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-A의 역방향 연결도 전달을 허용합니다.
+A에서 조회된 역방향 Peering도 전달을 허용합니다.
 
 ### 2-3. Hub → B
 
 👁️ **설명**
 
-Hub와 B 사이의 Peering에도 같은 전달 허용을 적용합니다.
+Hub와 B 사이도 Spoke B의 **전체 VNet ID**로 현재 Peering 이름을 찾은 뒤 같은 전달 허용을 적용합니다.
 A 연결을 수정한 것만으로 B 연결의 속성이 바뀌지는 않습니다.
 
 🟢 **실행**
 
 <!-- exec:forward-hub-to-spokeb -->
 ```bash
+remote_id=$(az network vnet show -g "$RG_SPOKEB" -n "vnet-lzbegin-spokeb-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+peering_name=$(peering_name_for_remote \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" "$remote_id") &&
 az network vnet peering update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
-  -n hub-to-spokeb --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-이번 대상은 `hub-to-spokeb`입니다.
+이번 대상은 Hub에서 조회된 Spoke B용 AVNM Peering입니다.
 
 ### 2-4. B → Hub
 
 👁️ **설명**
 
-B 쪽의 Hub Peering을 수정하여 네 방향 설정을 마칩니다.
+B 쪽에서도 Hub의 **전체 VNet ID**로 현재 Peering 이름을 찾아 네 방향 설정을 마칩니다.
 직접 A↔B Peering을 추가하지 않고 기존 Hub 경유 구조를 유지합니다.
 
 🟢 **실행**
 
 <!-- exec:forward-spokeb-to-hub -->
 ```bash
+remote_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+peering_name=$(peering_name_for_remote \
+  "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" "$remote_id") &&
 az network vnet peering update -g "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
-  -n spokeb-to-hub --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-네 방향 모두 전달 허용입니다. 게이트웨이 공유 설정은 바꾸지 않았습니다.
+네 방향 모두 조회된 Peering에 대해 전달 허용입니다. 게이트웨이 공유 설정은 바꾸지 않았습니다.
 
 ## 3. Spoke A의 경로 테이블과 두 경로
 
@@ -328,8 +345,8 @@ A만 연결된 짧은 구간은 왕복 경로가 완성되지 않은 상태입�
 
 현재 Firewall과 양쪽 경로 테이블·Peering을 점검한 뒤 A 테이블을 A Subnet에 연결합니다.
 이때부터 A의 경로가 실제로 바뀌며, B 연결까지 완료해야 왕복 구성이 완성됩니다.
-`assert_route_tables_ready`는 A/B 테이블 각각의 `/16`·`/0`과 네 Peering의
-Connected·전달 허용을 확인합니다. 검사 실패를 무시하고 Subnet만 연결하지 마세요.
+`assert_route_tables_ready`는 A/B 테이블 각각의 `/16`·`/0`과 **정확한 remote VNet ID로 찾은**
+네 Peering의 Connected·전달 허용을 확인합니다. 검사 실패를 무시하고 Subnet만 연결하지 마세요.
 
 🟢 **실행**
 

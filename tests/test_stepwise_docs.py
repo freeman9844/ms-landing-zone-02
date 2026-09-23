@@ -133,9 +133,17 @@ def firewall_cases():
 def routing_cases():
     cases = {}
     for local, remote in (("hub", "spokea"), ("spokea", "hub"), ("hub", "spokeb"), ("spokeb", "hub")):
+        remote_id = netid(remote, "virtualNetworks", vnet(remote))
+        generated = f"avnm-{local}-{remote}"
         cases[f"forward-{local}-to-{remote}"] = [
+            az(["network", "vnet", "show", "-g", rg(remote), "-n", vnet(remote), "--query", "id", "-o", "tsv"],
+               remote_id),
+            az(["network", "vnet", "peering", "list", "-g", rg(local), "--vnet-name", vnet(local), "-o", "json"], [{
+                "name": generated,
+                "remoteVirtualNetwork": {"id": remote_id},
+            }]),
             az(["network", "vnet", "peering", "update", "-g", rg(local), "--vnet-name", vnet(local),
-                "-n", f"{local}-to-{remote}", "--set", "allowForwardedTraffic=true", "-o", "json"])]
+                "-n", generated, "--set", "allowForwardedTraffic=true", "-o", "json"])]
     for zone, remote in (("spokea", "10.20.0.0/16"), ("spokeb", "10.10.0.0/16")):
         table = f"rt-lzbegin-{zone}-demo123"
         cases[f"route-table-{zone}"] = [az(["network", "route-table", "create", "-g", rg(zone),
