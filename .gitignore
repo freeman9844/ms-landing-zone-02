@@ -1,0 +1,7 @@
+.workshop-state/
+.workshop-keys/
+evidence/
+infra/*.json
+infra/modules/*.json
+__pycache__/
+.tools/

@@ -1,0 +1,190 @@
+import json
+import unittest
+from harness import run, call, account, group, STATE, SUB
+
+SOURCE = 'source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; '
+
+
+class StateTests(unittest.TestCase):
+    def test_state_exports_avnm_names_and_ids(self):
+        result = run(SOURCE + r'''
+load_run state.json &&
+printf '%s\n' \
+  "$AVNM" "$NETWORK_GROUP" "$CONNECTIVITY_CONFIG" \
+  "$AVNM_ID" "$NETWORK_GROUP_ID" "$CONNECTIVITY_CONFIG_ID"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        base = (
+            f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-hub-demo123"
+            "/providers/Microsoft.Network/networkManagers/avnm-lzbegin-demo123"
+        )
+        self.assertEqual(result.stdout.splitlines(), [
+            "avnm-lzbegin-demo123",
+            "ng-lzbegin-spokes-demo123",
+            "cc-lzbegin-hub-spoke-demo123",
+            base,
+            base + "/networkGroups/ng-lzbegin-spokes-demo123",
+            base + "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123",
+        ])
+
+    def test_schema_one_and_other_topologies_are_rejected(self):
+        for change in (
+            {"schemaVersion": 1},
+            {"topology": "manual-hub-spoke"},
+            {"topology": None},
+        ):
+            with self.subTest(change=change):
+                data = dict(STATE, **change)
+                result = run(SOURCE + "load_run state.json",
+                             files={"state.json": json.dumps(data)})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Invalid or unreadable state file", result.stderr)
+
+    def test_failed_reload_clears_previous_state_and_zone_targets_without_exiting(self):
+        variables = ("RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB "
+                     "AVNM NETWORK_GROUP CONNECTIVITY_CONFIG AVNM_ID NETWORK_GROUP_ID "
+                     "CONNECTIVITY_CONFIG_ID RG SUBNET PREFIX VNET VM NSG")
+        for path, files in (
+            ("missing.json", {}),
+            ("bad.json", {"bad.json": '{"schemaVersion":999}'}),
+            ("bad.json", {"bad.json": "not JSON"}),
+            ("", {}),
+        ):
+            with self.subTest(path=path, files=files):
+                result = run(SOURCE + f'''
+load_run state.json && zone_context spokea || exit 90
+export STATE_FILE='{path}'
+load_run "$STATE_FILE"
+status=$?
+printf 'LOAD_STATUS=%s\\n' "$status"
+for name in {variables}; do
+  [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
+done
+printf 'SHELL_ALIVE\\n'
+load_run state.json && zone_context hub &&
+  printf 'RESTORED:%s:%s\\n' "$RUN_ID" "$RG"
+''', files=files)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertIn("LOAD_STATUS=1\nSHELL_ALIVE", result.stdout)
+                self.assertIn("Invalid or unreadable state file", result.stderr)
+                self.assertIn("RESTORED:demo123:rg-lzbegin-hub-demo123", result.stdout)
+
+    def test_switching_state_drops_zone_targets_from_previous_run(self):
+        result = run(SOURCE + f'''
+load_run state.json && zone_context spokea &&
+  create_run abc123 {SUB} eastus >/dev/null &&
+  load_run .workshop-state/abc123.json || exit 90
+for name in RG SUBNET PREFIX VNET VM NSG; do
+  [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
+done
+zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(result.stdout, "abc123 eastus rg-lzbegin-spokeb-abc123\n")
+
+    def new_group_calls(self, values=("false", "false", "false")):
+        return [call(["group", "exists", "--name",
+                      {"regex": f"rg-lzbegin-{zone}-[a-f0-9]{{12}}"}, "-o", "tsv"], value)
+                for zone, value in zip(("hub", "spokea", "spokeb"), values)]
+
+    def test_new_runs_use_distinct_ids_and_valid_recoverable_state(self):
+        result = run(SOURCE + f'''
+set -e
+first=$(new_run {SUB} koreacentral)
+second=$(new_run {SUB} koreacentral)
+test "$first" != "$second"
+load_run "$first"
+printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
+load_run "$second"
+printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
+''', [account(), *self.new_group_calls(), account(), *self.new_group_calls()])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            run_id, rg = line.split()
+            self.assertRegex(run_id, r"^[a-f0-9]{12}$")
+            self.assertEqual(rg, f"rg-lzbegin-hub-{run_id}")
+        self.assertNotEqual(lines[0], lines[1])
+
+    def test_new_run_rejects_any_existing_rg_before_creating_state(self):
+        for index in range(3):
+            with self.subTest(zone=index):
+                result = run(SOURCE + f'new_run {SUB} koreacentral; '
+                             'rc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
+                             [account(), *self.new_group_calls(["false"] * index + ["true"])])
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("already exists", result.stderr)
+
+    def test_new_run_rejects_unknown_existence_and_cloud_errors(self):
+        for value, code in (("unknown", 0), ("", 3)):
+            with self.subTest(value=value, code=code):
+                calls = self.new_group_calls([value])
+                calls[0]["returncode"] = code
+                result = run(SOURCE + f'new_run {SUB} koreacentral', [account(), *calls])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Cannot", result.stderr)
+
+    def test_round_trip_and_private_permissions(self):
+        result = run(SOURCE + f'create_run abc123 {SUB} koreacentral && '
+                     'load_run .workshop-state/abc123.json && '
+                     'printf "%s %s\\n" "$RUN_ID" "$RG_HUB" && '
+                     'stat -c %a .workshop-state/abc123.json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("abc123 rg-lzbegin-hub-abc123\n600", result.stdout)
+
+    def test_invalid_id_creates_nothing(self):
+        result = run(SOURCE + f'create_run ../other {SUB} koreacentral; '
+                     'rc=$?; test ! -e .workshop-state || exit 9; exit "$rc"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("runId", result.stderr)
+
+    def test_existing_state_is_not_overwritten(self):
+        result = run(SOURCE + f'create_run abc123 {SUB} koreacentral && '
+                     f'create_run abc123 {SUB} eastus')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exists", result.stderr)
+
+    def test_rejects_tampered_rg_without_exiting_shell(self):
+        data = json.loads(json.dumps(STATE))
+        data["resourceGroups"]["hub"] = "production"
+        result = run(SOURCE + 'load_run state.json; printf "alive:%s" "$?"',
+                     files={"state.json": json.dumps(data)})
+        self.assertEqual(result.stdout, "alive:1")
+        self.assertIn("state", result.stderr)
+
+    def test_rejects_unknown_schema_and_shell_injection(self):
+        for field, value in (("schemaVersion", 3), ("runId", "$(touch escaped)"),
+                             ("subscriptionId", "not-a-subscription")):
+            with self.subTest(field=field):
+                data = dict(STATE, **{field: value})
+                result = run(SOURCE + 'load_run state.json', files={"state.json": json.dumps(data)})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("state", result.stderr)
+
+    def test_subscription_mismatch_is_not_automatically_switched(self):
+        result = run(SOURCE + 'load_run state.json && assert_subscription',
+                     [call(["account", "show", "--query", "id", "-o", "tsv"], "other")])
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_subscription_and_owned_group(self):
+        result = run(SOURCE + 'load_run state.json && assert_subscription && assert_owned_rg "$RG_HUB"',
+                     [account(), group("hub")])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_wrong_owner_prevents_use(self):
+        response = group("hub")
+        data = json.loads(response["stdout"])
+        data["tags"]["runId"] = "other"
+        response["stdout"] = json.dumps(data)
+        result = run(SOURCE + 'load_run state.json && assert_owned_rg "$RG_HUB"', [response])
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_foreign_group_rejected_before_azure(self):
+        result = run(SOURCE + 'load_run state.json && assert_owned_rg production')
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_zone_context_rejects_unknown_zone(self):
+        result = run(SOURCE + 'load_run state.json && zone_context elsewhere')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("zone", result.stderr)
