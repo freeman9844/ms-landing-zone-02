@@ -128,7 +128,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 | NAT Gateway | 3개 | 검증 후 Spoke 2개 제거, Hub 1개 유지 | 유휴 상태에도 시간 과금 |
 | Standard Public IP | NAT용 3개 | Firewall용 1개 추가 후 Spoke용 2개 제거 | 연결·할당 상태에 따라 비용 발생 |
 | Azure Firewall Standard | 없음 | 1개 | 배포·유휴 시간 및 처리량 과금 |
-| Azure Virtual Network Manager | 없음 | 1개 | 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있음 |
+| Azure Virtual Network Manager | 모듈 03부터 1개 | 동일 | 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있음 |
 | Log Analytics | 없음 | 1개 | 수집량과 보존에 따른 비용 |
 | Peering·전송 | 사용량 기반 | 사용량 기반 | 반복/대량 부하 검사는 하지 않기 |
 

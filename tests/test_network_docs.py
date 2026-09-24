@@ -505,6 +505,21 @@ printf 'SHELL_ALIVE\\n'
                     result = self.execute(module, name, calls)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_hub_effective_configuration_accepts_only_empty_or_approved_configuration(self):
+        expected_call = avnm_cases()["effective-hub"][0]
+        for value, accepted in (
+            ({"value": []}, True),
+            (effective_configuration("hub"), True),
+            ({"value": [connectivity_config()]}, True),
+            ({"value": [dict(connectivity_config(), id="unexpected")]}, False),
+            ({"value": [dict(connectivity_config(), targetVirtualNetwork={"id": "unexpected"})]}, False),
+            ({"value": [connectivity_config(), connectivity_config()]}, False),
+            ({"value": {}}, False),
+        ):
+            with self.subTest(value=value):
+                result = self.execute(3, "effective-hub", [dict(expected_call, stdout=json.dumps(value))])
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
     def test_foundation_and_avnm_actions_stop_on_each_failed_lookup(self):
         for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
             for name, calls in cases.items():

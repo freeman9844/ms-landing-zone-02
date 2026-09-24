@@ -39,6 +39,8 @@ assert_owned_rg "$RG_SPOKEB"
 Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 사용하지 않습니다.
 재실행 시에는 먼저 기존 AVNM 목록을 읽고 정확한 이름·ID·구독 scope·feature를 확인한 뒤에만
 재사용합니다. 목록 조회가 실패하면 부재로 간주하지 않고 즉시 중단합니다.
+**모듈 03에서 AVNM을 생성합니다.** 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있으므로
+실습 후 모듈 07에서 정리하세요.
 
 🟢 **실행**
 
@@ -329,9 +331,9 @@ commit 요청이 성공하면 다음 단계에서 각 VNet의 effective configur
 
 👁️ **설명**
 
-Hub는 정적 Spoke Network Group의 멤버가 아니라 별도로 지정한 대상입니다. 이 구성에서 Hub의
-effective 목록은 비어 있어도 정상입니다. 배포 상태와 실제 Hub Peering 두 개를 다음 블록에서
-확인하고, Spoke A/B의 effective configuration과 함께 판정합니다.
+Hub는 정적 Spoke Network Group의 멤버가 아니라 별도로 지정한 대상입니다. Hub의
+effective 목록은 비어 있거나, 의도한 configuration 하나를 반환할 수 있습니다. 배포 상태와
+실제 Hub Peering 두 개를 뒤의 블록에서 확인하고, Spoke A/B의 effective configuration과 함께 판정합니다.
 
 🟢 **실행**
 
@@ -341,14 +343,40 @@ effective=$(az network manager list-effective-connectivity-config \
   --resource-group "$RG_HUB" \
   --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e '(.value | type == "array") and (.value | length == 0)' <<<"$effective" >/dev/null &&
+hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
+jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
+  def falsey: . == false or . == "False";
+  (.value | type == "array") and
+  ((.value | length == 0) or
+    ((.value | length == 1) and (.value[0] as $cfg |
+      ($cfg.id | type == "string") and
+      (($cfg.id | ascii_downcase) == ($config | ascii_downcase)) and
+      $cfg.connectivityTopology == "HubAndSpoke" and
+      $cfg.provisioningState == "Succeeded" and
+      ($cfg.deleteExistingPeering | falsey) and
+      ($cfg.isGlobal | falsey) and
+      (($cfg.hubs // []) | length == 1) and
+      ($cfg.hubs[0].resourceId | type == "string") and
+      (($cfg.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      ($cfg.targetVirtualNetwork.id == null or
+        (($cfg.targetVirtualNetwork.id | type == "string") and
+         (($cfg.targetVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)))) and
+      (($cfg.appliesToGroups // []) | length == 1) and
+      ($cfg.appliesToGroups[0].networkGroupId | type == "string") and
+      (($cfg.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
+      $cfg.appliesToGroups[0].groupConnectivity == "None" and
+      ($cfg.appliesToGroups[0].isGlobal | falsey) and
+      ($cfg.appliesToGroups[0].useHubGateway | falsey)
+    )))
+' <<<"$effective" >/dev/null &&
 printf '%s\n' "$effective"
 ```
 
 📋 **확인**
 
-Hub는 group member가 아니므로 `value: []`여야 합니다. 배포 성공 여부는 Spoke effective
-configuration과 뒤의 양방향 Peering 검사로 판단합니다.
+Hub는 group member가 아니므로 `value: []`도 정상입니다. 의도한 configuration 하나가
+반환되어도 정상이며, 배포 성공 여부는 두 Spoke의 effective configuration과 뒤의 양방향
+Peering 검사로 판단합니다.
 
 ## 8. Spoke A의 effective connectivity 확인
 
@@ -389,7 +417,7 @@ Spoke A에서도 같은 configuration ID가 보여야 합니다.
 
 👁️ **설명**
 
-Spoke B도 동일하게 확인합니다. 세 VNet 모두 같은 configuration을 읽을 수 있어야 AVNM이 의도한 범위에 배포된 것입니다.
+Spoke B도 동일하게 확인합니다. 두 Spoke 모두 같은 configuration을 읽을 수 있어야 AVNM이 의도한 범위에 배포된 것입니다.
 
 🟢 **실행**
 
