@@ -345,6 +345,42 @@ Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
 동일 명령을 실행하거나 세션 재연결을 시험했다는 의미는 아닙니다.
 로컬 최종 검사는 139 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
 
+### 2026-09-24 게시 버전 실제 AVNM Azure 재리허설
+
+게시 저장소 `main`의 `b8c7893`에서 Korea Central의 새 실행 `8c43433227ef`을
+인증된 로컬 Azure CLI로 실행했습니다. 시작 전 별도 실행 `98f2d58f5774`의 세 RG가
+존재하는 것을 확인했으며, 그 실행의 자원은 변경하거나 삭제하지 않았습니다.
+모듈 01의 읽기 전용 preflight와 모듈 02–06의 참가자 실행 블록을 순서대로 실행했습니다.
+AVNM의 Hub effective 목록은 비어 있고 두 Spoke에는 승인된 구성 하나씩, Hub에는
+Connected Peering 두 개와 두 Spoke에는 각각 Hub를 향한 Connected Peering 하나씩
+있었습니다. Commit 직후 Spoke A의 첫 effective 조회는 아직 반영 전이라 실패했고,
+20초 후 **같은 읽기 전용 블록 재조회**에서 통과했습니다. 실패를 성공으로 취급하거나
+commit을 다시 수행하지 않았습니다.
+
+모듈 04의 baseline·NSG 차단·복구, 모듈 06의 Firewall Allow·Deny·복구 로그,
+양쪽 `/16` 왕복 경로와 `/0` 출구, 여섯 단계의 Spoke NAT 분리·삭제 및 제거 후
+최종 검증이 모두 `PASS`였습니다. 변경된 `firewall_ready_ip`의 관리 규칙 상세 검사는
+Subnet에 UDR을 연결하기 전에 실제 Policy 응답을 대상으로 통과했습니다.
+
+| 실제 관측 구간 | 소요 |
+|---|---:|
+| 지원 VM/NAT 배포 | 약 68초 |
+| Firewall IP 구성 | 약 7분 51초 |
+| 첫 Firewall Allow 검증·로그 | 약 7분 6초 |
+| Firewall Deny 검증·로그 | 약 5분 9초 |
+| Firewall Allow 복구 검증·로그 | 약 5분 1초 |
+| Spoke NAT 제거 후 최종 검증 | 약 5분 |
+| `cleanup.sh`와 세 RG 부재 재조회 | 약 14분 21초 |
+
+Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
+`2.2.1`, log-analytics extension `1.0.0b2`, Checkov `3.3.19`를 사용했습니다.
+`cleanup.sh`가 성공한 뒤 새 실행의 Hub·Spoke A·Spoke B RG를 독립적으로 조회해
+각각 `false`를 확인했습니다. 기존 `NetworkWatcher_koreacentral`은
+`Succeeded`이고 다른 실행의 세 RG도 남아 있었습니다.
+증거: 로컬 `evidence/rehearsal-8c43433227ef/` (Git 제외).
+이 리허설은 브라우저 Cloud Shell 재접속이나 다른 구독·지역에서의 동작 검증이 아닙니다.
+기록 추가 후 로컬 최종 검사는 141 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
+
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기
 전에는 해당 조직의 공유 정책을 따릅니다.
