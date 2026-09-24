@@ -24,8 +24,14 @@ def ready_calls():
                      {"category": "AZFWApplicationRule", "enabled": True}]}),
         az(["network", "firewall", "policy", "rule-collection-group", "show", "-g", rg("hub"),
             "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop", "-o", "json"],
-           {"ruleCollections": [{"name": name, "action": {"type": "Allow"}}
-                                for name in ("management", "lab-http", "egress-check")]})]
+           {"ruleCollections": [
+               {"name": "management", "priority": 100, "action": {"type": "Allow"},
+                "rules": [{"name": "azure-management", "ruleType": "NetworkRule",
+                           "ipProtocols": ["TCP"], "sourceAddresses": ["10.10.1.0/24", "10.20.1.0/24"],
+                           "destinationAddresses": ["AzureCloud"], "destinationPorts": ["443"]}]},
+               {"name": "lab-http", "action": {"type": "Allow"}},
+               {"name": "egress-check", "action": {"type": "Allow"}},
+           ]})]
 
 
 def generated_peering_name(local, remote):
@@ -246,6 +252,35 @@ class SafetyTests(unittest.TestCase):
                 calls = ready_calls()[:index + 1]
                 calls[-1]["stdout"] = value if isinstance(value, str) else json.dumps(value)
                 self.assertNotEqual(self.execute("firewall_ready_ip", calls).returncode, 0)
+
+    def test_firewall_readiness_rejects_misconfigured_management_rule(self):
+        for field, wrong in (
+            ("name", "unexpected"),
+            ("ruleType", "ApplicationRule"),
+            ("ipProtocols", ["UDP"]),
+            ("sourceAddresses", ["10.10.1.0/24"]),
+            ("sourceAddresses", ["*"]),
+            ("destinationAddresses", ["Internet"]),
+            ("destinationPorts", ["80"]),
+        ):
+            with self.subTest(field=field, value=wrong):
+                calls = ready_calls()
+                data = json.loads(calls[-1]["stdout"])
+                data["ruleCollections"][0]["rules"][0][field] = wrong
+                calls[-1]["stdout"] = json.dumps(data)
+                self.assertNotEqual(self.execute("firewall_ready_ip", calls).returncode, 0)
+        for rules in ([], [json.loads(ready_calls()[-1]["stdout"])["ruleCollections"][0]["rules"][0]] * 2):
+            with self.subTest(rules=rules):
+                calls = ready_calls()
+                data = json.loads(calls[-1]["stdout"])
+                data["ruleCollections"][0]["rules"] = rules
+                calls[-1]["stdout"] = json.dumps(data)
+                self.assertNotEqual(self.execute("firewall_ready_ip", calls).returncode, 0)
+        calls = ready_calls()
+        data = json.loads(calls[-1]["stdout"])
+        data["ruleCollections"][0]["priority"] = 200
+        calls[-1]["stdout"] = json.dumps(data)
+        self.assertNotEqual(self.execute("firewall_ready_ip", calls).returncode, 0)
 
     def test_both_tables_and_all_four_forwarded_peerings_are_required(self):
         result = self.execute(f'assert_route_tables_ready "{FW_IP}"', tables_calls())

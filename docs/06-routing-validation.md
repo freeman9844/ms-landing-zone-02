@@ -46,7 +46,7 @@ assert_owned_rg "$RG_SPOKEB"
 
 | 함수 | 매 호출 시 실제로 확인하는 것 |
 |---|---|
-| `firewall_ready_ip` | Hub 소유권, Firewall 완료·정확한 ID/Policy·유효 사설 IP, 정확한 workspace/전용 진단/두 category, 세 collection의 Allow |
+| `firewall_ready_ip` | Hub 소유권, Firewall 완료·정확한 ID/Policy·유효 사설 IP, 정확한 workspace/전용 진단/두 category, 세 collection의 Allow와 관리 규칙의 주소·프로토콜·포트 |
 | `assert_route_tables_ready` | 두 Spoke 소유권, 양쪽 `/16`·`/0`과 next hop, 네 방향 Connected/전달 허용 |
 | `assert_spoke_nat_removal` | 삭제 단계에 맞는 현재 Subnet 연결·정확한 NAT/Public IP ID·네 소유 태그·참조 관계 |
 
@@ -60,7 +60,11 @@ assert_owned_rg "$RG_SPOKEB"
 UDR(User Defined Route)는 목적지별 다음 홉을 지정합니다. A→B 요청뿐 아니라
 B→A 응답도 같은 Firewall을 지나야 합니다. 경로는 **가장 길게 일치하는 접두사**를 선택합니다.
 `10.20.1.x` 목적지에는 `/16`이 `/8`이나 `/0`보다 구체적입니다.
-인터넷용 `/0`만 넣으면 시스템의 `10.0.0.0/8 → None` 버림 경로를 이기지 못합니다.
+모듈 04에는 Spoke의 `/0 → Firewall` 경로가 아직 없으며, A→B의 `None`은
+실제 유효 경로를 조회해 확인합니다. 시스템의 `10.0.0.0/8 → None` 경로가
+`/0`을 추가한 뒤에도 항상 유지된다고 가정하지 마세요. 원본 워크숍의 실제 리허설에서는
+`/0 → Firewall`을 먼저 연결하자 상대 Spoke에도 `/0 → VirtualAppliance`가 적용됐습니다.
+이 과정은 두 Spoke의 `/16`과 `/0`을 모두 만든 뒤 Subnet에 연결하고 결과를 검증합니다.
 예를 들어 A의 `10.10.1.x`에서 B의 `10.20.1.x`로 보내는 요청에는 A 테이블의
 `10.20.0.0/16`을, B의 응답에는 B 테이블의 `10.10.0.0/16`을 적용합니다.
 한쪽만 있으면 요청이 도착해도 응답이 다른 길로 돌아갈 수 있습니다.

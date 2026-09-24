@@ -40,8 +40,10 @@ Azure는 Subnet마다 앞의 네 주소와 마지막 주소를 예약하므로 `
 겹치지 않는 주소를 쓰면 어느 네트워크로 보내야 하는지 구분할 수 있습니다.
 이번 실습에서는 참가자가 네 방향 Peering을 직접 만들지 않고,
 **AVNM(Azure Virtual Network Manager)**가 Hub↔Spoke Peering을 중앙에서 관리합니다.
-Hub와 각각 연결해도 Spoke끼리 자동으로 연결되지는 않습니다. 이
-**비전이성(non-transitivity)**을 모듈 04에서 확인합니다.
+Hub와 각각 연결해도 Spoke끼리 자동으로 연결되지는 않습니다. 이를
+**비전이성(non-transitivity)**이라고 합니다. 모듈 04의 A→B 차단 검사는
+직접 A↔B Peering이 없는 구성에서 실제 `None` 경로와 통신 실패를 확인합니다.
+통신 실패만으로 비전이성을 증명하지는 않습니다.
 
 ## 3. AVNM이 연결을 관리하는 방법
 

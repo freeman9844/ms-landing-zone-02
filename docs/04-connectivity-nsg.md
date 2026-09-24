@@ -540,7 +540,8 @@ bash scripts/verify-core.sh "$STATE_FILE" baseline
 | Hub→A/B | Allow | `VNetPeering` | 각각 `spokea`, `spokeb` |
 | A→B | Allow | `None` | 연결 실패가 정상 |
 
-`None`은 누락이 아니라 버림 경로 유형입니다. 연결 실패만으로 비전이성 검증을 통과시키지 않습니다.
+`None`은 버림 경로 유형입니다. 직접 A↔B Peering이 없는 현재 구성에서
+실제 유효 경로와 차단을 확인하는 것이지, 실패만으로 비전이성을 증명하지 않습니다.
 
 Azure Portal에서도 **Network security groups → 해당 Spoke의 NSG → Overview**에서
 설정한 인바운드 규칙을 확인할 수 있습니다. 아래 Spoke A 예시처럼 `allow-hub-http`의
@@ -631,7 +632,7 @@ bash scripts/verify-core.sh "$STATE_FILE" restored
 
 📋 **확인**
 
-Hub→A/B 정상 HTTP, A→B 비전이성이 기준 상태로 돌아왔습니다.
+Hub→A/B 정상 HTTP와 A→B의 현재 `None` 경로 차단이 기준 상태로 돌아왔습니다.
 
 <a id="트러블슈팅"></a>
 ## Portal 확인과 트러블슈팅

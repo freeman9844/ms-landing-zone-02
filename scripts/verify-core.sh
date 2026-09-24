@@ -96,7 +96,7 @@ fi
 # A만 차단하는 실습이므로 Hub→B는 계속 성공해야 합니다.
 nsg_proof spokeb "$b" "$hub" Allow
 http_proof "$1" hub "$b" spokeb
-# A→B는 NSG에서 허용해도 경로가 None이어서 실패해야 합니다. 이 조합으로 Peering 비전이성을 증명합니다.
+# A→B는 NSG가 허용해도 현재 None 경로로 차단됩니다. 비전이성만으로 실패했다고 단정하지 않습니다.
 nsg_proof spokeb "$b" "$a" Allow
 route_proof spokea "$b" None
 http_proof "$1" spokea "$b" blocked

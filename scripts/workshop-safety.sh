@@ -76,14 +76,23 @@ firewall_ready_ip() {
   ' <<< "$diagnostic" >/dev/null || { fail "Firewall diagnostics are not ready."; return 1; }
   collections=$(az network firewall policy rule-collection-group show -g "$RG_HUB" \
     --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  # 이름별 규칙 모음이 하나씩 있고 모두 Allow인 전환 준비 상태인지 확인합니다. 규칙을 바꾸지는 않습니다.
-  # 규칙의 세부 내용과 실제 통신 성공까지 이 함수 하나로 증명하지 않으며 별도 Firewall 검증을 수행합니다.
+  # 전환 후 Run Command에 필요한 관리 규칙은 주소·프로토콜·포트까지 확인합니다.
+  # 실습 HTTP와 인터넷 출구의 실제 통신은 모듈 06에서 별도로 검증합니다.
   jq -e '
     .ruleCollections as $rules | ($rules | type == "array") and
     all(["management", "lab-http", "egress-check"][];
       . as $name | [$rules[] | select(.name == $name)] |
-      length == 1 and .[0].action.type == "Allow")
-  ' <<< "$collections" >/dev/null || { fail "Required Firewall collections must be uniquely Allow."; return 1; }
+      length == 1 and .[0].action.type == "Allow") and
+    ([$rules[] | select(.name == "management")] |
+      length == 1 and .[0].priority == 100 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "azure-management" and .ruleType == "NetworkRule" and
+        .ipProtocols == ["TCP"] and
+        (.sourceAddresses | type == "array" and length == 2 and
+          sort == ["10.10.1.0/24", "10.20.1.0/24"]) and
+        .destinationAddresses == ["AzureCloud"] and .destinationPorts == ["443"]))
+  ' <<< "$collections" >/dev/null || { fail "Required Firewall collections or management rule are not ready."; return 1; }
   # $(firewall_ready_ip)에서 사용할 순수 IP만 stdout으로 반환합니다. 오류 설명은 stderr로 보냅니다.
   printf '%s\n' "$ip"
 }

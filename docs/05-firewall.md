@@ -346,7 +346,8 @@ az network firewall policy rule-collection-group collection add-filter-collectio
 
 📋 **확인**
 
-`management`는 Allow, 우선순위 100, 목적지는 AzureCloud TCP 443입니다.
+`management`는 Allow, 우선순위 100, 출발지는 두 Spoke VM Subnet, 목적지는
+AzureCloud TCP 443입니다. 모듈 06에서 경로를 바꾸기 전 이 값도 다시 검사합니다.
 오류가 났어도 collection이 저장됐을 수 있습니다. 이름만 보고 `add-filter-collection`을
 재실행하지 말고 아래 [Policy 갱신 실패 복구](#policy-갱신-실패-복구)를 먼저 확인하세요.
 
