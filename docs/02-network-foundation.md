@@ -5,8 +5,9 @@
 ## 목표
 
 서로 겹치지 않는 주소를 배치하고 네트워크의 용도와 소유 범위를 구분합니다.
-재접속 후 `STATE_FILE`이 비어 있으면 아래 공통 준비에서 기존 JSON 경로를 입력합니다.
-활성 구독이 달라졌다면 [상태 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행합니다.
+재접속 후 활성 구독이 원래 구독과 같다면 아래 공통 준비에서 기존 JSON 경로를 입력합니다.
+활성 구독이 다르거나 다른 실습/구독으로 전환했다면
+[모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
 
 ## 실행 방법: 한 단계씩 실행하고 확인하기
 
@@ -530,6 +531,14 @@ CLI로 만든 주소와 태그를 Portal 화면에서도 대조합니다. RG와 
 
 Hub·A·B의 주소가 위 단계의 값과 일치하고 RG와 VNet의 `runId`가 자신의 실행 ID인지 확인합니다.
 RG 태그가 하위 리소스로 자동 상속되는 것은 아닙니다.
+
+아래는 **Virtual networks → Hub VNet → Subnets**의 참고 화면입니다. 목록의 Hub·Spoke A·
+Spoke B VNet과 Hub의 `snet-management`(`10.0.1.0/24`), `AzureFirewallSubnet`(`10.0.2.0/26`)을
+비교하세요. 화면의 실행 ID는 예시입니다. 이 화면만으로 Spoke Subnet 주소,
+`defaultOutboundAccess` 또는 RG·VNet 태그까지 확인한 것으로 간주하지 말고
+각 VNet·RG의 해당 화면과 위 CLI 조회 결과를 별도로 대조하세요.
+
+![Azure Portal의 세 실습 VNet 목록과 Hub VNet의 management 및 AzureFirewallSubnet 주소](images/02-hub-subnets.png)
 
 ## 트러블슈팅
 

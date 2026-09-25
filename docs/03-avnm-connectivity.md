@@ -7,9 +7,11 @@
 👁️ **설명**
 
 모듈 02의 세 VNet이 먼저 있어야 합니다. 모듈 01의 `STATE_FILE`을 그대로 사용합니다.
-구독과 세 RG의 소유권 확인은 공통 준비에서 한 번만 실행합니다. 재접속 후 `STATE_FILE`이
-비어 있다면 기존 JSON 경로를 묻습니다. `.workshop-state/<실행 ID>.json`처럼 점까지 입력하고
-다른 실습/구독으로 전환할 때는 [상태 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 실행하세요.
+구독과 세 RG의 소유권 확인은 공통 준비에서 한 번만 실행합니다. 재접속 후 활성 구독이
+원래 구독과 같다면 공통 준비에 기존 JSON 경로를 입력하세요. `STATE_FILE`이 비어 있을 때
+묻는 경로는 `.workshop-state/<실행 ID>.json`처럼 점까지 입력합니다.
+활성 구독이 다르거나 다른 실습/구독으로 전환했다면
+[모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
 이후 블록은 같은 세션을 공유하며 필요한 AVNM 이름과 ID는 상태 파일에서 복구합니다.
 **한 블록 실행 → 확인 → 다음 블록** 순서입니다. 오류 시 다음 단계로 넘어가지 않습니다.
 `&&`는 앞 검사 실패 시 해당 작업을 멈추며 Cloud Shell을 종료하지 않습니다.
@@ -476,6 +478,24 @@ jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<
 📋 **확인**
 
 Hub에는 Spoke A와 Spoke B를 향한 두 개의 `Connected` Peering이 보여야 합니다. 이름은 고정 문자열로 가정하지 않습니다.
+아래는 출력의 **형식 예시**입니다. `Remote`에는 각각 다른 Spoke의 전체 VNet ID가
+표시되어야 하며, 실제 `Name`은 AVNM이 생성한 값이므로 예시 이름과 비교하지 마세요.
+구독 UUID와 실행 ID도 자신의 값으로 대조합니다.
+
+```json
+[
+  {
+    "Name": "<AVNM이 생성한 A 방향 이름>",
+    "State": "Connected",
+    "Remote": "/subscriptions/<구독 UUID>/resourceGroups/rg-lzbegin-spokea-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-<실행 ID>"
+  },
+  {
+    "Name": "<AVNM이 생성한 B 방향 이름>",
+    "State": "Connected",
+    "Remote": "/subscriptions/<구독 UUID>/resourceGroups/rg-lzbegin-spokeb-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-<실행 ID>"
+  }
+]
+```
 
 ## 11. Spoke A에서 AVNM Peering 확인
 

@@ -166,7 +166,8 @@ full-ID 비교, 독립 저장소 경로 `$HOME/ms-landing-zone-02` 복구 동작
 복구 회귀 검사는 이미 준비된 셸에서 잘못된 상태를 읽은 뒤 대상 변수가 남지 않는지 직접 확인합니다.
 교재의 실제 복구 블록을 실행하여 디렉터리 이동 실패·입력 EOF·JSON 오류 시 구독 변경이 없는지,
 상태 디렉터리 밖에 업로드한 JSON으로도 복구할 수 있는지 검사합니다.
-이 개정의 검증은 **로컬/mock만**이며 아래 과거 Azure 리허설을 새 실행 결과로 해석하지 않습니다.
+이후 문서 개정은 **로컬/mock만** 검증합니다. 아래 2026-09-24 Azure 리허설을
+새로 변경한 설명이나 브라우저 Cloud Shell 조작의 재실행 결과로 해석하지 않습니다.
 
 도구가 없으면 먼저 누락 오류를 확인한 뒤 조직이 승인한 방법으로 설치하세요.
 예를 들어 별도 환경에서 `uv tool install checkov`를 사용하고 해당 executable을 PATH에 둡니다.
@@ -380,6 +381,10 @@ Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
 증거: 로컬 `evidence/rehearsal-8c43433227ef/` (Git 제외).
 이 리허설은 브라우저 Cloud Shell 재접속이나 다른 구독·지역에서의 동작 검증이 아닙니다.
 기록 추가 후 로컬 최종 검사는 141 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
+2026-09-25 원본 워크숍의 세션 복구 설명, Hub Subnet Portal 예시, Firewall IP 연결
+대기 안내를 AVNM 과정에 맞춰 이관했습니다. 수동 Peering 생성 예시와 원본의
+Spoke NAT 없는 Firewall 선행 흐름은 이관하지 않았습니다. 이 문서 변경 후 Azure
+리허설을 다시 수행하지 않았으며, 위 결과는 변경 전 게시본의 검증 증거입니다.
 
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기

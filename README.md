@@ -157,11 +157,11 @@ Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01
 - Firewall 규칙의 `AzureCloud:443`은 자사 tenant 전용 허용이 아닙니다.
 - 기본 VM은 관리형 디스크의 플랫폼 암호화를 사용합니다. host encryption·guest ADE와
   VM extension 금지 권고에는 [명시적인 교육용 예외](docs/maintainer-validation.md#보안-검사-예외)가 있습니다.
-- **2026-09-21 Linux CLI 기록은 수동 Peering 기반 원본 워크숍의 역사적 리허설 증거입니다.**
-  발견한 배포 결함을 수정하고 통신·차단·복구 및 Spoke NAT 제거 후 경로를 확인했습니다.
-  브라우저 Cloud Shell/Portal 조작과 다른 구독의 용량·정책은 검증 범위가 아닙니다.
-  이 기록은 단일 과정으로 재편하기 전의 실행이며, 현재 AVNM 변형의 실행 증거가 아닙니다.
-  개최 전 [역사적 기록과 AVNM 리허설 체크리스트](docs/maintainer-validation.md#avnm-변형-리허설-체크리스트)를 확인하세요.
+- **2026-09-24 Linux CLI에서 현재 AVNM 기반 모듈 01–06을 실제 Azure에서 재리허설했습니다.**
+  AVNM 연결, NSG 차단·복구, Firewall Allow/Deny 로그, 왕복 경로, Spoke NAT 제거와
+  세 실습 RG의 삭제를 확인했습니다. 브라우저 Cloud Shell 재접속/Portal 조작과
+  다른 구독의 용량·정책은 검증 범위가 아닙니다.
+  개최 전 [실제 AVNM 리허설 기록](docs/maintainer-validation.md#2026-09-24-게시-버전-실제-avnm-azure-재리허설)을 확인하세요.
 
 ## 태깅 범례와 트러블슈팅
 
