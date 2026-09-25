@@ -615,204 +615,34 @@ printf 'SHELL_ALIVE\\n'
         for module in (3, 5):
             self.assertNotIn("source scripts/workshop-safety.sh", DOCS[module].read_text())
 
-    def test_avnm_reused_resources_accept_id_casing_variants(self):
-        valid = connectivity_config()
-        reused = {
-            "avnm-create": [az([
-                "network", "manager", "list",
-                "--resource-group", rg("hub"),
-                "-o", "json",
-            ], [{
-                "name": "avnm-lzbegin-demo123",
-                "id": avnm_id(),
-                "networkManagerScopeAccesses": ["Connectivity"],
-                "networkManagerScopes": {
-                    "subscriptions": [f"/subscriptions/{SUB}"],
-                },
-                "provisioningState": "Succeeded",
-            }])],
-            "network-group-create": [az([
-                "network", "manager", "group", "list",
-                "--network-manager-name", "avnm-lzbegin-demo123",
-                "--resource-group", rg("hub"),
-                "-o", "json",
-            ], [{
-                "name": "ng-lzbegin-spokes-demo123",
-                "id": network_group_id(),
-                "description": "Workshop spoke virtual networks",
-                "provisioningState": "Succeeded",
-            }])],
-            "member-spokea": [az([
-                "network", "manager", "group", "static-member", "list",
-                "--network-group", "ng-lzbegin-spokes-demo123",
-                "--network-manager", "avnm-lzbegin-demo123",
-                "--resource-group", rg("hub"),
-                "-o", "json",
-            ], [static_member("spokea", "spokea")])],
-            "member-spokeb": [az([
-                "network", "manager", "group", "static-member", "list",
-                "--network-group", "ng-lzbegin-spokes-demo123",
-                "--network-manager", "avnm-lzbegin-demo123",
-                "--resource-group", rg("hub"),
-                "-o", "json",
-            ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])],
-            "connectivity-config-create": [
-                az([
-                    "network", "manager", "group", "static-member", "list",
-                    "--network-group", "ng-lzbegin-spokes-demo123",
-                    "--network-manager", "avnm-lzbegin-demo123",
-                    "--resource-group", rg("hub"),
-                    "-o", "json",
-                ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
-                az([
-                    "network", "vnet", "show",
-                    "-g", rg("hub"),
-                    "-n", vnet("hub"),
-                    "--query", "id",
-                    "-o", "tsv",
-                ], netid("hub", "virtualNetworks", vnet("hub"))),
-                az([
-                    "network", "manager", "connect-config", "list",
-                    "--network-manager-name", "avnm-lzbegin-demo123",
-                    "--resource-group", rg("hub"),
-                    "-o", "json",
-                ], [valid]),
-            ],
-            "effective-hub": [az([
-                "network", "manager", "list-effective-connectivity-config",
-                "--resource-group", rg("hub"),
-                "--virtual-network-name", vnet("hub"),
-                "-o", "json",
-            ], {"value": []})],
-            "effective-spokea": [az([
-                "network", "manager", "list-effective-connectivity-config",
-                "--resource-group", rg("spokea"),
-                "--virtual-network-name", vnet("spokea"),
-                "-o", "json",
-            ], effective_configuration("spokea"))],
-            "effective-spokeb": [az([
-                "network", "manager", "list-effective-connectivity-config",
-                "--resource-group", rg("spokeb"),
-                "--virtual-network-name", vnet("spokeb"),
-                "-o", "json",
-            ], effective_configuration("spokeb"))],
-            "inspect-avnm-peerings-hub": [az([
-                "network", "vnet", "peering", "list",
-                "-g", rg("hub"),
-                "--vnet-name", vnet("hub"),
-                "-o", "json",
-            ], avnm_peerings("hub"))],
-            "inspect-avnm-peerings-spokea": [az([
-                "network", "vnet", "peering", "list",
-                "-g", rg("spokea"),
-                "--vnet-name", vnet("spokea"),
-                "-o", "json",
-            ], avnm_peerings("spokea"))],
-            "inspect-avnm-peerings-spokeb": [az([
-                "network", "vnet", "peering", "list",
-                "-g", rg("spokeb"),
-                "--vnet-name", vnet("spokeb"),
-                "-o", "json",
-            ], avnm_peerings("spokeb"))],
-        }
-        for name, calls in reused.items():
-            for transform in (str.lower, str.swapcase):
-                with self.subTest(step=name, casing=transform.__name__):
-                    result = self.execute(3, name, recase_ids(calls, transform))
-                    self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_existing_configuration_reuse_accepts_non_demo_run_id(self):
-        state = workshop_state("rerun456")
-        calls = [
-            az([
-                "network", "manager", "group", "static-member", "list",
-                "--network-group", network_group_name(state),
-                "--network-manager", avnm_name(state),
-                "--resource-group", rg("hub", state),
-                "-o", "json",
-            ], [static_member("spokea", "spokea", state), static_member("spokeb", "spokeb", state)]),
-            az([
-                "network", "vnet", "show",
-                "-g", rg("hub", state),
-                "-n", vnet("hub", state),
-                "--query", "id",
-                "-o", "tsv",
-            ], netid("hub", "virtualNetworks", vnet("hub", state), state)),
-            az([
-                "network", "manager", "connect-config", "list",
-                "--network-manager-name", avnm_name(state),
-                "--resource-group", rg("hub", state),
-                "-o", "json",
-            ], [connectivity_config(state)]),
-        ]
-        result = self.execute(
-            3,
-            "connectivity-config-create",
-            calls,
-            files={"state.json": json.dumps(state)},
-            state=state,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_existing_manager_rejects_security_admin_scope(self):
-        calls = [az([
-            "network", "manager", "list",
-            "--resource-group", rg("hub"),
-            "-o", "json",
-        ], [{
-            "name": "avnm-lzbegin-demo123",
-            "id": avnm_id(),
-            "networkManagerScopeAccesses": ["SecurityAdmin"],
-            "networkManagerScopes": {
-                "subscriptions": [f"/subscriptions/{SUB}"],
-            },
-            "provisioningState": "Succeeded",
-        }])]
-        result = self.execute(3, "avnm-create", calls)
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_existing_configuration_rejects_mesh_or_destructive_flags(self):
-        valid = {
-            "name": "cc-lzbegin-hub-spoke-demo123",
-            "id": connectivity_config_id(),
-            "connectivityTopology": "HubAndSpoke",
-            "deleteExistingPeering": "False",
-            "isGlobal": "False",
-            "provisioningState": "Succeeded",
-            "hubs": connectivity_config()["hubs"],
-            "appliesToGroups": connectivity_config()["appliesToGroups"],
-        }
-        for field, value in (
-            ("connectivityTopology", "Mesh"),
-            ("deleteExistingPeering", "True"),
-            ("isGlobal", "True"),
+    def test_first_creation_rejects_any_existing_resource_without_writing(self):
+        cases = avnm_cases()
+        for name, payload in (
+            ("avnm-create", [{"name": "unrelated-avnm"}]),
+            ("network-group-create", [{"name": "unrelated-group"}]),
+            ("member-spokea", [static_member("hub", "hub")]),
+            ("member-spokeb", [static_member("spokea", "spokea"),
+                               static_member("spokeb", "spokeb")]),
+            ("connectivity-config-create", [{"name": "unrelated-config"}]),
         ):
-            with self.subTest(field=field):
-                data = dict(valid, **{field: value})
-                calls = [
-                    az([
-                        "network", "manager", "group", "static-member", "list",
-                        "--network-group", "ng-lzbegin-spokes-demo123",
-                        "--network-manager", "avnm-lzbegin-demo123",
-                        "--resource-group", rg("hub"),
-                        "-o", "json",
-                    ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
-                    az([
-                        "network", "vnet", "show",
-                        "-g", rg("hub"),
-                        "-n", vnet("hub"),
-                        "--query", "id",
-                        "-o", "tsv",
-                    ], netid("hub", "virtualNetworks", vnet("hub"))),
-                    az([
-                        "network", "manager", "connect-config", "list",
-                        "--network-manager-name", "avnm-lzbegin-demo123",
-                        "--resource-group", rg("hub"),
-                        "-o", "json",
-                    ], [data]),
-                ]
-                result = self.execute(3, "connectivity-config-create", calls)
+            with self.subTest(step=name):
+                calls = copy.deepcopy(cases[name])
+                lookup = 2 if name == "connectivity-config-create" else 0
+                calls[lookup]["stdout"] = json.dumps(payload)
+                result = self.execute(3, name, calls[:lookup + 1])
                 self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+    def test_avnm_first_creation_rejects_malformed_discovery(self):
+        for name in ("avnm-create", "network-group-create", "member-spokea",
+                     "member-spokeb", "connectivity-config-create"):
+            with self.subTest(step=name):
+                calls = copy.deepcopy(avnm_cases()[name])
+                lookup = 2 if name == "connectivity-config-create" else 0
+                calls[lookup]["stdout"] = '{"unexpected":true}'
+                result = self.execute(3, name, calls[:lookup + 1])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
 
     def test_member_lists_reject_unapproved_topology_membership(self):
         valid = [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]

@@ -15,10 +15,11 @@
 이후 블록은 같은 세션을 공유하며 필요한 AVNM 이름과 ID는 상태 파일에서 복구합니다.
 **한 블록 실행 → 확인 → 다음 블록** 순서입니다. 오류 시 다음 단계로 넘어가지 않습니다.
 `&&`는 앞 검사 실패 시 해당 작업을 멈추며 Cloud Shell을 종료하지 않습니다.
-각 자원 블록은 기존 자원을 먼저 조회하고, 없을 때만 **한 개의 Azure CLI 생성 명령**을 실행합니다.
-조회 실패나 기존 자원의 ID·설정 불일치는 새 자원을 만드는 이유가 아닙니다.
-Connectivity Configuration의 멤버 확인·Hub ID 확인·생성은 별도 단계로 나누되,
-생성 블록에서도 현재 상태를 재확인합니다. 블록을 건너뛰거나 합쳐 실행하지 마세요.
+이 모듈의 AVNM·Group·정적 멤버·구성은 모두 **이번 실행에서 처음 생성**합니다.
+기존 자원을 재사용하거나 덮어쓰지 않습니다. 각 생성 블록은 해당 범위가 비어
+있는지만 확인한 뒤 Azure CLI 생성 명령 한 개를 실행하고, 이미 자원이 있다면
+오류로 멈춥니다. 부분 실행 후 생성 블록을 다시 실행하지 말고 현재 상태를
+확인한 뒤 남은 단계부터 진행하세요. 블록을 건너뛰거나 합쳐 실행하지 마세요.
 
 🟢 **실행**
 
@@ -44,8 +45,8 @@ assert_owned_rg "$RG_SPOKEB"
 
 이 워크숍은 AVNM의 **Connectivity**만 사용합니다. Security Admin, Routing, 동적 멤버십,
 Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 사용하지 않습니다.
-재실행 시에는 먼저 기존 AVNM 목록을 읽고 정확한 이름·ID·구독 scope·feature를 확인한 뒤에만
-재사용합니다. 목록 조회가 실패하면 부재로 간주하지 않고 즉시 중단합니다.
+이번 Hub RG에는 AVNM이 아직 없어야 합니다. 목록 조회가 실패하거나 이미
+자원이 있으면 생성하지 않습니다.
 **모듈 03에서 AVNM을 생성합니다.** 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있으므로
 실습 후 모듈 07에서 정리하세요.
 
@@ -53,8 +54,7 @@ Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 �
 
 👁️ **설명**
 
-Hub RG에 이미 AVNM이 있는지 확인합니다. 이번 이름이 있다면 구독 scope와
-`networkManagerScopeAccesses`가 `["Connectivity"]`인지 비교하세요.
+이번 Hub RG의 AVNM 목록이 비어 있는지 확인합니다.
 
 🟢 **실행**
 
@@ -66,62 +66,46 @@ az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBS
 
 📋 **확인**
 
-처음 실행이면 빈 배열도 정상입니다. 조회가 실패하면 생성 단계로 넘어가지 않습니다.
-목록의 다른 AVNM을 이번 실행의 자원으로 재사용하지 마세요.
+빈 배열 `[]`을 확인하세요. 목록에 자원이 있거나 조회가 실패하면 생성하지 마세요.
 
-### 1-2. AVNM 생성 또는 기존 범위 확인
+### 1-2. Connectivity-only AVNM 최초 생성
 
 👁️ **설명**
 
-생성 직전에 목록을 다시 읽습니다. 없는 경우에만 만들고, 같은 이름이 있으면
-전체 ID·Connectivity-only scope·배포 완료 상태를 자동으로 비교합니다.
+생성 직전 Hub RG의 목록이 비어 있는지 다시 확인합니다. 기존 AVNM을
+재사용하거나 설정을 갱신하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:avnm-create -->
 ```bash
-# Hub RG에서 이번 이름의 AVNM을 조회하고, 없을 때만 Connectivity 범위로 만듭니다.
+# Hub RG에 AVNM이 없을 때만 Connectivity 범위로 새로 만듭니다.
 managers=$(az network manager list \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
-matches=$(jq -c --arg name "$AVNM" '[.[] | select(.name == $name)]' <<<"$managers") &&
-count=$(jq -r 'length' <<<"$matches") &&
-if [[ "$count" == "0" ]]; then
-  az network manager create \
-    --location "$LOCATION" \
-    --name "$AVNM" \
-    --resource-group "$RG_HUB" \
-    --scope-accesses Connectivity \
-    --network-manager-scopes "subscriptions=/subscriptions/$SUBSCRIPTION_ID" \
-    --description "Beginner Hub and Spoke connectivity" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$count" == "1" ]]; then
-  jq -e --arg name "$AVNM" --arg id "$AVNM_ID" --arg sub "/subscriptions/$SUBSCRIPTION_ID" '
-    .[0].name == $name and
-    ((.[0].id | ascii_downcase) == ($id | ascii_downcase)) and
-    (.[0].networkManagerScopeAccesses == ["Connectivity"]) and
-    (((.[0].networkManagerScopes.subscriptions // []) | length) == 1) and
-    (((.[0].networkManagerScopes.subscriptions[0] // "") | ascii_downcase) == ($sub | ascii_downcase)) and
-    (((.[0].networkManagerScopes.managementGroups // []) | length) == 0) and
-    .[0].provisioningState == "Succeeded"
-  ' <<<"$matches" >/dev/null || { fail "Existing AVNM does not match the approved Connectivity-only scope."; false; }
-else
-  fail "Duplicate AVNM names found: $AVNM" && false
-fi
+{ jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
+  { fail "Hub RG already contains an AVNM; do not overwrite it."; false; }; } &&
+az network manager create \
+  --location "$LOCATION" \
+  --name "$AVNM" \
+  --resource-group "$RG_HUB" \
+  --scope-accesses Connectivity \
+  --network-manager-scopes "subscriptions=/subscriptions/$SUBSCRIPTION_ID" \
+  --description "Beginner Hub and Spoke connectivity" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-처음 실행이면 Hub RG에 `avnm-lzbegin-<runId>`가 만들어집니다. 재실행이면 기존 AVNM을 그대로 재사용하고,
-Connectivity-only가 아니면 실패합니다.
+Hub RG에 `avnm-lzbegin-<runId>`가 만들어집니다. 응답의 scope access가
+Connectivity이고 구독 scope가 이번 구독인지 확인하세요.
 
 ## 2. Spoke 전용 Network Group 만들기
 
 👁️ **설명**
 
 Network Group에는 **Spoke A와 Spoke B만** 들어갑니다. Hub는 group member가 아니라 이후
-Connectivity Configuration의 hub로 별도 지정합니다. 재실행 시에는 같은 이름의 group이 있어도
-정확한 ID와 설명이 일치할 때만 재사용합니다.
+Connectivity Configuration의 hub로 별도 지정합니다. 이 AVNM의 Network Group도 새로 만듭니다.
 
 ### 2-1. 현재 Network Group 목록 조회
 
@@ -140,55 +124,43 @@ az network manager group list --network-manager-name "$AVNM" \
 
 📋 **확인**
 
-처음 실행이면 빈 배열입니다. 기존 group이 있으면 이번 실행의 이름·ID를 확인하세요.
-조회 오류가 발생하면 다음 생성 단계로 넘어가지 않습니다.
+빈 배열 `[]`을 확인하세요. 기존 group이나 조회 오류가 있으면 생성하지 않습니다.
 
-### 2-2. Spoke Network Group 생성 또는 확인
+### 2-2. Spoke Network Group 최초 생성
 
 👁️ **설명**
 
-현재 목록을 다시 조회해 같은 이름의 group을 검증하거나 새로 만듭니다.
+현재 목록이 비어 있을 때만 Group을 새로 만듭니다.
 
 🟢 **실행**
 
 <!-- exec:network-group-create -->
 ```bash
-# 이번 AVNM에 Spoke만 넣을 Network Group이 있는지 확인하고 없을 때 만듭니다.
+# 이번 AVNM에 Group이 없을 때 Spoke 전용 Group을 만듭니다.
 groups=$(az network manager group list \
   --network-manager-name "$AVNM" \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
-matches=$(jq -c --arg name "$NETWORK_GROUP" '[.[] | select(.name == $name)]' <<<"$groups") &&
-count=$(jq -r 'length' <<<"$matches") &&
-if [[ "$count" == "0" ]]; then
-  az network manager group create \
-    --name "$NETWORK_GROUP" \
-    --network-manager-name "$AVNM" \
-    --resource-group "$RG_HUB" \
-    --description "Workshop spoke virtual networks" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$count" == "1" ]]; then
-  jq -e --arg name "$NETWORK_GROUP" --arg id "$NETWORK_GROUP_ID" '
-    .[0].name == $name and
-    ((.[0].id | ascii_downcase) == ($id | ascii_downcase)) and
-    .[0].description == "Workshop spoke virtual networks" and
-    .[0].provisioningState == "Succeeded"
-  ' <<<"$matches" >/dev/null || { fail "Existing Network Group does not match the workshop contract."; false; }
-else
-  fail "Duplicate Network Group names found: $NETWORK_GROUP" && false
-fi
+{ jq -e 'type == "array" and length == 0' <<<"$groups" >/dev/null ||
+  { fail "AVNM already contains a Network Group; do not overwrite it."; false; }; } &&
+az network manager group create \
+  --name "$NETWORK_GROUP" \
+  --network-manager-name "$AVNM" \
+  --resource-group "$RG_HUB" \
+  --description "Workshop spoke virtual networks" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-처음 실행이면 Spoke용 group이 만들어지고, 재실행이면 같은 contract일 때만 재사용합니다.
+Spoke용 Group이 생성됩니다. Hub를 정적 멤버로 추가하지 않습니다.
 
 ## 3. 정적 멤버로 Spoke A 추가
 
 👁️ **설명**
 
-이 워크숍은 동적 멤버십을 쓰지 않습니다. 목록을 먼저 읽고 `spokea` 멤버가 이미 있으면
-정확한 VNet ID인지 검증합니다. 없을 때만 생성합니다.
+이 워크숍은 동적 멤버십을 쓰지 않습니다. 처음에는 정적 멤버가 없으며
+Spoke A VNet부터 등록합니다.
 
 ### 3-1. 현재 정적 멤버 조회
 
@@ -210,42 +182,32 @@ az network manager group static-member list --network-group "$NETWORK_GROUP" \
 
 처음 실행이면 빈 배열입니다. 다른 VNet이 이미 있으면 추가 작업을 멈추고 원인을 확인하세요.
 
-### 3-2. Spoke A 멤버 생성 또는 확인
+### 3-2. Spoke A 정적 멤버 최초 생성
 
 👁️ **설명**
 
-생성 직전에 다시 조회하고 `spokea`가 있다면 전체 VNet ID를 자동으로 비교합니다.
+생성 직전에 Group이 비어 있는지 확인하고 Spoke A VNet의 전체 ID로 등록합니다.
 
 🟢 **실행**
 
 <!-- exec:member-spokea -->
 ```bash
-# A의 전체 VNet ID를 확인해 정적 멤버가 없을 때만 등록합니다.
+# 빈 Group에 A VNet을 첫 번째 정적 멤버로 등록합니다.
 members=$(az network manager group static-member list \
   --network-group "$NETWORK_GROUP" \
   --network-manager "$AVNM" \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
-matches=$(jq -c '[.[] | select(.name == "spokea")]' <<<"$members") &&
-count=$(jq -r 'length' <<<"$matches") &&
-if [[ "$count" == "0" ]]; then
-  az network manager group static-member create \
-    --name spokea \
-    --network-group "$NETWORK_GROUP" \
-    --network-manager "$AVNM" \
-    --resource-group "$RG_HUB" \
-    --resource-id "$spokea_id" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$count" == "1" ]]; then
-  jq -e --arg id "$spokea_id" '
-    .[0].name == "spokea" and
-    ((.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)) and
-    .[0].provisioningState == "Succeeded"
-  ' <<<"$matches" >/dev/null || { fail "Existing Spoke A member does not match the expected VNet ID."; false; }
-else
-  fail "Duplicate static members found for Spoke A." && false
-fi
+{ jq -e 'type == "array" and length == 0' <<<"$members" >/dev/null ||
+  { fail "Network Group already contains static members; do not overwrite them."; false; }; } &&
+az network manager group static-member create \
+  --name spokea \
+  --network-group "$NETWORK_GROUP" \
+  --network-manager "$AVNM" \
+  --resource-group "$RG_HUB" \
+  --resource-id "$spokea_id" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -256,8 +218,7 @@ Spoke A VNet만 group member여야 합니다. Hub나 다른 VNet이 대신 들�
 
 👁️ **설명**
 
-B도 같은 방식으로 추가합니다. 재실행 시에는 `spokeb` 멤버의 resource ID를 검증하고,
-없을 때만 생성합니다.
+B도 새 정적 멤버로 추가합니다. 앞에서 만든 A만 있는 상태여야 합니다.
 
 ### 4-1. A 등록 후 정적 멤버 조회
 
@@ -279,42 +240,38 @@ az network manager group static-member list --network-group "$NETWORK_GROUP" \
 
 `spokea`의 `resourceId`가 A VNet을 가리켜야 합니다. 오류라면 B 추가를 진행하지 않습니다.
 
-### 4-2. Spoke B 멤버 생성 또는 확인
+### 4-2. Spoke B 정적 멤버 최초 생성
 
 👁️ **설명**
 
-B도 현재 목록을 다시 조회하고, 같은 이름이 있으면 B의 전체 VNet ID를 비교합니다.
+B 생성 직전 A만 등록돼 있는지 확인합니다. B가 이미 있거나 다른 VNet이
+섞여 있다면 덮어쓰지 않고 중단합니다.
 
 🟢 **실행**
 
 <!-- exec:member-spokeb -->
 ```bash
-# B도 A와 별도 멤버로 등록하며 기존 이름이 다른 VNet을 가리키면 중단합니다.
+# A만 있는 Group에 B VNet을 두 번째 정적 멤버로 등록합니다.
 members=$(az network manager group static-member list \
   --network-group "$NETWORK_GROUP" \
   --network-manager "$AVNM" \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
-matches=$(jq -c '[.[] | select(.name == "spokeb")]' <<<"$members") &&
-count=$(jq -r 'length' <<<"$matches") &&
-if [[ "$count" == "0" ]]; then
-  az network manager group static-member create \
-    --name spokeb \
-    --network-group "$NETWORK_GROUP" \
-    --network-manager "$AVNM" \
-    --resource-group "$RG_HUB" \
-    --resource-id "$spokeb_id" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$count" == "1" ]]; then
-  jq -e --arg id "$spokeb_id" '
-    .[0].name == "spokeb" and
-    ((.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)) and
+{ jq -e --arg spokea "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" '
+    type == "array" and length == 1 and
+    .[0].name == "spokea" and
+    ((.[0].resourceId | ascii_downcase) == ($spokea | ascii_downcase)) and
     .[0].provisioningState == "Succeeded"
-  ' <<<"$matches" >/dev/null || { fail "Existing Spoke B member does not match the expected VNet ID."; false; }
-else
-  fail "Duplicate static members found for Spoke B." && false
-fi
+  ' <<<"$members" >/dev/null ||
+  { fail "Expected only the completed Spoke A member before creating B."; false; }; } &&
+az network manager group static-member create \
+  --name spokeb \
+  --network-group "$NETWORK_GROUP" \
+  --network-manager "$AVNM" \
+  --resource-group "$RG_HUB" \
+  --resource-id "$spokeb_id" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -328,8 +285,8 @@ fi
 이 단계가 수동 Peering 생성 대신 AVNM이 연결을 관리하도록 선언하는 부분입니다.
 먼저 정적 멤버가 **정확히 A/B 두 개**로 반영됐는지 기다린 뒤 Hub VNet ID를
 조회합니다. 생성 시에는 두 조건을 다시 확인하고 compact JSON으로
-configuration payload를 만듭니다. 재실행 시 기존 configuration의 topology,
-destructive flag, global flag, hub, group을 모두 확인한 뒤 재사용합니다.
+configuration payload를 만듭니다. 기존 Connectivity Configuration은
+재사용하거나 갱신하지 않습니다.
 
 ### 5-1. 두 Spoke의 정적 멤버 반영 확인
 
@@ -405,19 +362,19 @@ printf '%s\n' "$hub_id"
 
 전체 ID에 자신의 구독, Hub RG, `vnet-lzbegin-hub-<실행 ID>`가 표시됩니다.
 
-### 5-3. Connectivity Configuration 생성 또는 재사용
+### 5-3. Connectivity Configuration 최초 생성
 
 👁️ **설명**
 
 이 블록은 다른 블록의 임시 변수나 검사 결과를 신뢰하지 않습니다. A/B 멤버와
-Hub VNet을 다시 조회해 일치할 때만 현재 구성을 재사용하거나 새 구성을 만듭니다.
-목록 조회 실패는 구성 부재로 취급하지 않습니다.
+Hub VNet을 다시 조회하고 기존 구성이 없을 때만 새 구성을 만듭니다.
+목록 조회 실패나 기존 구성의 존재를 구성 부재로 취급하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:connectivity-config-create -->
 ```bash
-# 두 멤버와 Hub ID를 다시 검사한 뒤, 없을 때만 HubAndSpoke 구성을 만듭니다.
+# 두 멤버와 Hub ID를 확인하고 기존 구성이 없는 경우에만 새 구성을 만듭니다.
 spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
 spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
 members=$(az network manager group static-member list \
@@ -443,40 +400,19 @@ configs=$(az network manager connect-config list \
   --network-manager-name "$AVNM" \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
-matches=$(jq -c --arg name "$CONNECTIVITY_CONFIG" '[.[] | select(.name == $name)]' <<<"$configs") &&
-count=$(jq -r 'length' <<<"$matches") &&
-if [[ "$count" == "0" ]]; then
-  az network manager connect-config create \
-    --configuration-name "$CONNECTIVITY_CONFIG" \
-    --description "AVNM managed beginner hub and spoke" \
-    --applies-to-groups "$groups" \
-    --hubs "$hubs" \
-    --connectivity-topology HubAndSpoke \
-    --delete-existing-peering False \
-    --is-global False \
-    --network-manager-name "$AVNM" \
-    --resource-group "$RG_HUB" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$count" == "1" ]]; then
-  jq -e --arg name "$CONNECTIVITY_CONFIG" --arg id "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-    .[0].name == $name and
-    ((.[0].id | ascii_downcase) == ($id | ascii_downcase)) and
-    .[0].connectivityTopology == "HubAndSpoke" and
-    .[0].provisioningState == "Succeeded" and
-    ((.[0].deleteExistingPeering == "False") or (.[0].deleteExistingPeering == false)) and
-    ((.[0].isGlobal == "False") or (.[0].isGlobal == false)) and
-    (((.[0].hubs // []) | length) == 1) and
-    (((.[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
-    (.[0].hubs[0].resourceType == "Microsoft.Network/virtualNetworks") and
-    (((.[0].appliesToGroups // []) | length) == 1) and
-    (((.[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase)) and
-    (.[0].appliesToGroups[0].groupConnectivity == "None") and
-    (((.[0].appliesToGroups[0].isGlobal == "False") or (.[0].appliesToGroups[0].isGlobal == false))) and
-    (((.[0].appliesToGroups[0].useHubGateway == "False") or (.[0].appliesToGroups[0].useHubGateway == false)))
-  ' <<<"$matches" >/dev/null || { fail "Existing connectivity configuration does not match the approved Hub-and-Spoke contract."; false; }
-else
-  fail "Duplicate connectivity configuration names found: $CONNECTIVITY_CONFIG" && false
-fi
+{ jq -e 'type == "array" and length == 0' <<<"$configs" >/dev/null ||
+  { fail "AVNM already contains a Connectivity Configuration; do not overwrite it."; false; }; } &&
+az network manager connect-config create \
+  --configuration-name "$CONNECTIVITY_CONFIG" \
+  --description "AVNM managed beginner hub and spoke" \
+  --applies-to-groups "$groups" \
+  --hubs "$hubs" \
+  --connectivity-topology HubAndSpoke \
+  --delete-existing-peering False \
+  --is-global False \
+  --network-manager-name "$AVNM" \
+  --resource-group "$RG_HUB" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -774,7 +710,7 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 | 증상 | 조치 |
 |---|---|
 | commit은 성공했지만 effective configuration이 안 보임 | 잠시 기다린 뒤 effective 블록을 다시 실행 |
-| 기존 AVNM/Group/Configuration mismatch | 이름이 같아도 자동 덮어쓰지 말고 원인을 확인 |
+| 생성 시 이미 자원이 있음 | 생성 블록을 재실행하지 말고 자원 상태를 확인하고 남은 단계부터 진행 |
 | Hub가 group member로 들어감 | Hub를 member에서 제거하고 hub 필드로만 지정 |
 | Connected인데 통신 불가 | NSG·VM 서비스·경로를 별도로 확인; 모듈 04 이후 단계에서 검증 |
 | 소유 검사 실패 | 활성 구독과 상태 파일 확인 후 공통 준비 재실행; 태그로 우회하지 않기 |
