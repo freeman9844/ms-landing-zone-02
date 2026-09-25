@@ -15,11 +15,16 @@
 이후 블록은 같은 세션을 공유하며 필요한 AVNM 이름과 ID는 상태 파일에서 복구합니다.
 **한 블록 실행 → 확인 → 다음 블록** 순서입니다. 오류 시 다음 단계로 넘어가지 않습니다.
 `&&`는 앞 검사 실패 시 해당 작업을 멈추며 Cloud Shell을 종료하지 않습니다.
+각 자원 블록은 기존 자원을 먼저 조회하고, 없을 때만 **한 개의 Azure CLI 생성 명령**을 실행합니다.
+조회 실패나 기존 자원의 ID·설정 불일치는 새 자원을 만드는 이유가 아닙니다.
+Connectivity Configuration의 멤버 확인·Hub ID 확인·생성은 별도 단계로 나누되,
+생성 블록에서도 현재 상태를 재확인합니다. 블록을 건너뛰거나 합쳐 실행하지 마세요.
 
 🟢 **실행**
 
 <!-- exec:prepare-03 -->
 ```bash
+# 이번 실행의 상태·구독·세 RG 소유권을 한 번 확인합니다.
 source scripts/workshop-common.sh &&
 ensure_state_file &&
 load_run "$STATE_FILE" &&
@@ -44,10 +49,38 @@ Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 �
 **모듈 03에서 AVNM을 생성합니다.** 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있으므로
 실습 후 모듈 07에서 정리하세요.
 
+### 1-1. 현재 AVNM 목록 조회
+
+👁️ **설명**
+
+Hub RG에 이미 AVNM이 있는지 확인합니다. 이번 이름이 있다면 구독 scope와
+`networkManagerScopeAccesses`가 `["Connectivity"]`인지 비교하세요.
+
+🟢 **실행**
+
+<!-- exec:inspect-avnm -->
+```bash
+# Hub RG의 AVNM 목록을 변경하지 않고 출력합니다.
+az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+처음 실행이면 빈 배열도 정상입니다. 조회가 실패하면 생성 단계로 넘어가지 않습니다.
+목록의 다른 AVNM을 이번 실행의 자원으로 재사용하지 마세요.
+
+### 1-2. AVNM 생성 또는 기존 범위 확인
+
+👁️ **설명**
+
+생성 직전에 목록을 다시 읽습니다. 없는 경우에만 만들고, 같은 이름이 있으면
+전체 ID·Connectivity-only scope·배포 완료 상태를 자동으로 비교합니다.
+
 🟢 **실행**
 
 <!-- exec:avnm-create -->
 ```bash
+# Hub RG에서 이번 이름의 AVNM을 조회하고, 없을 때만 Connectivity 범위로 만듭니다.
 managers=$(az network manager list \
   --resource-group "$RG_HUB" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
@@ -90,10 +123,37 @@ Network Group에는 **Spoke A와 Spoke B만** 들어갑니다. Hub는 group memb
 Connectivity Configuration의 hub로 별도 지정합니다. 재실행 시에는 같은 이름의 group이 있어도
 정확한 ID와 설명이 일치할 때만 재사용합니다.
 
+### 2-1. 현재 Network Group 목록 조회
+
+👁️ **설명**
+
+이번 AVNM의 group 이름을 확인합니다. Hub를 멤버로 지정하는 단계가 아닙니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-network-groups -->
+```bash
+# AVNM에 속한 기존 Network Group의 이름과 ID를 확인합니다.
+az network manager group list --network-manager-name "$AVNM" \
+  --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+처음 실행이면 빈 배열입니다. 기존 group이 있으면 이번 실행의 이름·ID를 확인하세요.
+조회 오류가 발생하면 다음 생성 단계로 넘어가지 않습니다.
+
+### 2-2. Spoke Network Group 생성 또는 확인
+
+👁️ **설명**
+
+현재 목록을 다시 조회해 같은 이름의 group을 검증하거나 새로 만듭니다.
+
 🟢 **실행**
 
 <!-- exec:network-group-create -->
 ```bash
+# 이번 AVNM에 Spoke만 넣을 Network Group이 있는지 확인하고 없을 때 만듭니다.
 groups=$(az network manager group list \
   --network-manager-name "$AVNM" \
   --resource-group "$RG_HUB" \
@@ -130,10 +190,37 @@ fi
 이 워크숍은 동적 멤버십을 쓰지 않습니다. 목록을 먼저 읽고 `spokea` 멤버가 이미 있으면
 정확한 VNet ID인지 검증합니다. 없을 때만 생성합니다.
 
+### 3-1. 현재 정적 멤버 조회
+
+👁️ **설명**
+
+Spoke A를 추가하기 전 Network Group에 이미 들어 있는 VNet을 살펴봅니다.
+동적 멤버십을 만드는 명령이 아닙니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-members-before-spokea -->
+```bash
+# group의 기존 정적 멤버와 각각의 resourceId를 읽습니다.
+az network manager group static-member list --network-group "$NETWORK_GROUP" \
+  --network-manager "$AVNM" --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+처음 실행이면 빈 배열입니다. 다른 VNet이 이미 있으면 추가 작업을 멈추고 원인을 확인하세요.
+
+### 3-2. Spoke A 멤버 생성 또는 확인
+
+👁️ **설명**
+
+생성 직전에 다시 조회하고 `spokea`가 있다면 전체 VNet ID를 자동으로 비교합니다.
+
 🟢 **실행**
 
 <!-- exec:member-spokea -->
 ```bash
+# A의 전체 VNet ID를 확인해 정적 멤버가 없을 때만 등록합니다.
 members=$(az network manager group static-member list \
   --network-group "$NETWORK_GROUP" \
   --network-manager "$AVNM" \
@@ -172,10 +259,37 @@ Spoke A VNet만 group member여야 합니다. Hub나 다른 VNet이 대신 들�
 B도 같은 방식으로 추가합니다. 재실행 시에는 `spokeb` 멤버의 resource ID를 검증하고,
 없을 때만 생성합니다.
 
+### 4-1. A 등록 후 정적 멤버 조회
+
+👁️ **설명**
+
+A 등록 결과를 별도로 조회합니다. 목록 전파가 늦을 수 있으며 구성 생성 전
+5-1에서 A/B 모두 반영됐는지 다시 기다립니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-members-before-spokeb -->
+```bash
+# B를 추가하기 전에 A가 group에 표시되는지 확인합니다.
+az network manager group static-member list --network-group "$NETWORK_GROUP" \
+  --network-manager "$AVNM" --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+`spokea`의 `resourceId`가 A VNet을 가리켜야 합니다. 오류라면 B 추가를 진행하지 않습니다.
+
+### 4-2. Spoke B 멤버 생성 또는 확인
+
+👁️ **설명**
+
+B도 현재 목록을 다시 조회하고, 같은 이름이 있으면 B의 전체 VNet ID를 비교합니다.
+
 🟢 **실행**
 
 <!-- exec:member-spokeb -->
 ```bash
+# B도 A와 별도 멤버로 등록하며 기존 이름이 다른 VNet을 가리키면 중단합니다.
 members=$(az network manager group static-member list \
   --network-group "$NETWORK_GROUP" \
   --network-manager "$AVNM" \
@@ -211,16 +325,25 @@ fi
 
 👁️ **설명**
 
-이 단계가 수동 Peering 생성 대신 AVNM이 연결을 관리하도록 선언하는 부분입니다. 먼저
-정적 멤버 목록이 **정확히 A/B 두 개**인지 확인합니다. 그런 다음 Hub VNet ID를 직접 조회해
-예상한 RG·이름과 일치하는지 검증하고, compact JSON으로 configuration payload를 만듭니다.
-재실행 시 기존 configuration이 있으면 topology, destructive flag, global flag, hub, group을
-모두 확인한 뒤 재사용합니다.
+이 단계가 수동 Peering 생성 대신 AVNM이 연결을 관리하도록 선언하는 부분입니다.
+먼저 정적 멤버가 **정확히 A/B 두 개**로 반영됐는지 기다린 뒤 Hub VNet ID를
+조회합니다. 생성 시에는 두 조건을 다시 확인하고 compact JSON으로
+configuration payload를 만듭니다. 재실행 시 기존 configuration의 topology,
+destructive flag, global flag, hub, group을 모두 확인한 뒤 재사용합니다.
+
+### 5-1. 두 Spoke의 정적 멤버 반영 확인
+
+👁️ **설명**
+
+멤버 생성 API가 끝난 직후에는 목록 반영이 늦을 수 있습니다. 최대 2분 동안
+Spoke A/B만 있는지 읽기 전용으로 확인합니다. 다른 이름이나 VNet ID가 보이면
+기다리지 않고 중단합니다.
 
 🟢 **실행**
 
-<!-- exec:connectivity-config-create -->
+<!-- exec:inspect-static-members -->
 ```bash
+# group 목록에서 A/B의 전체 VNet ID와 Succeeded 상태를 확인합니다.
 spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
 spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
 wait_static_members() {
@@ -250,7 +373,63 @@ wait_static_members() {
   done
   fail "Spoke A/B static members were not ready after two minutes."
 }
-wait_static_members &&
+wait_static_members
+```
+
+📋 **확인**
+
+오류 없이 프롬프트로 돌아오면 A/B가 반영된 상태입니다. 아직 구성은 만들지 않았습니다.
+다른 멤버가 있으면 원인을 확인하고 다음 블록을 실행하지 마세요.
+
+### 5-2. Hub VNet의 전체 ID 확인
+
+👁️ **설명**
+
+Hub는 Network Group 멤버가 아니라 별도로 지정할 VNet입니다. CLI에서 조회한
+전체 ID가 이번 실행의 Hub RG·VNet 이름과 일치하는지 확인합니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-avnm-hub -->
+```bash
+# 생성할 구성의 Hub 대상이 이번 실행의 VNet인지 읽기 전용으로 확인합니다.
+hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
+{ [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
+  { fail "Unexpected Hub VNet ID: $hub_id"; false; }; } &&
+printf '%s\n' "$hub_id"
+```
+
+📋 **확인**
+
+전체 ID에 자신의 구독, Hub RG, `vnet-lzbegin-hub-<실행 ID>`가 표시됩니다.
+
+### 5-3. Connectivity Configuration 생성 또는 재사용
+
+👁️ **설명**
+
+이 블록은 다른 블록의 임시 변수나 검사 결과를 신뢰하지 않습니다. A/B 멤버와
+Hub VNet을 다시 조회해 일치할 때만 현재 구성을 재사용하거나 새 구성을 만듭니다.
+목록 조회 실패는 구성 부재로 취급하지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:connectivity-config-create -->
+```bash
+# 두 멤버와 Hub ID를 다시 검사한 뒤, 없을 때만 HubAndSpoke 구성을 만듭니다.
+spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
+spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
+members=$(az network manager group static-member list \
+  --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
+  --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") &&
+{ jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
+  type == "array" and length == 2 and
+  ([.[].name] | sort == ["spokea", "spokeb"]) and
+  ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
+  all(.[]; .provisioningState == "Succeeded")
+' <<<"$members" >/dev/null ||
+  { fail "Spoke A/B static members are not ready or do not match."; false; }; } &&
 hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
   --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
 expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
@@ -316,6 +495,7 @@ Connectivity 배포를 요청합니다. 재실행은 같은 configuration을 다
 
 <!-- exec:connectivity-commit -->
 ```bash
+# 이번 Connectivity Configuration 하나를 Korea Central에 적용합니다.
 az network manager post-commit \
   --network-manager-name "$AVNM" \
   --commit-type Connectivity \
@@ -341,6 +521,7 @@ effective 목록은 비어 있거나, 의도한 configuration 하나를 반환�
 
 <!-- exec:effective-hub -->
 ```bash
+# Hub는 그룹 밖이므로 빈 응답 또는 이번 구성이 적용된 응답만 허용합니다.
 effective=$(az network manager list-effective-connectivity-config \
   --resource-group "$RG_HUB" \
   --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
@@ -390,6 +571,7 @@ Spoke A도 같은 configuration을 받아야 합니다. Hub에만 적용되고 S
 
 <!-- exec:effective-spokea -->
 ```bash
+# A의 effective 구성이 이번 Hub와 Network Group을 가리키는지 검사합니다.
 effective=$(az network manager list-effective-connectivity-config \
   --resource-group "$RG_SPOKEA" \
   --virtual-network-name "vnet-lzbegin-spokea-$RUN_ID" \
@@ -425,6 +607,7 @@ Spoke B도 동일하게 확인합니다. 두 Spoke 모두 같은 configuration�
 
 <!-- exec:effective-spokeb -->
 ```bash
+# B도 A와 같은 구성 ID 및 Hub 대상을 사용해야 합니다.
 effective=$(az network manager list-effective-connectivity-config \
   --resource-group "$RG_SPOKEB" \
   --virtual-network-name "vnet-lzbegin-spokeb-$RUN_ID" \
@@ -461,6 +644,7 @@ Spoke B도 같은 configuration ID와 `HubAndSpoke` topology를 보여야 합니
 
 <!-- exec:inspect-avnm-peerings-hub -->
 ```bash
+# AVNM 생성 이름 대신 Hub에서 A/B를 향한 전체 remote VNet ID를 비교합니다.
 peerings=$(az network vnet peering list -g "$RG_HUB" \
   --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
@@ -507,6 +691,7 @@ Spoke A는 Hub 하나만 remote로 가져야 합니다. B와 직접 연결이 �
 
 <!-- exec:inspect-avnm-peerings-spokea -->
 ```bash
+# A에서 Hub 방향 Peering만 Connected인지 조회합니다.
 peerings=$(az network vnet peering list -g "$RG_SPOKEA" \
   --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
@@ -534,6 +719,7 @@ Spoke B도 같은 방식으로 Hub 하나만 확인합니다. Hub 쪽 결과만 
 
 <!-- exec:inspect-avnm-peerings-spokeb -->
 ```bash
+# B에서도 Hub 방향 Peering만 Connected인지 별도로 조회합니다.
 peerings=$(az network vnet peering list -g "$RG_SPOKEB" \
   --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
   -o json --subscription "$SUBSCRIPTION_ID") &&

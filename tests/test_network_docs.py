@@ -403,11 +403,28 @@ def preparation_calls(module, state=STATE):
 class NetworkDocsTests(unittest.TestCase):
     def test_configuration_waits_for_both_static_members_before_create(self):
         calls = avnm_cases()["connectivity-config-create"]
-        result = self.execute(3, "connectivity-config-create", [
+        result = self.execute(3, "inspect-static-members", [
             dict(calls[0], stdout=json.dumps([static_member("spokea", "spokea")])),
-            *calls,
+            calls[0],
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_configuration_preflight_checks_hub_separately_and_create_rechecks_members(self):
+        hub_call = avnm_cases()["connectivity-config-create"][1]
+        result = self.execute(3, "inspect-avnm-hub", [hub_call])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(netid("hub", "virtualNetworks", vnet("hub")), result.stdout)
+        for name, calls in (
+            ("inspect-avnm-hub", [dict(hub_call, stdout="unexpected")]),
+            ("connectivity-config-create", [
+                dict(avnm_cases()["connectivity-config-create"][0], stdout=json.dumps([
+                    static_member("spokea", "spokea")
+                ]))
+            ]),
+        ):
+            with self.subTest(step=name):
+                result = self.execute(3, name, calls)
+                self.assertNotEqual(result.returncode, 0)
 
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=STATE):
         steps = blocks(DOCS[module])
@@ -504,6 +521,28 @@ printf 'SHELL_ALIVE\\n'
                 with self.subTest(module=module, step=name):
                     result = self.execute(module, name, calls)
                     self.assertEqual(result.returncode, 0, result.stderr)
+        config_calls = avnm_cases()["connectivity-config-create"]
+        for name, calls in (
+            ("inspect-static-members", config_calls[:1]),
+            ("inspect-avnm-hub", config_calls[1:2]),
+        ):
+            with self.subTest(step=name):
+                result = self.execute(3, name, calls)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_avnm_inspection_blocks_are_read_only_and_show_cli_output(self):
+        steps = blocks(DOCS[3])
+        for name, calls in (
+            ("inspect-avnm", avnm_cases()["avnm-create"][:1]),
+            ("inspect-network-groups", avnm_cases()["network-group-create"][:1]),
+            ("inspect-members-before-spokea", avnm_cases()["member-spokea"][:1]),
+            ("inspect-members-before-spokeb", avnm_cases()["member-spokeb"][:1]),
+        ):
+            with self.subTest(step=name):
+                self.assertNotIn(" create ", steps[name])
+                result = self.execute(3, name, calls)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(calls[0]["stdout"], result.stdout)
 
     def test_hub_effective_configuration_accepts_only_empty_or_approved_configuration(self):
         expected_call = avnm_cases()["effective-hub"][0]
@@ -800,8 +839,9 @@ printf 'SHELL_ALIVE\\n'
                     "-o", "json",
                 ], members)]
                 if label.startswith("missing-"):
-                    calls *= 12
-                result = self.execute(3, "connectivity-config-create", calls)
+                    result = self.execute(3, "inspect-static-members", calls * 12)
+                else:
+                    result = self.execute(3, "connectivity-config-create", calls)
                 self.assertNotEqual(result.returncode, 0)
 
     def test_foundation_and_avnm_propagate_final_cli_errors(self):

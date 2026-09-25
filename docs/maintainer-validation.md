@@ -49,6 +49,12 @@ Peering과 진단 설정의 ID, NSG/Firewall 규칙의 NIC IP는 명시적인 �
 AVNM manager/group/static member/connectivity configuration/commit/effective-configuration,
 NAT 배포/개별 연결/조회, NSG 변경/검증, Firewall 자원/collection/진단,
 UDR 테이블/각 route/연결/검증은 별도 블록입니다.
+모듈 03의 manager/group/정적 멤버는 읽기 전용 목록 조회와 조건부 생성 블록을
+각각 제공합니다. 구성 생성 전에는 정적 A/B 멤버 반영 대기와 Hub VNet 전체 ID 조회를
+읽기 전용 블록에서 따로 수행합니다. 생성 블록은 앞 블록의 임시 변수에 의존하지 않고
+현재 멤버·Hub ID를 다시 확인한 다음 기존 구성 재사용 또는 Azure CLI 생성 한 번만 수행합니다.
+각 단계의 한글 주석은 명령의 대상과 예상 결과를 설명하며, 조회 실패·기존 자원의
+계약 불일치를 새 자원 생성으로 대체하지 않습니다.
 두 Spoke 테이블과 네 전달 Peering을 완성한 뒤 각 Subnet 연결 직전에 현재 준비 상태를 검사합니다.
 NAT 제거는 Spoke별 **분리 → NAT 삭제 → Public IP 삭제** 여섯 작업이며 매 작업 안에
 새 통신 검증·현재 소유/참조 확인·삭제 확인 입력이 있습니다. 마지막 제거 후 검증도 별도입니다.
