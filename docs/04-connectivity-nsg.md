@@ -537,6 +537,33 @@ bash scripts/verify-core.sh "$STATE_FILE" baseline
 
 `PASS: core baseline evidence complete.` 및 아래 증거를 확인합니다.
 
+아래는 **출력 형식 예시**이며 현재 실행의 AVNM 실환경 증거가 아닙니다.
+IP와 실패까지 걸린 시간은 달라질 수 있습니다. A→B 차단의 `curl` 종료 코드는
+환경에 따라 `28`(시간 초과) 또는 `7`(연결 실패)입니다.
+차단 메시지만 보지 말고 NSG·유효 경로와 마지막 완료 문구까지 확인하세요.
+
+```text
+PASS: 10.10.1.4 /16 -> VNetPeering
+PASS: 10.20.1.4 /16 -> VNetPeering
+NSG: {
+  "access": "Allow",
+  "ruleName": "securityRules/allow-hub-http"
+}
+PASS: HTTP spokea
+NSG: {
+  "access": "Allow",
+  "ruleName": "securityRules/allow-hub-http"
+}
+PASS: HTTP spokeb
+NSG: {
+  "access": "Allow",
+  "ruleName": "securityRules/allow-spokea-http"
+}
+PASS: 10.20.1.4 /16 -> None
+PASS: connection blocked (curl 28); correlate NSG/route/firewall evidence.
+PASS: core baseline evidence complete.
+```
+
 | 흐름 | NSG | 유효 next hop | HTTP |
 |---|---|---|---|
 | Hub→A/B | Allow | `VNetPeering` | 각각 `spokea`, `spokeb` |

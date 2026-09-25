@@ -389,6 +389,15 @@ az network vnet subnet update -g "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$
 
 B Subnet도 자기 테이블을 참조합니다. 이제 왕복 경로 검증으로 이동합니다.
 
+Azure Portal의 **Route tables → 이번 실행의 Spoke B 테이블 → Overview**에서도
+`to-internet`의 `0.0.0.0/0`과 `to-other-spoke`의 `10.10.0.0/16`이 같은
+Firewall 사설 IP를 next hop으로 사용하는지 확인할 수 있습니다. 아래 화면은
+**5-2까지 완료한 뒤**의 참고 예시입니다. 실행 ID와 IP는 자신의 값과 대조하세요.
+경로 목록만으로 AVNM 연결·Subnet 연결이나 실제 왕복 통신까지 증명되지 않으므로
+다음 5-3에서 유효 경로와 통신을 별도로 검사하세요.
+
+![Azure Portal의 Spoke B 경로 테이블에 표시된 Firewall 기본 경로와 상대 Spoke 반환 경로](images/06-spokeb-routes-after-return.png)
+
 ### 5-3. Allow 상태의 실제 증거
 
 👁️ **설명**
@@ -410,6 +419,38 @@ bash scripts/verify-extension.sh "$STATE_FILE" allowed
 A→B 및 B→A의 `VirtualAppliance` next hop이 Firewall IP입니다.
 A→B HTTP 성공과 새 **Allow 로그**, 두 Spoke의 Firewall Public IP egress를 확인합니다.
 Hub→B는 직접 `VNetPeering`입니다.
+
+아래는 **출력 형식 예시**이며 현재 실행의 AVNM 실환경 증거가 아닙니다.
+VM·외부 목적지 IP·로그 시각·리소스 ID는 실행마다 달라집니다.
+두 Spoke의 egress는 각각 검사하며, 게스트가 반환한 `EGRESS` 줄 자체는
+명령 치환으로 수집되므로 출력되지 않습니다. 대신 외부 목적지의 유효 경로가
+두 번 `VirtualAppliance`로 확인되고 마지막 완료 문구가 나오는지 보세요.
+
+```text
+PASS: 10.20.1.4 /16 -> VirtualAppliance
+PASS: 10.10.1.4 /16 -> VirtualAppliance
+PASS: 10.20.1.4 /16 -> VNetPeering
+NSG: {
+  "access": "Allow",
+  "ruleName": "securityRules/allow-spokea-http"
+}
+PASS: HTTP spokeb
+PASS: HTTP spokeb
+[
+  {
+    "Action": "Allow",
+    "DestinationIp": "10.20.1.4",
+    "DestinationPort": "8080",
+    "SourceIp": "10.10.1.4",
+    "TimeGenerated": "<이번 검증 이후의 로그 시각>",
+    "_ResourceId": "<이번 실행의 Firewall 전체 리소스 ID>"
+  }
+]
+PASS: matching Firewall Allow evidence found.
+PASS: 172.67.74.152 /0 -> VirtualAppliance
+PASS: 172.67.74.152 /0 -> VirtualAppliance
+PASS: extension allowed has matching route, NSG, HTTP, Firewall log and egress evidence.
+```
 
 `egress`는 밖으로 나가는 통신입니다. 외부 IP 서비스가 본 출발지와 그 서비스의 유효 경로를
 같이 검사합니다. 공인 IP만 같다고 모든 트래픽이 Firewall을 통과한다고 결론내리지 않습니다.
