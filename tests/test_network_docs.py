@@ -401,6 +401,11 @@ def preparation_calls(module, state=STATE):
 
 
 class NetworkDocsTests(unittest.TestCase):
+    def test_module_03_execution_blocks_do_not_chain_with_and(self):
+        for name, script in blocks(DOCS[3]).items():
+            with self.subTest(step=name):
+                self.assertNotIn("&&", script)
+
     def test_configuration_waits_for_both_static_members_before_create(self):
         calls = avnm_cases()["connectivity-config-create"]
         result = self.execute(3, "inspect-static-members", [

@@ -14,7 +14,9 @@
 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
 이후 블록은 같은 세션을 공유하며 필요한 AVNM 이름과 ID는 상태 파일에서 복구합니다.
 **한 블록 실행 → 확인 → 다음 블록** 순서입니다. 오류 시 다음 단계로 넘어가지 않습니다.
-`&&`는 앞 검사 실패 시 해당 작업을 멈추며 Cloud Shell을 종료하지 않습니다.
+각 블록의 결과를 확인하고 다음 블록을 **직접** 실행합니다. 실패 시 이어서
+붙여 넣거나 다음 생성 단계로 넘어가지 마세요. 공통 준비와 생성 블록의
+안전 검사는 실패할 때 오류를 반환하지만 Cloud Shell을 종료하지 않습니다.
 이 모듈의 AVNM·Group·정적 멤버·구성은 모두 **이번 실행에서 처음 생성**합니다.
 기존 자원을 재사용하거나 덮어쓰지 않습니다. 각 생성 블록은 해당 범위가 비어
 있는지만 확인한 뒤 Azure CLI 생성 명령 한 개를 실행하고, 이미 자원이 있다면
@@ -26,13 +28,16 @@
 <!-- exec:prepare-03 -->
 ```bash
 # 이번 실행의 상태·구독·세 RG 소유권을 한 번 확인합니다.
-source scripts/workshop-common.sh &&
-ensure_state_file &&
-load_run "$STATE_FILE" &&
-assert_subscription &&
-assert_owned_rg "$RG_HUB" &&
-assert_owned_rg "$RG_SPOKEA" &&
-assert_owned_rg "$RG_SPOKEB"
+prepare_avnm_session() {
+  source scripts/workshop-common.sh || return 1
+  ensure_state_file || return 1
+  load_run "$STATE_FILE" || return 1
+  assert_subscription || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  assert_owned_rg "$RG_SPOKEA" || return 1
+  assert_owned_rg "$RG_SPOKEB"
+}
+prepare_avnm_session
 ```
 
 📋 **확인**
@@ -80,19 +85,23 @@ az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBS
 <!-- exec:avnm-create -->
 ```bash
 # Hub RG에 AVNM이 없을 때만 Connectivity 범위로 새로 만듭니다.
-managers=$(az network manager list \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-{ jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
-  { fail "Hub RG already contains an AVNM; do not overwrite it."; false; }; } &&
-az network manager create \
-  --location "$LOCATION" \
-  --name "$AVNM" \
-  --resource-group "$RG_HUB" \
-  --scope-accesses Connectivity \
-  --network-manager-scopes "subscriptions=/subscriptions/$SUBSCRIPTION_ID" \
-  --description "Beginner Hub and Spoke connectivity" \
-  -o json --subscription "$SUBSCRIPTION_ID"
+create_avnm_if_empty() {
+  local managers
+  managers=$(az network manager list \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
+    { fail "Hub RG already contains an AVNM; do not overwrite it."; return 1; }
+  az network manager create \
+    --location "$LOCATION" \
+    --name "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --scope-accesses Connectivity \
+    --network-manager-scopes "subscriptions=/subscriptions/$SUBSCRIPTION_ID" \
+    --description "Beginner Hub and Spoke connectivity" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_avnm_if_empty
 ```
 
 📋 **확인**
@@ -137,18 +146,22 @@ az network manager group list --network-manager-name "$AVNM" \
 <!-- exec:network-group-create -->
 ```bash
 # 이번 AVNM에 Group이 없을 때 Spoke 전용 Group을 만듭니다.
-groups=$(az network manager group list \
-  --network-manager-name "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-{ jq -e 'type == "array" and length == 0' <<<"$groups" >/dev/null ||
-  { fail "AVNM already contains a Network Group; do not overwrite it."; false; }; } &&
-az network manager group create \
-  --name "$NETWORK_GROUP" \
-  --network-manager-name "$AVNM" \
-  --resource-group "$RG_HUB" \
-  --description "Workshop spoke virtual networks" \
-  -o json --subscription "$SUBSCRIPTION_ID"
+create_group_if_empty() {
+  local groups
+  groups=$(az network manager group list \
+    --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$groups" >/dev/null ||
+    { fail "AVNM already contains a Network Group; do not overwrite it."; return 1; }
+  az network manager group create \
+    --name "$NETWORK_GROUP" \
+    --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --description "Workshop spoke virtual networks" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_group_if_empty
 ```
 
 📋 **확인**
@@ -193,21 +206,25 @@ az network manager group static-member list --network-group "$NETWORK_GROUP" \
 <!-- exec:member-spokea -->
 ```bash
 # 빈 Group에 A VNet을 첫 번째 정적 멤버로 등록합니다.
-members=$(az network manager group static-member list \
-  --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
-{ jq -e 'type == "array" and length == 0' <<<"$members" >/dev/null ||
-  { fail "Network Group already contains static members; do not overwrite them."; false; }; } &&
-az network manager group static-member create \
-  --name spokea \
-  --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" \
-  --resource-id "$spokea_id" \
-  -o json --subscription "$SUBSCRIPTION_ID"
+create_spokea_member_if_empty() {
+  local members spokea_id
+  members=$(az network manager group static-member list \
+    --network-group "$NETWORK_GROUP" \
+    --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+  jq -e 'type == "array" and length == 0' <<<"$members" >/dev/null ||
+    { fail "Network Group already contains static members; do not overwrite them."; return 1; }
+  az network manager group static-member create \
+    --name spokea \
+    --network-group "$NETWORK_GROUP" \
+    --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --resource-id "$spokea_id" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokea_member_if_empty
 ```
 
 📋 **확인**
@@ -252,26 +269,30 @@ B 생성 직전 A만 등록돼 있는지 확인합니다. B가 이미 있거나 
 <!-- exec:member-spokeb -->
 ```bash
 # A만 있는 Group에 B VNet을 두 번째 정적 멤버로 등록합니다.
-members=$(az network manager group static-member list \
-  --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
-{ jq -e --arg spokea "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" '
+create_spokeb_member_after_a() {
+  local members spokeb_id
+  members=$(az network manager group static-member list \
+    --network-group "$NETWORK_GROUP" \
+    --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
+  jq -e --arg spokea "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" '
     type == "array" and length == 1 and
     .[0].name == "spokea" and
     ((.[0].resourceId | ascii_downcase) == ($spokea | ascii_downcase)) and
     .[0].provisioningState == "Succeeded"
   ' <<<"$members" >/dev/null ||
-  { fail "Expected only the completed Spoke A member before creating B."; false; }; } &&
-az network manager group static-member create \
-  --name spokeb \
-  --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" \
-  --resource-id "$spokeb_id" \
-  -o json --subscription "$SUBSCRIPTION_ID"
+    { fail "Expected only the completed Spoke A member before creating B."; return 1; }
+  az network manager group static-member create \
+    --name spokeb \
+    --network-group "$NETWORK_GROUP" \
+    --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --resource-id "$spokeb_id" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokeb_member_after_a
 ```
 
 📋 **확인**
@@ -301,10 +322,10 @@ Spoke A/B만 있는지 읽기 전용으로 확인합니다. 다른 이름이나 
 <!-- exec:inspect-static-members -->
 ```bash
 # group 목록에서 A/B의 전체 VNet ID와 Succeeded 상태를 확인합니다.
-spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
-spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
 wait_static_members() {
-  local members ready
+  local members ready spokea_id spokeb_id
+  spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+  spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
   for ((attempt=1; attempt<=12; attempt++)); do
     members=$(az network manager group static-member list \
       --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
@@ -316,7 +337,7 @@ wait_static_members() {
       ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
       all(.[]; .provisioningState == "Succeeded")
     ' <<<"$members") || { fail "Invalid static-member response."; return 1; }
-    [[ "$ready" == true ]] && return 0
+    if [[ "$ready" == true ]]; then return 0; fi
     jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
       type == "array" and length <= 2 and
       ([.[].name] | unique | length) == length and
@@ -326,7 +347,7 @@ wait_static_members() {
         ((.resourceId | ascii_downcase) == ($spokeb | ascii_downcase))))
     ' <<<"$members" >/dev/null ||
       { fail "Unexpected static-member identity; do not retry."; return 1; }
-    ((attempt == 12)) || sleep 10
+    if ((attempt < 12)); then sleep 10 || return 1; fi
   done
   fail "Spoke A/B static members were not ready after two minutes."
 }
@@ -350,12 +371,16 @@ Hub는 Network Group 멤버가 아니라 별도로 지정할 VNet입니다. CLI�
 <!-- exec:inspect-avnm-hub -->
 ```bash
 # 생성할 구성의 Hub 대상이 이번 실행의 VNet인지 읽기 전용으로 확인합니다.
-hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-{ [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
-  { fail "Unexpected Hub VNet ID: $hub_id"; false; }; } &&
-printf '%s\n' "$hub_id"
+inspect_avnm_hub() {
+  local hub_id expected_hub_id
+  hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
+    { fail "Unexpected Hub VNet ID: $hub_id"; return 1; }
+  printf '%s\n' "$hub_id"
+}
+inspect_avnm_hub
 ```
 
 📋 **확인**
@@ -375,44 +400,48 @@ Hub VNet을 다시 조회하고 기존 구성이 없을 때만 새 구성을 만
 <!-- exec:connectivity-config-create -->
 ```bash
 # 두 멤버와 Hub ID를 확인하고 기존 구성이 없는 경우에만 새 구성을 만듭니다.
-spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
-spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
-members=$(az network manager group static-member list \
-  --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
-  --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") &&
-{ jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
-  type == "array" and length == 2 and
-  ([.[].name] | sort == ["spokea", "spokeb"]) and
-  ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
-  all(.[]; .provisioningState == "Succeeded")
-' <<<"$members" >/dev/null ||
-  { fail "Spoke A/B static members are not ready or do not match."; false; }; } &&
-hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-{ [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
-  { fail "Unexpected Hub VNet ID: $hub_id"; false; }; } &&
-hubs=$(jq -cn --arg id "$hub_id" \
-  '[{resourceId:$id,resourceType:"Microsoft.Network/virtualNetworks"}]') &&
-groups=$(jq -cn --arg id "$NETWORK_GROUP_ID" \
-  '[{networkGroupId:$id,groupConnectivity:"None",isGlobal:false,useHubGateway:false}]') &&
-configs=$(az network manager connect-config list \
-  --network-manager-name "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-{ jq -e 'type == "array" and length == 0' <<<"$configs" >/dev/null ||
-  { fail "AVNM already contains a Connectivity Configuration; do not overwrite it."; false; }; } &&
-az network manager connect-config create \
-  --configuration-name "$CONNECTIVITY_CONFIG" \
-  --description "AVNM managed beginner hub and spoke" \
-  --applies-to-groups "$groups" \
-  --hubs "$hubs" \
-  --connectivity-topology HubAndSpoke \
-  --delete-existing-peering False \
-  --is-global False \
-  --network-manager-name "$AVNM" \
-  --resource-group "$RG_HUB" \
-  -o json --subscription "$SUBSCRIPTION_ID"
+create_connectivity_config_if_empty() {
+  local spokea_id spokeb_id members hub_id expected_hub_id hubs groups configs
+  spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+  spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
+  members=$(az network manager group static-member list \
+    --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
+    type == "array" and length == 2 and
+    ([.[].name] | sort == ["spokea", "spokeb"]) and
+    ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
+    all(.[]; .provisioningState == "Succeeded")
+  ' <<<"$members" >/dev/null ||
+    { fail "Spoke A/B static members are not ready or do not match."; return 1; }
+  hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
+    { fail "Unexpected Hub VNet ID: $hub_id"; return 1; }
+  hubs=$(jq -cn --arg id "$hub_id" \
+    '[{resourceId:$id,resourceType:"Microsoft.Network/virtualNetworks"}]') || return 1
+  groups=$(jq -cn --arg id "$NETWORK_GROUP_ID" \
+    '[{networkGroupId:$id,groupConnectivity:"None",isGlobal:false,useHubGateway:false}]') || return 1
+  configs=$(az network manager connect-config list \
+    --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$configs" >/dev/null ||
+    { fail "AVNM already contains a Connectivity Configuration; do not overwrite it."; return 1; }
+  az network manager connect-config create \
+    --configuration-name "$CONNECTIVITY_CONFIG" \
+    --description "AVNM managed beginner hub and spoke" \
+    --applies-to-groups "$groups" \
+    --hubs "$hubs" \
+    --connectivity-topology HubAndSpoke \
+    --delete-existing-peering False \
+    --is-global False \
+    --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_connectivity_config_if_empty
 ```
 
 📋 **확인**
@@ -458,12 +487,14 @@ effective 목록은 비어 있거나, 의도한 configuration 하나를 반환�
 <!-- exec:effective-hub -->
 ```bash
 # Hub는 그룹 밖이므로 빈 응답 또는 이번 구성이 적용된 응답만 허용합니다.
-effective=$(az network manager list-effective-connectivity-config \
-  --resource-group "$RG_HUB" \
-  --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
+inspect_effective_hub() {
+  local effective hub_id
+  effective=$(az network manager list-effective-connectivity-config \
+    --resource-group "$RG_HUB" \
+    --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
   def falsey: . == false or . == "False";
   (.value | type == "array") and
   ((.value | length == 0) or
@@ -487,8 +518,11 @@ jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$N
       ($cfg.appliesToGroups[0].isGlobal | falsey) and
       ($cfg.appliesToGroups[0].useHubGateway | falsey)
     )))
-' <<<"$effective" >/dev/null &&
-printf '%s\n' "$effective"
+' <<<"$effective" >/dev/null ||
+    { fail "Unexpected Hub effective connectivity."; return 1; }
+  printf '%s\n' "$effective"
+}
+inspect_effective_hub
 ```
 
 📋 **확인**
@@ -508,12 +542,14 @@ Spoke A도 같은 configuration을 받아야 합니다. Hub에만 적용되고 S
 <!-- exec:effective-spokea -->
 ```bash
 # A의 effective 구성이 이번 Hub와 Network Group을 가리키는지 검사합니다.
-effective=$(az network manager list-effective-connectivity-config \
-  --resource-group "$RG_SPOKEA" \
-  --virtual-network-name "vnet-lzbegin-spokea-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
+inspect_effective_spokea() {
+  local effective expected_hub_id
+  effective=$(az network manager list-effective-connectivity-config \
+    --resource-group "$RG_SPOKEA" \
+    --virtual-network-name "vnet-lzbegin-spokea-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
   (.value | type == "array") and
   (.value | length == 1) and
   ((.value[0].id | ascii_downcase) == ($config | ascii_downcase)) and
@@ -525,8 +561,11 @@ jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg 
   (((.value[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
   (((.value[0].appliesToGroups // []) | length) == 1) and
   (((.value[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase))
-' <<<"$effective" >/dev/null &&
-printf '%s\n' "$effective"
+' <<<"$effective" >/dev/null ||
+    { fail "Unexpected Spoke A effective connectivity."; return 1; }
+  printf '%s\n' "$effective"
+}
+inspect_effective_spokea
 ```
 
 📋 **확인**
@@ -544,12 +583,14 @@ Spoke B도 동일하게 확인합니다. 두 Spoke 모두 같은 configuration�
 <!-- exec:effective-spokeb -->
 ```bash
 # B도 A와 같은 구성 ID 및 Hub 대상을 사용해야 합니다.
-effective=$(az network manager list-effective-connectivity-config \
-  --resource-group "$RG_SPOKEB" \
-  --virtual-network-name "vnet-lzbegin-spokeb-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
+inspect_effective_spokeb() {
+  local effective expected_hub_id
+  effective=$(az network manager list-effective-connectivity-config \
+    --resource-group "$RG_SPOKEB" \
+    --virtual-network-name "vnet-lzbegin-spokeb-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
   (.value | type == "array") and
   (.value | length == 1) and
   ((.value[0].id | ascii_downcase) == ($config | ascii_downcase)) and
@@ -561,8 +602,11 @@ jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg 
   (((.value[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
   (((.value[0].appliesToGroups // []) | length) == 1) and
   (((.value[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase))
-' <<<"$effective" >/dev/null &&
-printf '%s\n' "$effective"
+' <<<"$effective" >/dev/null ||
+    { fail "Unexpected Spoke B effective connectivity."; return 1; }
+  printf '%s\n' "$effective"
+}
+inspect_effective_spokeb
 ```
 
 📋 **확인**
@@ -581,18 +625,23 @@ Spoke B도 같은 configuration ID와 `HubAndSpoke` topology를 보여야 합니
 <!-- exec:inspect-avnm-peerings-hub -->
 ```bash
 # AVNM 생성 이름 대신 Hub에서 A/B를 향한 전체 remote VNet ID를 비교합니다.
-peerings=$(az network vnet peering list -g "$RG_HUB" \
-  --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" &&
-spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" &&
-jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
+inspect_hub_peerings() {
+  local peerings spokea_id spokeb_id
+  peerings=$(az network vnet peering list -g "$RG_HUB" \
+    --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+  spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
+  jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
   type == "array" and
   length == 2 and
   ([.[].remoteVirtualNetwork.id | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
   all(.[]; .peeringState == "Connected")
-' <<<"$peerings" >/dev/null &&
-jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+' <<<"$peerings" >/dev/null ||
+    { fail "Unexpected Hub peerings."; return 1; }
+  jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+}
+inspect_hub_peerings
 ```
 
 📋 **확인**
@@ -628,17 +677,22 @@ Spoke A는 Hub 하나만 remote로 가져야 합니다. B와 직접 연결이 �
 <!-- exec:inspect-avnm-peerings-spokea -->
 ```bash
 # A에서 Hub 방향 Peering만 Connected인지 조회합니다.
-peerings=$(az network vnet peering list -g "$RG_SPOKEA" \
-  --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg hub "$hub_id" '
+inspect_spokea_peerings() {
+  local peerings hub_id
+  peerings=$(az network vnet peering list -g "$RG_SPOKEA" \
+    --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  jq -e --arg hub "$hub_id" '
   type == "array" and
   length == 1 and
   ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
   .[0].peeringState == "Connected"
-' <<<"$peerings" >/dev/null &&
-jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+' <<<"$peerings" >/dev/null ||
+    { fail "Unexpected Spoke A peerings."; return 1; }
+  jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+}
+inspect_spokea_peerings
 ```
 
 📋 **확인**
@@ -656,17 +710,22 @@ Spoke B도 같은 방식으로 Hub 하나만 확인합니다. Hub 쪽 결과만 
 <!-- exec:inspect-avnm-peerings-spokeb -->
 ```bash
 # B에서도 Hub 방향 Peering만 Connected인지 별도로 조회합니다.
-peerings=$(az network vnet peering list -g "$RG_SPOKEB" \
-  --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" &&
-jq -e --arg hub "$hub_id" '
+inspect_spokeb_peerings() {
+  local peerings hub_id
+  peerings=$(az network vnet peering list -g "$RG_SPOKEB" \
+    --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  jq -e --arg hub "$hub_id" '
   type == "array" and
   length == 1 and
   ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
   .[0].peeringState == "Connected"
-' <<<"$peerings" >/dev/null &&
-jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+' <<<"$peerings" >/dev/null ||
+    { fail "Unexpected Spoke B peerings."; return 1; }
+  jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
+}
+inspect_spokeb_peerings
 ```
 
 📋 **확인**
