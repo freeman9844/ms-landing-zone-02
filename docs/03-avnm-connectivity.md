@@ -447,6 +447,10 @@ create_connectivity_config_if_empty
 
 `HubAndSpoke`, `deleteExistingPeering=False`, `isGlobal=False`, Hub VNet ID, Network Group ID가 모두
 의도한 값이어야 합니다. Hub gateway, global mesh, destructive overwrite는 사용하지 않습니다.
+생성된 구성은 Azure Portal의 **Virtual Network Manager → Configurations → 해당 Connectivity Configuration**
+화면에서도 확인할 수 있습니다. 화면의 `Not deployed`는 아직 다음 단계에서 배포(commit)하지 않은 상태입니다.
+
+![Azure Portal에서 생성된 Hub-and-Spoke Connectivity Configuration의 Hub 및 두 Spoke와 배포 전 상태](images/03-connectivity-config-before-deploy.png)
 
 ## 6. koreacentral에 Connectivity 배포(commit)
 
