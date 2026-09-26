@@ -17,20 +17,25 @@ Firewall은 허용·차단과 검사 로그를 담당합니다. 앞에서 만든
 `.workshop-state/<실행 ID>.json` 경로를 입력합니다.
 활성 구독이 다르거나 다른 실습/구독으로 전환했다면
 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
-`&&` 앞의 검사 실패 시 해당 작업은 멈춥니다. 오류를 무시하고 다음 블록을 실행하지 마세요.
+각 블록의 결과를 확인한 뒤 다음 블록을 직접 실행합니다. 조회나 검사에 실패하면
+다음 자원 작업으로 넘어가지 마세요. 실패한 블록은 Azure 자원을 변경하지 않으며
+Cloud Shell을 종료하지 않습니다.
 구독과 세 RG의 소유권은 공통 준비에서 확인하며, 개별 작업에서는 같은 검사를 반복하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:prepare-05 -->
 ```bash
-source scripts/workshop-common.sh &&
-ensure_state_file &&
-load_run "$STATE_FILE" &&
-assert_subscription &&
-assert_owned_rg "$RG_HUB" &&
-assert_owned_rg "$RG_SPOKEA" &&
-assert_owned_rg "$RG_SPOKEB"
+prepare_firewall_session() {
+  source scripts/workshop-common.sh || return 1
+  ensure_state_file || return 1
+  load_run "$STATE_FILE" || return 1
+  assert_subscription || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  assert_owned_rg "$RG_SPOKEA" || return 1
+  assert_owned_rg "$RG_SPOKEB"
+}
+prepare_firewall_session
 ```
 
 📋 **확인**
@@ -373,15 +378,20 @@ NSG에서 A→B를 허용한 것과 별개로, 모듈 06에서 Firewall을 통�
 
 <!-- exec:firewall-http-rule -->
 ```bash
-a=$(az network nic show -g "$RG_SPOKEA" -n "nic-lzbegin-spokea-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-b=$(az network nic show -g "$RG_SPOKEB" -n "nic-lzbegin-spokeb-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-az network firewall policy rule-collection-group collection add-filter-collection \
-  -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n lab-http \
-  --collection-priority 200 --action Allow --rule-name spokea-to-spokeb \
-  --rule-type NetworkRule --ip-protocols TCP \
-  --source-addresses "$a" --destination-addresses "$b" --destination-ports 8080 -o json --subscription "$SUBSCRIPTION_ID"
+# 두 VM의 현재 사설 IP를 확인한 후에만 HTTP 허용 규칙을 추가합니다.
+create_firewall_http_rule() {
+  local a b
+  a=$(az network nic show -g "$RG_SPOKEA" -n "nic-lzbegin-spokea-$RUN_ID" \
+    --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  b=$(az network nic show -g "$RG_SPOKEB" -n "nic-lzbegin-spokeb-$RUN_ID" \
+    --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  az network firewall policy rule-collection-group collection add-filter-collection \
+    -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n lab-http \
+    --collection-priority 200 --action Allow --rule-name spokea-to-spokeb \
+    --rule-type NetworkRule --ip-protocols TCP \
+    --source-addresses "$a" --destination-addresses "$b" --destination-ports 8080 -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_firewall_http_rule
 ```
 
 📋 **확인**
@@ -463,17 +473,22 @@ ID 형식 재검사 대신, 실제 로그 수집에 필요한 category와 저장
 
 <!-- exec:firewall-diagnostics -->
 ```bash
-fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-categories=$(az monitor diagnostic-settings categories list --resource "$fw_id" -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e '(.value | type == "array") and
-  ([.value[].name] | index("AZFWNetworkRule") != null and index("AZFWApplicationRule") != null)' \
-  <<< "$categories" >/dev/null &&
-az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
-  --workspace "$law_id" --export-to-resource-specific true \
-  --logs '[{"category":"AZFWNetworkRule","enabled":true},{"category":"AZFWApplicationRule","enabled":true}]' -o json --subscription "$SUBSCRIPTION_ID"
+# Firewall·workspace를 조회하고 두 로그 범주가 지원될 때만 진단 설정을 생성합니다.
+create_firewall_diagnostics() {
+  local fw_id law_id categories
+  fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  categories=$(az monitor diagnostic-settings categories list --resource "$fw_id" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e '(.value | type == "array") and
+    ([.value[].name] | index("AZFWNetworkRule") != null and index("AZFWApplicationRule") != null)' \
+    <<< "$categories" >/dev/null || { fail "Required Firewall diagnostic categories are missing."; return 1; }
+  az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
+    --workspace "$law_id" --export-to-resource-specific true \
+    --logs '[{"category":"AZFWNetworkRule","enabled":true},{"category":"AZFWApplicationRule","enabled":true}]' -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_firewall_diagnostics
 ```
 
 📋 **확인**
@@ -494,16 +509,21 @@ workspace ID가 이번 Hub의 workspace입니다.
 
 <!-- exec:inspect-firewall-diagnostics -->
 ```bash
-fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
-  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
-setting=$(az monitor diagnostic-settings show --name workshop --resource "$fw_id" -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e --arg id "$law_id" '((.workspaceId | ascii_downcase) == ($id | ascii_downcase) and .logAnalyticsDestinationType == "Dedicated" and
-  (.logs | type == "array") and
-  any(.logs[]; .category == "AZFWNetworkRule" and .enabled == true) and
-  any(.logs[]; .category == "AZFWApplicationRule" and .enabled == true))
-  or error("ERROR: Unexpected Firewall diagnostics or workspace ID.")' <<< "$setting"
+# 저장된 workspace ID와 두 전용 로그 범주를 다시 읽어 확인합니다.
+inspect_firewall_diagnostics() {
+  local fw_id law_id setting
+  fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  setting=$(az monitor diagnostic-settings show --name workshop --resource "$fw_id" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$law_id" '((.workspaceId | ascii_downcase) == ($id | ascii_downcase) and .logAnalyticsDestinationType == "Dedicated" and
+    (.logs | type == "array") and
+    any(.logs[]; .category == "AZFWNetworkRule" and .enabled == true) and
+    any(.logs[]; .category == "AZFWApplicationRule" and .enabled == true))
+    or error("ERROR: Unexpected Firewall diagnostics or workspace ID.")' <<< "$setting"
+}
+inspect_firewall_diagnostics
 ```
 
 📋 **확인**

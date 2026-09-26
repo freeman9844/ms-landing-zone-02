@@ -179,6 +179,11 @@ class StepwiseDocsTests(unittest.TestCase):
     execute = test_network_docs.NetworkDocsTests.execute
     keyfile = {".workshop-keys/demo123/id_ed25519.pub": "fixture-public-key"}
 
+    def test_module_05_execution_blocks_do_not_chain_with_and(self):
+        for name, script in blocks(DOCS[5]).items():
+            with self.subTest(step=name):
+                self.assertNotIn("&&", script)
+
     def test_ordinary_actions_check_ownership_once_for_a_prepared_session(self):
         cases = dict(self.cases())
         cases[3] = test_network_docs.avnm_cases()
