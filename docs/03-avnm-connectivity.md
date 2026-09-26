@@ -44,12 +44,12 @@ prepare_avnm_session
 
 오류 없이 프롬프트로 돌아오면 모듈 03 작업을 실행할 준비가 된 상태입니다.
 
-## 1. Connectivity-only AVNM 만들기
+## 1. Connectivity·Security Admin·Routing AVNM 만들기
 
 👁️ **설명**
 
-이 워크숍은 AVNM의 **Connectivity**만 사용합니다. Security Admin, Routing, 동적 멤버십,
-Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 사용하지 않습니다.
+이 워크숍은 AVNM의 **Connectivity·Security Admin·Routing** 기능을 사용합니다.
+동적 멤버십, Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 사용하지 않습니다.
 이번 Hub RG에는 AVNM이 아직 없어야 합니다. 목록 조회가 실패하거나 이미
 자원이 있으면 생성하지 않습니다.
 **모듈 03에서 AVNM을 생성합니다.** 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있으므로
@@ -73,33 +73,45 @@ az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBS
 
 빈 배열 `[]`을 확인하세요. 목록에 자원이 있거나 조회가 실패하면 생성하지 마세요.
 
-### 1-2. Connectivity-only AVNM 최초 생성
+### 1-2. 세 기능 범위의 AVNM 최초 생성
 
 👁️ **설명**
 
 생성 직전 Hub RG의 목록이 비어 있는지 다시 확인합니다. 기존 AVNM을
-재사용하거나 설정을 갱신하지 않습니다.
+재사용하거나 설정을 갱신하지 않습니다. 현재 CLI 확장의 manager 생성 옵션에는
+Routing이 나열되지 않으므로 ARM 2025-01-01 API를 `az rest`로 호출합니다.
 
 🟢 **실행**
 
 <!-- exec:avnm-create -->
 ```bash
-# Hub RG에 AVNM이 없을 때만 Connectivity 범위로 새로 만듭니다.
+# Hub RG에 AVNM이 없을 때 Connectivity·Security Admin·Routing 범위로 만듭니다.
 create_avnm_if_empty() {
-  local managers
+  local managers manager_id body result
   managers=$(az network manager list \
     --resource-group "$RG_HUB" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
     { fail "Hub RG already contains an AVNM; do not overwrite it."; return 1; }
-  az network manager create \
-    --location "$LOCATION" \
-    --name "$AVNM" \
-    --resource-group "$RG_HUB" \
-    --scope-accesses Connectivity \
-    --network-manager-scopes "subscriptions=/subscriptions/$SUBSCRIPTION_ID" \
-    --description "Beginner Hub and Spoke connectivity" \
-    -o json --subscription "$SUBSCRIPTION_ID"
+  manager_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
+  body=$(jq -cn --arg location "$LOCATION" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '{
+    location:$location,
+    properties:{
+      description:"Beginner Hub and Spoke connectivity",
+      networkManagerScopes:{subscriptions:[$scope]},
+      networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]
+    }
+  }') || return 1
+  result=$(az rest --method put --url "$manager_id?api-version=2025-01-01" \
+    --body "$body" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$manager_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
+    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
+    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<<"$result" >/dev/null ||
+    { fail "Unexpected AVNM scope or resource ID; inspect the created manager before continuing."; return 1; }
+  printf '%s\n' "$result"
 }
 create_avnm_if_empty
 ```
@@ -107,14 +119,46 @@ create_avnm_if_empty
 📋 **확인**
 
 Hub RG에 `avnm-lzbegin-<runId>`가 만들어집니다. 응답의 scope access가
-Connectivity이고 구독 scope가 이번 구독인지 확인하세요.
+Connectivity·SecurityAdmin·Routing이고 구독 scope가 이번 구독인지 확인하세요.
+생성 응답이 `Updating`이면 해당 AVNM의 `provisioningState=Succeeded`가
+될 때까지 기다린 뒤 Group 생성으로 이동하세요. 응답이 오류이거나 범위가 다르면
+생성 블록을 반복 실행하지 말고 실제 자원 상태를 확인합니다.
 
 Azure Portal의 **Virtual Network Manager → Network managers → 이번 실행의 AVNM → Overview**에서도
-생성된 자원을 확인할 수 있습니다. 아래 화면처럼 **Enabled features: Connectivity**,
-**Scope (In-tenant): Subscriptions (1)**, **Provisioning state: Succeeded**인지
-확인하세요. 화면의 이름·구독·실행 ID는 예시이므로 자신의 값과 대조합니다.
+세 기능, **Scope (In-tenant): Subscriptions (1)**, **Provisioning state: Succeeded**를 확인하세요.
 
-![Azure Portal의 AVNM Overview에 표시된 Connectivity 기능, 구독 범위 및 생성 완료 상태](images/03-avnm-overview.png)
+### 1-3. AVNM 배포 완료 확인
+
+👁️ **설명**
+
+생성 요청이 끝나도 실제 배포가 진행 중일 수 있습니다. Group 생성 전에 범위와 완료 상태를 조회합니다.
+
+🟢 **실행**
+
+<!-- exec:avnm-ready -->
+```bash
+inspect_avnm_ready() {
+  local manager expected_id
+  manager=$(az network manager show --name "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
+  jq -e --arg id "$expected_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    ((.id | ascii_downcase) == ($id | ascii_downcase)) and
+    .properties.provisioningState == "Succeeded" and
+    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
+    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
+    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<<"$manager" >/dev/null ||
+    { fail "AVNM scope or provisioning state is not ready."; return 1; }
+  printf '%s\n' "$manager"
+}
+inspect_avnm_ready
+```
+
+📋 **확인**
+
+`provisioningState=Succeeded`이며 세 기능과 이번 구독의 전체 ID가 보여야 합니다.
+`Updating`이면 잠시 기다린 뒤 이 읽기 전용 확인 블록만 다시 실행하세요.
 
 ## 2. Spoke 전용 Network Group 만들기
 
@@ -313,6 +357,130 @@ Azure Portal의 **Virtual Network Manager → 이번 실행의 AVNM → Network 
 확인하며, 실제 Hub↔Spoke 연결은 이후 commit과 Peering 검사에서 확인합니다.
 
 ![Azure Portal의 AVNM Network Group에 정적으로 등록된 Spoke A와 B의 Group members 목록](images/03-spoke-group-members.png)
+
+### 4-3. Spoke A 전용 Routing Group 생성
+
+👁️ **설명**
+
+연결용 Group과 별도로 A의 반환 경로만 적용할 Group을 만듭니다. 이 Group에는 A만 등록합니다.
+
+🟢 **실행**
+
+<!-- exec:route-group-spokea-create -->
+```bash
+create_spokea_route_group() {
+  local groups
+  groups=$(az network manager group list --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$NETWORK_GROUP_ID" '
+    type == "array" and length == 1 and
+    ((.[0].id | ascii_downcase) == ($id | ascii_downcase)) and
+    .[0].provisioningState == "Succeeded"
+  ' <<<"$groups" >/dev/null ||
+    { fail "Expected only the completed connectivity group before creating the A routing group."; return 1; }
+  az network manager group create --name "ng-lzbegin-route-spokea-$RUN_ID" \
+    --network-manager-name "$AVNM" --resource-group "$RG_HUB" \
+    --description "Spoke A routing scope" -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokea_route_group
+```
+
+📋 **확인**
+
+연결용 Spoke Group과 새 A Routing Group이 별도로 표시됩니다.
+
+### 4-4. Spoke B 전용 Routing Group 생성
+
+👁️ **설명**
+
+B는 A와 반대쪽 `/16` 경로를 사용하므로 별도 Group이 필요합니다.
+
+🟢 **실행**
+
+<!-- exec:route-group-spokeb-create -->
+```bash
+create_spokeb_route_group() {
+  local groups route_a_id
+  route_a_id="$AVNM_ID/networkGroups/ng-lzbegin-route-spokea-$RUN_ID"
+  groups=$(az network manager group list --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg spokes "$NETWORK_GROUP_ID" --arg a "$route_a_id" '
+    type == "array" and length == 2 and
+    ([.[].id | ascii_downcase] | sort) ==
+      ([$spokes, $a] | map(ascii_downcase) | sort) and
+    all(.[]; .provisioningState == "Succeeded")
+  ' <<<"$groups" >/dev/null ||
+    { fail "Expected only the completed connectivity and A routing groups."; return 1; }
+  az network manager group create --name "ng-lzbegin-route-spokeb-$RUN_ID" \
+    --network-manager-name "$AVNM" --resource-group "$RG_HUB" \
+    --description "Spoke B routing scope" -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokeb_route_group
+```
+
+📋 **확인**
+
+이제 연결용 Group 하나와 A/B Routing Group 두 개가 있습니다.
+
+### 4-5. A Routing Group에 Spoke A 등록
+
+👁️ **설명**
+
+A Routing Group이 비어 있을 때만 A VNet을 추가합니다. 기존 멤버가 있으면 덮어쓰지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:route-member-spokea -->
+```bash
+create_spokea_route_member() {
+  local members
+  members=$(az network manager group static-member list \
+    --network-group "ng-lzbegin-route-spokea-$RUN_ID" --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$members" >/dev/null ||
+    { fail "Spoke A routing group already contains a member."; return 1; }
+  az network manager group static-member create --name spokea \
+    --network-group "ng-lzbegin-route-spokea-$RUN_ID" --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --resource-id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokea_route_member
+```
+
+📋 **확인**
+
+A Routing Group의 유일한 정적 멤버가 Spoke A VNet입니다.
+
+### 4-6. B Routing Group에 Spoke B 등록
+
+👁️ **설명**
+
+B Routing Group이 비어 있을 때만 B VNet을 추가합니다. A를 B Group에 넣지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:route-member-spokeb -->
+```bash
+create_spokeb_route_member() {
+  local members
+  members=$(az network manager group static-member list \
+    --network-group "ng-lzbegin-route-spokeb-$RUN_ID" --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$members" >/dev/null ||
+    { fail "Spoke B routing group already contains a member."; return 1; }
+  az network manager group static-member create --name spokeb \
+    --network-group "ng-lzbegin-route-spokeb-$RUN_ID" --network-manager "$AVNM" \
+    --resource-group "$RG_HUB" \
+    --resource-id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_spokeb_route_member
+```
+
+📋 **확인**
+
+B Routing Group의 유일한 정적 멤버가 Spoke B VNet입니다. A/B를 서로의 Group에 넣지 마세요.
 
 ## 5. Hub-and-Spoke Connectivity Configuration 만들기
 
@@ -805,7 +973,7 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 
 📋 **확인**
 
-- AVNM은 Connectivity-only scope입니다.
+- AVNM은 Connectivity·SecurityAdmin·Routing 범위입니다.
 - Network Group에는 Spoke A와 Spoke B만 있습니다.
 - Connectivity Configuration은 `HubAndSpoke`, `deleteExistingPeering=False`, `isGlobal=False`입니다.
 - Hub에는 두 개, 각 Spoke에는 하나의 `Connected` Peering이 있습니다.

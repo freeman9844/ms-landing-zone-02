@@ -66,6 +66,7 @@ clear_run() {
   unset RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
     AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID \
+    ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID \
     RG SUBNET PREFIX VNET VM NSG ||
     { fail "Cannot clear previous workshop variables."; return 1; }
 }
@@ -112,10 +113,12 @@ load_run() {
   AVNM_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
   NETWORK_GROUP_ID="$AVNM_ID/networkGroups/$NETWORK_GROUP"
   CONNECTIVITY_CONFIG_ID="$AVNM_ID/connectivityConfigurations/$CONNECTIVITY_CONFIG"
+  ROUTE_GROUP_A_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokea-$RUN_ID"
+  ROUTE_GROUP_B_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokeb-$RUN_ID"
   # 하위 스크립트도 같은 실습 정보를 사용하도록 환경 변수로 전달합니다.
   export RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
-    AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID
+    AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID
 }
 
 # 구독을 자동 변경하지 않습니다. 불일치하면 사용자가 올바른 구독을 명시적으로 선택해야 합니다.

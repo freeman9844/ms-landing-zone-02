@@ -59,6 +59,12 @@ def avnm_name(state=STATE):
 def network_group_name(state=STATE):
     return f"ng-lzbegin-spokes-{state['runId']}"
 
+def routing_group_name(zone, state=STATE):
+    return f"ng-lzbegin-route-{zone}-{state['runId']}"
+
+def routing_group_id(zone, state=STATE):
+    return avnm_id(state) + "/networkGroups/" + routing_group_name(zone, state)
+
 
 def connectivity_config_name(state=STATE):
     return f"cc-lzbegin-hub-spoke-{state['runId']}"
@@ -199,6 +205,15 @@ def avnm_cases():
     hub = netid("hub", "virtualNetworks", vnet("hub"))
     spokea = netid("spokea", "virtualNetworks", vnet("spokea"))
     spokeb = netid("spokeb", "virtualNetworks", vnet("spokeb"))
+    manager = avnm_id()
+    manager_body = {
+        "location": "koreacentral",
+        "properties": {
+            "description": "Beginner Hub and Spoke connectivity",
+            "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"]},
+            "networkManagerScopeAccesses": ["Connectivity", "SecurityAdmin", "Routing"],
+        },
+    }
     hubs = json.dumps([{
         "resourceId": hub,
         "resourceType": "Microsoft.Network/virtualNetworks",
@@ -209,20 +224,26 @@ def avnm_cases():
         "isGlobal": False,
         "useHubGateway": False,
     }], separators=(",", ":"))
+    initial_group = {"name": network_group_name(), "id": network_group_id(),
+                     "provisioningState": "Succeeded"}
+    route_a_group = {"name": routing_group_name("spokea"), "id": routing_group_id("spokea"),
+                     "provisioningState": "Succeeded"}
     return {
         "avnm-create": [
             az(["network", "manager", "list", "--resource-group", rg("hub"), "-o", "json"], []),
             az([
-                "network", "manager", "create",
-                "--location", "koreacentral",
-                "--name", "avnm-lzbegin-demo123",
-                "--resource-group", rg("hub"),
-                "--scope-accesses", "Connectivity",
-                "--network-manager-scopes",
-                f"subscriptions=/subscriptions/{SUB}",
-                "--description", "Beginner Hub and Spoke connectivity",
+                "rest", "--method", "put",
+                "--url", f"{manager}?api-version=2025-01-01",
+                "--body", json.dumps(manager_body, separators=(",", ":")),
                 "-o", "json",
-            ]),
+            ], {"id": manager, "properties": {
+                **manager_body["properties"], "provisioningState": "Succeeded"}}),
+        ],
+        "avnm-ready": [
+            az(["network", "manager", "show", "--name", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json"],
+               {"id": manager, "properties": {
+                   **manager_body["properties"], "provisioningState": "Succeeded"}}),
         ],
         "network-group-create": [
             az([
@@ -275,6 +296,40 @@ def avnm_cases():
                 "--resource-id", spokeb,
                 "-o", "json",
             ]),
+        ],
+        "route-group-spokea-create": [
+            az(["network", "manager", "group", "list", "--network-manager-name", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json"], [initial_group]),
+            az(["network", "manager", "group", "create",
+                "--name", routing_group_name("spokea"),
+                "--network-manager-name", avnm_name(), "--resource-group", rg("hub"),
+                "--description", "Spoke A routing scope", "-o", "json"]),
+        ],
+        "route-group-spokeb-create": [
+            az(["network", "manager", "group", "list", "--network-manager-name", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json"], [initial_group, route_a_group]),
+            az(["network", "manager", "group", "create",
+                "--name", routing_group_name("spokeb"),
+                "--network-manager-name", avnm_name(), "--resource-group", rg("hub"),
+                "--description", "Spoke B routing scope", "-o", "json"]),
+        ],
+        "route-member-spokea": [
+            az(["network", "manager", "group", "static-member", "list",
+                "--network-group", routing_group_name("spokea"), "--network-manager", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json"], []),
+            az(["network", "manager", "group", "static-member", "create",
+                "--name", "spokea", "--network-group", routing_group_name("spokea"),
+                "--network-manager", avnm_name(), "--resource-group", rg("hub"),
+                "--resource-id", spokea, "-o", "json"]),
+        ],
+        "route-member-spokeb": [
+            az(["network", "manager", "group", "static-member", "list",
+                "--network-group", routing_group_name("spokeb"), "--network-manager", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json"], []),
+            az(["network", "manager", "group", "static-member", "create",
+                "--name", "spokeb", "--network-group", routing_group_name("spokeb"),
+                "--network-manager", avnm_name(), "--resource-group", rg("hub"),
+                "--resource-id", spokeb, "-o", "json"]),
         ],
         "connectivity-config-create": [
             az([
@@ -677,6 +732,39 @@ printf 'SHELL_ALIVE\\n'
                 result = self.execute(3, name, calls[:1])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
+
+    def test_avnm_creation_rejects_wrong_scope_and_foreign_resource_id(self):
+        calls = avnm_cases()["avnm-create"]
+        original = json.loads(calls[-1]["stdout"])
+        for changed in (
+            dict(original, id="unexpected"),
+            dict(original, properties=dict(original["properties"],
+                networkManagerScopeAccesses=["Connectivity", "SecurityAdmin"])),
+            dict(original, properties=dict(original["properties"],
+                networkManagerScopes={"subscriptions": ["/subscriptions/00000000-0000-0000-0000-000000000000"]})),
+        ):
+            with self.subTest(response=changed):
+                result = self.execute(3, "avnm-create",
+                                      [calls[0], dict(calls[-1], stdout=json.dumps(changed))])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+    def test_avnm_creation_accepts_scope_resource_id_case_variants(self):
+        calls = avnm_cases()["avnm-create"]
+        response = json.loads(calls[-1]["stdout"])
+        response["properties"]["networkManagerScopes"]["subscriptions"][0] = (
+            response["properties"]["networkManagerScopes"]["subscriptions"][0].upper())
+        result = self.execute(3, "avnm-create",
+                              [calls[0], dict(calls[-1], stdout=json.dumps(response))])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_state_restores_distinct_spoke_routing_group_ids(self):
+        script = ('source scripts/workshop-common.sh\nload_run state.json\n'
+                  'printf "%s\\n%s\\n" "$ROUTE_GROUP_A_ID" "$ROUTE_GROUP_B_ID"\n')
+        result = run(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         [routing_group_id("spokea"), routing_group_id("spokeb")])
 
     def test_member_lists_reject_unapproved_topology_membership(self):
         valid = [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]
