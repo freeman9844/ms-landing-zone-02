@@ -573,7 +573,53 @@ inspect_effective_spokea
 
 📋 **확인**
 
-Spoke A에서도 같은 configuration ID가 보여야 합니다.
+아래는 Spoke A에서 확인한 결과를 바탕으로 한 **출력 예시**입니다.
+`<구독 ID>`와 `<실행 ID>`는 자신의 값으로 바꿔 비교하세요.
+
+```json
+{
+  "skipToken": "",
+  "value": [
+    {
+      "appliesToGroups": [
+        {
+          "groupConnectivity": "None",
+          "isGlobal": "False",
+          "networkGroupId": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/networkGroups/ng-lzbegin-spokes-<실행 ID>",
+          "useHubGateway": "False"
+        }
+      ],
+      "configurationGroups": [
+        {
+          "description": "Workshop spoke virtual networks",
+          "id": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/networkGroups/ng-lzbegin-spokes-<실행 ID>",
+          "provisioningState": "Succeeded",
+          "resourceGroup": "rg-lzbegin-hub-<실행 ID>"
+        }
+      ],
+      "connectivityTopology": "HubAndSpoke",
+      "deleteExistingPeering": "False",
+      "description": "AVNM managed beginner hub and spoke",
+      "hubs": [
+        {
+          "resourceId": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-<실행 ID>",
+          "resourceType": "Microsoft.Network/virtualNetworks"
+        }
+      ],
+      "id": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/connectivityConfigurations/cc-lzbegin-hub-spoke-<실행 ID>",
+      "isGlobal": "False",
+      "provisioningState": "Succeeded",
+      "resourceGroup": "rg-lzbegin-hub-<실행 ID>"
+    }
+  ]
+}
+```
+
+`value`에 이번 구성 하나만 있고 `id`는 `$CONNECTIVITY_CONFIG_ID`,
+`hubs[0].resourceId`는 이번 Hub VNet ID, `appliesToGroups[0].networkGroupId`는
+`$NETWORK_GROUP_ID`와 각각 전체 ID가 일치해야 합니다. `connectivityTopology`는
+`HubAndSpoke`, `provisioningState`는 `Succeeded`인지 확인하세요. 예시의
+`"False"`는 실제 Azure CLI 응답의 문자열 표현이며, 검사 명령은 boolean `false`도 허용합니다.
 
 ## 9. Spoke B의 effective connectivity 확인
 
