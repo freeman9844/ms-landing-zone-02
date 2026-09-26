@@ -144,10 +144,10 @@ inspect_avnm_ready() {
   expected_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
   jq -e --arg id "$expected_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
     ((.id | ascii_downcase) == ($id | ascii_downcase)) and
-    .properties.provisioningState == "Succeeded" and
-    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
-    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
-    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+    .provisioningState == "Succeeded" and
+    (.networkManagerScopes.subscriptions | type == "array" and length == 1) and
+    ((.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
   ' <<<"$manager" >/dev/null ||
     { fail "AVNM scope or provisioning state is not ready."; return 1; }
   printf '%s\n' "$manager"
@@ -956,7 +956,8 @@ flowchart LR
 ```
 
 AVNM이 Hub↔Spoke Peering을 자동으로 만들었더라도 Spoke A의 패킷이 Hub를 거쳐 B로 자동 중계되지는 않습니다.
-모듈 04에서 실패를 확인한 뒤 모듈 05–06에서 Firewall과 **왕복 UDR**로 해결합니다.
+다음 모듈에서 VM을 만들기 전에 Firewall과 AVNM Routing의 **왕복 경로**를
+준비합니다. 따라서 경로가 없는 상태의 VM 통신 실패 실험은 수행하지 않습니다.
 임의로 A↔B 직접 Peering을 추가하면 비전이성 학습 목표가 사라집니다.
 
 <a id="트러블슈팅"></a>
@@ -991,7 +992,7 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 | commit은 성공했지만 effective configuration이 안 보임 | 잠시 기다린 뒤 effective 블록을 다시 실행 |
 | 생성 시 이미 자원이 있음 | 생성 블록을 재실행하지 말고 자원 상태를 확인하고 남은 단계부터 진행 |
 | Hub가 group member로 들어감 | Hub를 member에서 제거하고 hub 필드로만 지정 |
-| Connected인데 통신 불가 | NSG·VM 서비스·경로를 별도로 확인; 모듈 04 이후 단계에서 검증 |
+| Connected인데 통신 불가 | 모듈 04의 AVNM Routing·Firewall과 모듈 05의 Security Admin·VM 서비스를 각각 확인 |
 | 소유 검사 실패 | 활성 구독과 상태 파일 확인 후 공통 준비 재실행; 태그로 우회하지 않기 |
 
 ## 완료 체크
@@ -1003,5 +1004,5 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 ## 다음 단계
 
 - [이전: 네트워크 뼈대](02-network-foundation.md)
-- [다음: 통신과 NSG](04-connectivity-nsg.md)
+- [다음: Firewall과 AVNM Routing](04-connectivity-nsg.md)
 - [중단 시 정리](07-cleanup-production.md)

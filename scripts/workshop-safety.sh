@@ -97,106 +97,170 @@ firewall_ready_ip() {
   printf '%s\n' "$ip"
 }
 
-# 첫 Subnet 전환 전에도 두 테이블의 왕복 /16·기본 /0 및 원격 VNet ID로 찾은 네 방향 전달 허용을 검사합니다.
-assert_route_tables_ready() {
-  local ip="$1" zone rg remote table data local_zone remote_zone local_rg remote_rg local_vnet remote_id peering_name peering
+# AVNM 구성과 적용된 Subnet 테이블을 각각 검사합니다. 관리형 테이블의 이름이나 RG는 가정하지 않습니다.
+assert_avnm_routes_ready() {
+  local ip="${1:-}" config config_id zone rg group remote collection rule prefix data subnet table_id table
   assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
+  config=$(az network manager routing-config show -g "$RG_HUB" --manager-name "$AVNM" \
+    -n "rc-lzbegin-spokes-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$config_id" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    (.routeTableUsageMode == null or .routeTableUsageMode == "ManagedOnly")
+  ' <<< "$config" >/dev/null || { fail "Unexpected AVNM routing configuration."; return 1; }
   for zone in spokea spokeb; do
-    # 목적지 접두사는 상대 Spoke입니다. next hop IP는 두 방향 모두 같은 Firewall이어야 합니다.
     case "$zone" in
-      spokea) rg="$RG_SPOKEA"; remote=10.20.0.0/16 ;;
-      spokeb) rg="$RG_SPOKEB"; remote=10.10.0.0/16 ;;
+      spokea) rg="$RG_SPOKEA"; group="$ROUTE_GROUP_A_ID"; remote=10.20.0.0/16 ;;
+      spokeb) rg="$RG_SPOKEB"; group="$ROUTE_GROUP_B_ID"; remote=10.10.0.0/16 ;;
     esac
     assert_owned_rg "$rg" || return 1
-    table="rt-lzbegin-$zone-$RUN_ID"
-    data=$(az network route-table show -g "$rg" -n "$table" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    # 이 실습의 두 경로만 허용합니다. 운영 경로가 섞인 테이블을 실습 대상으로 간주하지 않습니다.
-    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/routeTables/$table" \
-      --arg remote "$remote" --arg ip "$ip" '
-      (.id | ascii_downcase) == ($id | ascii_downcase) and (.routes | type == "array" and length == 2) and
-      any(.routes[]; .name == "to-other-spoke" and .addressPrefix == $remote and
-        .nextHopType == "VirtualAppliance" and .nextHopIpAddress == $ip) and
-      any(.routes[]; .name == "to-internet" and .addressPrefix == "0.0.0.0/0" and
-        .nextHopType == "VirtualAppliance" and .nextHopIpAddress == $ip)
-    ' <<< "$data" >/dev/null || { fail "Incomplete or unexpected routes: $table"; return 1; }
-    for local_zone in hub "$zone"; do
-      if [[ "$local_zone" == hub ]]; then
-        local_rg="$RG_HUB"; remote_zone="$zone"; remote_rg="$rg"
-      else
-        local_rg="$rg"; remote_zone=hub; remote_rg="$RG_HUB"
-      fi
-      local_vnet="vnet-lzbegin-$local_zone-$RUN_ID"
-      remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$remote_zone-$RUN_ID"
-      peering_name=$(peering_name_for_remote "$local_rg" "$local_vnet" "$remote_id") || return 1
-      peering=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
-        -n "$peering_name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-      # Connected와 전달 허용뿐 아니라 상대 VNet ID도 대조합니다. Peering만으로 경로가 생기지는 않습니다.
-      jq -e --arg remote "$remote_id" '
-        .peeringState == "Connected" and .allowForwardedTraffic == true and
-        .allowVirtualNetworkAccess == true and
-        (.remoteVirtualNetwork.id | ascii_downcase) == ($remote | ascii_downcase)
-      ' <<< "$peering" >/dev/null || { fail "Peering is not ready for forwarded traffic."; return 1; }
+    collection=$(az network manager routing-config rule-collection show \
+      -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+      -n "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$config_id/ruleCollections/$zone" --arg group "$group" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and
+      .provisioningState == "Succeeded" and
+      (.appliesTo | type == "array" and length == 1) and
+      (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
+    ' <<< "$collection" >/dev/null || { fail "Unexpected routing target: $zone"; return 1; }
+    for rule in to-other-spoke to-internet; do
+      if [[ "$rule" == to-other-spoke ]]; then prefix="$remote"; else prefix=0.0.0.0/0; fi
+      data=$(az network manager routing-config rule-collection rule show \
+        -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+        --collection-name "$zone" -n "$rule" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+      jq -e --arg id "$config_id/ruleCollections/$zone/rules/$rule" \
+        --arg prefix "$prefix" --arg ip "$ip" '
+        (.id | ascii_downcase) == ($id | ascii_downcase) and
+        .provisioningState == "Succeeded" and
+        .destination.type == "AddressPrefix" and
+        .destination.destinationAddress == $prefix and
+        .nextHop.nextHopType == "VirtualAppliance" and
+        .nextHop.nextHopAddress == $ip
+      ' <<< "$data" >/dev/null || { fail "Unexpected AVNM routing rule: $zone/$rule"; return 1; }
     done
+    subnet=$(az network vnet subnet show -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
+      -n snet-workload -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    table_id=$(jq -er --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/snet-workload" \
+      --arg sub "$SUBSCRIPTION_ID" '
+      if (.id | ascii_downcase) != ($id | ascii_downcase) then error("Subnet ID mismatch") else . end
+      | .routeTable.id
+      | select(type == "string")
+      | select(ascii_downcase | startswith("/subscriptions/" + ($sub | ascii_downcase) + "/resourcegroups/"))
+      | select(ascii_downcase | test("/providers/microsoft.network/routetables/[^/]+$"))
+    ' <<< "$subnet") || { fail "No verified AVNM route table association: $zone"; return 1; }
+    table=$(az network route-table show --ids "$table_id" -o json \
+      --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$table_id" --arg remote "$remote" --arg ip "$ip" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and
+      (.routes | type == "array" and length == 2) and
+      all(.routes[]; .provisioningState == "Succeeded" and
+        .nextHopType == "VirtualAppliance" and .nextHopIpAddress == $ip) and
+      ([.routes[].addressPrefix] | sort) == ([$remote, "0.0.0.0/0"] | sort)
+    ' <<< "$table" >/dev/null || { fail "Subnet routes are not deployed: $zone"; return 1; }
   done
 }
 
-# detach → nat → pip의 현재 참조 관계를 검사합니다. 삭제나 확인 입력은 교재의 개별 블록에 남깁니다.
-assert_spoke_nat_removal() {
-  local zone="${1:-}" stage="${2:-}" rg base nat_id pip_id subnet_id subnet nat pip nats
-  # stage는 교재에서 실행할 다음 변경입니다: detach=Subnet 분리, nat=NAT 삭제, pip=Public IP 삭제.
-  # Hub를 허용하지 않아 관리 VM의 NAT나 Firewall Public IP를 이 절차로 제거하지 못하게 합니다.
-  case "$zone" in
-    spokea) rg="$RG_SPOKEA" ;;
-    spokeb) rg="$RG_SPOKEB" ;;
-    *) fail "Only an exact Spoke may lose its NAT."; return 1 ;;
-  esac
-  [[ "$stage" == detach || "$stage" == nat || "$stage" == pip ]] ||
-    { fail "Unknown NAT removal stage."; return 1; }
-  assert_owned_rg "$rg" || return 1
-  base="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network"
-  nat_id="$base/natGateways/nat-lzbegin-$zone-$RUN_ID"
-  pip_id="$base/publicIPAddresses/pip-lzbegin-$zone-$RUN_ID"
-  subnet_id="$base/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/snet-workload"
-  subnet=$(az network vnet subnet show -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
-    -n snet-workload -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  # 모든 단계에서 Firewall 경로 연결은 남아 있어야 합니다. NAT 삭제 단계부터는 Subnet이 분리된 상태여야 합니다.
-  jq -e --arg id "$subnet_id" --arg nat "$nat_id" --arg stage "$stage" \
-    --arg rt "$base/routeTables/rt-lzbegin-$zone-$RUN_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    (.routeTable.id | ascii_downcase) == ($rt | ascii_downcase) and
-    (if $stage == "detach" then (.natGateway.id | ascii_downcase) == ($nat | ascii_downcase)
-     else .natGateway == null end)
-  ' <<< "$subnet" >/dev/null || { fail "Unexpected subnet/NAT/route-table association."; return 1; }
-  if [[ "$stage" == pip ]]; then
-    # list 응답이 실제 배열인 경우만 부재로 인정합니다. show의 404/권한 오류를 서로 혼동하지 않습니다.
+# Spoke에는 실습용뿐 아니라 다른 NAT/PIP도 없어야 합니다. RG와 Subnet의 실제 상태를 대조합니다.
+assert_no_spoke_nat() {
+  local zone rg subnet nats pips
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
+    assert_owned_rg "$rg" || return 1
+    subnet=$(az network vnet subnet show -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
+      -n snet-workload -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e '.natGateway == null' <<< "$subnet" >/dev/null ||
+      { fail "Spoke subnet still has a NAT gateway: $zone"; return 1; }
     nats=$(az network nat gateway list -g "$rg" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "$nat_id" --arg name "nat-lzbegin-$zone-$RUN_ID" '
-      type == "array" and all(.[];
-        (.id | type == "string" and length > 0) and (.name | type == "string" and length > 0) and
-        (.id | ascii_downcase) != ($id | ascii_downcase) and
-        (.name | ascii_downcase) != ($name | ascii_downcase))
-    ' <<< "$nats" >/dev/null || { fail "NAT deletion has not been confirmed."; return 1; }
-  else
-    nat=$(az network nat gateway show -g "$rg" -n "nat-lzbegin-$zone-$RUN_ID" -o json \
-      --subscription "$SUBSCRIPTION_ID") || return 1
-    # 실습용 IP 하나와 예상 Subnet만 참조해야 합니다. 다른 연결이 있으면 함께 끊지 않도록 중단합니다.
-    jq -e --arg id "$nat_id" --arg pip "$pip_id" --arg subnet "$subnet_id" --arg stage "$stage" --arg run "$RUN_ID" '
-      (.id | ascii_downcase) == ($id | ascii_downcase) and .tags.runId == $run and .tags.workshop == "lz-beginner" and
-      .tags.environment == "lab" and .tags.managedBy == "workshop" and
-      (.publicIpAddresses | type == "array" and length == 1) and
-      (.publicIpAddresses[0].id | ascii_downcase) == ($pip | ascii_downcase) and
-      (if $stage == "detach" then (.subnets | type == "array" and length == 1) and
-         (.subnets[0].id | ascii_downcase) == ($subnet | ascii_downcase)
-       else (.subnets == null or (.subnets | type == "array" and length == 0)) end)
-    ' <<< "$nat" >/dev/null || { fail "Unexpected NAT ownership or references."; return 1; }
-  fi
-  pip=$(az network public-ip show -g "$rg" -n "pip-lzbegin-$zone-$RUN_ID" -o json \
+    pips=$(az network public-ip list -g "$rg" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e 'type == "array" and length == 0' <<< "$nats" >/dev/null ||
+      { fail "Unexpected Spoke NAT gateway: $zone"; return 1; }
+    jq -e 'type == "array" and length == 0' <<< "$pips" >/dev/null ||
+      { fail "Unexpected Spoke public IP: $zone"; return 1; }
+  done
+}
+
+# 단일 보안 구성의 대상 Group, 실제 NIC IP와 규칙 우선순위를 매번 재조회합니다.
+assert_admin_rules_ready() {
+  local hub="$1" a="$2" b="$3" stage="$4" config id zone group collection rule source destination access priority data count rules expected
+  [[ "$stage" == baseline || "$stage" == denied || "$stage" == restored ]] ||
+    { fail "Unknown Security Admin stage: $stage"; return 1; }
+  assert_ipv4_in_subnet "$hub" 10.0.1.0/24 || return 1
+  assert_ipv4_in_subnet "$a" 10.10.1.0/24 || return 1
+  assert_ipv4_in_subnet "$b" 10.20.1.0/24 || return 1
+  id="$AVNM_ID/securityAdminConfigurations/sc-lzbegin-http-$RUN_ID"
+  config=$(az network manager security-admin-config show -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$id" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and .provisioningState == "Succeeded"
+  ' <<< "$config" >/dev/null || { fail "Unexpected AVNM Security Admin configuration."; return 1; }
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then group="$ROUTE_GROUP_A_ID"; else group="$ROUTE_GROUP_B_ID"; fi
+    collection=$(az network manager security-admin-config rule-collection show \
+      -g "$RG_HUB" --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
+      --rule-collection-name "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$id/ruleCollections/$zone" --arg group "$group" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and
+      .provisioningState == "Succeeded" and
+      (.appliesToGroups | type == "array" and length == 1) and
+      (.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
+    ' <<< "$collection" >/dev/null || { fail "Unexpected Security Admin target: $zone"; return 1; }
+    rules=$(az network manager security-admin-config rule-collection rule list \
+      -g "$RG_HUB" --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
+      --rule-collection-name "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    if [[ "$zone" == spokea ]]; then
+      expected=$(jq -nc --arg id "$id/ruleCollections/spokea/rules" --arg stage "$stage" '
+        [$id + "/hub-to-a"] +
+        (if $stage == "denied" then [$id + "/deny-hub-to-a"] else [] end)')
+    else
+      expected=$(jq -nc --arg id "$id/ruleCollections/spokeb/rules" \
+        '[$id + "/hub-to-b", $id + "/a-to-b"]')
+    fi
+    jq -e --argjson expected "$expected" '
+      type == "array" and
+      ([.[] | .id | ascii_downcase] | sort) == ([$expected[] | ascii_downcase] | sort)
+    ' <<< "$rules" >/dev/null || { fail "Unexpected Security Admin rule set: $zone"; return 1; }
+    if [[ "$zone" == spokea ]]; then
+      count=0
+      for rule in hub-to-a deny-hub-to-a; do
+        [[ "$rule" != deny-hub-to-a || "$stage" == denied ]] || continue
+        source="$hub"; destination="$a"
+        if [[ "$rule" == deny-hub-to-a ]]; then access=Deny; priority=100
+        else access=AlwaysAllow; priority=200; fi
+        _assert_admin_rule "$id" "$zone" "$rule" "$source" "$destination" "$access" "$priority" || return 1
+        count=$((count + 1))
+      done
+      [[ "$count" == 1 || "$stage" == denied && "$count" == 2 ]] || return 1
+    else
+      _assert_admin_rule "$id" "$zone" hub-to-b "$hub" "$b" AlwaysAllow 210 || return 1
+      _assert_admin_rule "$id" "$zone" a-to-b "$a" "$b" AlwaysAllow 220 || return 1
+    fi
+  done
+}
+
+_assert_admin_rule() {
+  local id="$1" zone="$2" rule="$3" source="$4" destination="$5" access="$6" priority="$7" data
+  data=$(az network manager security-admin-config rule-collection rule show \
+    -g "$RG_HUB" --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
+    --rule-collection-name "$zone" --rule-name "$rule" -o json \
     --subscription "$SUBSCRIPTION_ID") || return 1
-  # 마지막 Public IP 삭제 전에는 NAT와 NIC 어느 쪽에서도 참조하지 않는지 확인합니다.
-  # 통신 검증과 사용자 확인 입력은 호출하는 교재 블록의 책임이며, 이 함수는 삭제를 수행하지 않습니다.
-  jq -e --arg id "$pip_id" --arg run "$RUN_ID" --arg stage "$stage" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and .tags.runId == $run and .tags.workshop == "lz-beginner" and
-    .tags.environment == "lab" and .tags.managedBy == "workshop" and
-    ($stage != "pip" or (.natGateway == null and .ipConfiguration == null))
-  ' <<< "$pip" >/dev/null || { fail "Unexpected public IP ownership or references."; return 1; }
+  jq -e --arg id "$id/ruleCollections/$zone/rules/$rule" \
+    --arg src "$source" --arg dest "$destination" \
+    --arg access "$access" --argjson priority "$priority" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    .kind == "Custom" and
+    .access == $access and .priority == $priority and
+    .direction == "Inbound" and .protocol == "Tcp" and
+    (.sourcePortRanges == null or .sourcePortRanges == ["*"]) and
+    .destinationPortRanges == ["8080"] and
+    (.sources | type == "array" and length == 1) and
+    .sources[0].addressPrefixType == "IPPrefix" and
+    .sources[0].addressPrefix == ($src + "/32") and
+    (.destinations | type == "array" and length == 1) and
+    .destinations[0].addressPrefixType == "IPPrefix" and
+    .destinations[0].addressPrefix == ($dest + "/32")
+  ' <<< "$data" >/dev/null || { fail "Unexpected Security Admin rule: $zone/$rule"; return 1; }
 }

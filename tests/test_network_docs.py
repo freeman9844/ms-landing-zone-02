@@ -242,8 +242,7 @@ def avnm_cases():
         "avnm-ready": [
             az(["network", "manager", "show", "--name", avnm_name(),
                 "--resource-group", rg("hub"), "-o", "json"],
-               {"id": manager, "properties": {
-                   **manager_body["properties"], "provisioningState": "Succeeded"}}),
+               {"id": manager, **manager_body["properties"], "provisioningState": "Succeeded"}),
         ],
         "network-group-create": [
             az([
@@ -690,20 +689,32 @@ printf 'SHELL_ALIVE\\n'
             for name, script in blocks(path).items():
                 with self.subTest(module=module, step=name):
                     assertions = re.findall(r"\bassert_\w+", script)
-                    if name.startswith("prepare-"):
+                    if re.fullmatch(r"prepare-\d\d", name):
                         expected = ["assert_subscription"]
                         if module in (3, 4, 5, 6):
                             expected.extend(["assert_owned_rg"] * 3)
                     elif module == 2 and name.endswith("-rg"):
                         expected = ["assert_owned_rg"]
-                    elif module == 6 and name.startswith("attach-routes-"):
-                        expected = ["assert_route_tables_ready"]
-                    elif module == 6 and name.startswith("remove-"):
-                        expected = ["assert_spoke_nat_removal"]
                     else:
-                        expected = []
+                        expected = {
+                            (4, "prepare-04-functions"): ["assert_resource_id"],
+                            (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
+                            (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
+                            (4, "routing-before-commit"): ["assert_no_spoke_nat"],
+                            (4, "inspect-avnm-routing-subnets"): ["assert_avnm_routes_ready",
+                                                                   "assert_no_spoke_nat"],
+                            (5, "vm-route-gate"): ["assert_avnm_routes_ready", "assert_no_spoke_nat"],
+                            (5, "inspect-no-spoke-nat"): ["assert_no_spoke_nat"],
+                            (5, "read-vm-ips"): ["assert_ipv4_in_subnet"] * 3,
+                            (5, "inspect-security-rules"): ["assert_admin_rules_ready"],
+                            (5, "inspect-admin-deny"): ["assert_admin_rules_ready"],
+                            (5, "inspect-admin-restored"): ["assert_admin_rules_ready"],
+                            (6, "validate-avnm-subnets"): ["assert_avnm_routes_ready", "assert_no_spoke_nat"],
+                            (6, "validate-effective-nic-routes"): ["assert_avnm_routes_ready"],
+                            (6, "firewall-deny"): ["assert_no_spoke_nat"],
+                        }.get((module, name), [])
                     self.assertEqual(assertions, expected)
-        for module in (3, 5):
+        for module in (3,):
             self.assertNotIn("source scripts/workshop-safety.sh", DOCS[module].read_text())
 
     def test_first_creation_rejects_any_existing_resource_without_writing(self):
@@ -746,6 +757,28 @@ printf 'SHELL_ALIVE\\n'
             with self.subTest(response=changed):
                 result = self.execute(3, "avnm-create",
                                       [calls[0], dict(calls[-1], stdout=json.dumps(changed))])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+    def test_avnm_readiness_requires_flattened_cli_scope_and_full_id(self):
+        valid = avnm_cases()["avnm-ready"][0]
+        self.assertEqual(self.execute(3, "avnm-ready", [valid]).returncode, 0)
+        response = json.loads(valid["stdout"])
+        for payload in (
+            {"id": response["id"], "properties": {
+                "provisioningState": "Succeeded",
+                "networkManagerScopes": response["networkManagerScopes"],
+                "networkManagerScopeAccesses": response["networkManagerScopeAccesses"],
+            }},
+            dict(response, id=response["id"] + "/unexpected-child"),
+            dict(response, networkManagerScopes={"subscriptions": [
+                "/subscriptions/99999999-9999-9999-9999-999999999999"]}),
+            dict(response, networkManagerScopeAccesses=["Connectivity", "SecurityAdmin"]),
+            dict(response, provisioningState="Updating"),
+        ):
+            with self.subTest(payload=payload):
+                altered = dict(valid, stdout=json.dumps(payload))
+                result = self.execute(3, "avnm-ready", [altered])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 

@@ -61,18 +61,20 @@ class DocsTests(unittest.TestCase):
         for path in paths:
             self.assertNotIn("az network vnet peering create", path.read_text(), path)
 
-    def test_avnm_scope_stays_connectivity_only(self):
-        text = "\n".join(
-            (ROOT / relative).read_text()
-            for relative in [
-                "README.md",
-                "docs/01-prerequisites.md",
-                "docs/03-avnm-connectivity.md",
-            ]
-        )
-        self.assertNotIn("--scope-accesses Connectivity SecurityAdmin", text)
-        self.assertNotIn("routing-config create", text)
-        self.assertNotIn("security-admin-config create", text)
+    def test_avnm_has_three_scopes_and_staged_firewall_routing_security_order(self):
+        manager = (ROOT / "docs/03-avnm-connectivity.md").read_text()
+        self.assertIn('networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]', manager)
+        module04 = (ROOT / "docs/04-connectivity-nsg.md").read_text()
+        module05 = (ROOT / "docs/05-firewall.md").read_text()
+        self.assertIn("routing-config", module04)
+        self.assertIn("firewall", module04.lower())
+        self.assertNotIn("vm-lzbegin-spokea", module04)
+        self.assertIn("security-admin-config", module05)
+        self.assertIn("lab-support.bicep", module05)
+        self.assertIn("assert_avnm_routes_ready", module04)
+        self.assertIn("assert_no_spoke_nat", module05)
+        text = "\n".join((ROOT / relative).read_text() for relative in
+                         ("README.md", "docs/01-prerequisites.md", "docs/03-avnm-connectivity.md"))
         self.assertNotIn("--connect-capabilities", text)
         self.assertNotIn("peeringEnforcement", text)
         self.assertNotIn("peering-enforcement", text)

@@ -61,9 +61,9 @@ class PreflightTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("quota", result.stderr)
 
-    def test_extension_reuses_running_vms_without_requesting_more_quota(self):
-        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --extension',
-                     ready_calls(existing=("hub", "spokea", "spokeb"), extension=True))
+    def test_firewall_preflight_skips_vm_checks_and_requires_log_provider(self):
+        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --firewall',
+                     ready_calls(extension=True)[:6])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS", result.stdout)
 
@@ -84,11 +84,12 @@ class PreflightTests(unittest.TestCase):
                      ready_calls(existing=("hub", "spokea"), current=4, limit=6))
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_extension_rejects_missing_vm(self):
-        calls = ready_calls(extension=True)[:7]
-        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --extension', calls)
+    def test_firewall_rejects_unregistered_log_provider(self):
+        calls = ready_calls(extension=True)[:6]
+        calls[-1]["stdout"] = "NotRegistered"
+        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --firewall', calls)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Missing", result.stderr)
+        self.assertIn("Microsoft.OperationalInsights", result.stderr)
 
     def test_existing_unready_vm_is_not_counted_as_allocated_capacity(self):
         for power in ("VM deallocated", "VM stopped"):

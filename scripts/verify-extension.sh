@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# 모듈 06의 Firewall allowed/denied/restored 상태를 경로·NSG·HTTP·로그·인터넷 출구로 교차 검증합니다.
-# 정책·UDR·NAT는 변경하지 않습니다. 교재에서 변경한 현재 상태를 실제 요청과 조회로 확인합니다.
+# 모듈 06의 Firewall allowed/denied/restored 상태를 AVNM 경로·보안·HTTP·로그·출구로 검증합니다.
+# 정책·경로는 변경하지 않습니다. 현재 상태를 실제 요청과 조회로 확인합니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/verify-common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
 [[ $# == 2 && "$2" =~ ^(allowed|denied|restored)$ ]] ||
   { fail "Usage: verify-extension.sh STATE_FILE allowed|denied|restored"; exit 1; }
 load_run "$1"
@@ -29,11 +30,19 @@ public_ip=$(az network public-ip show -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" -
 hub=$(vm_ip hub)
 a=$(vm_ip spokea)
 b=$(vm_ip spokeb)
+assert_avnm_routes_ready "$fw_ip"
+assert_no_spoke_nat
+assert_admin_rules_ready "$hub" "$a" "$b" restored
 # 요청 A→B와 응답 B→A가 같은 Firewall을 지나야 합니다. Hub→B의 직접 Peering은 그대로 유지합니다.
 route_proof spokea "$b" VirtualAppliance "$fw_ip"
 route_proof spokeb "$a" VirtualAppliance "$fw_ip"
+route_proof spokea 8.8.8.8 VirtualAppliance "$fw_ip"
+route_proof spokeb 8.8.8.8 VirtualAppliance "$fw_ip"
+route_proof hub "$a" VNetPeering
 route_proof hub "$b" VNetPeering
-nsg_proof spokeb "$b" "$a" Allow
+admin_proof spokea "$a" "$hub" Allow hub-to-a
+admin_proof spokeb "$b" "$a" Allow a-to-b
+http_proof "$1" hub "$a" spokea
 http_proof "$1" hub "$b" spokeb
 # 새 A→B 요청 직전에 시각을 기록해 이전 실습의 Allow/Deny 로그를 성공 증거로 재사용하지 않습니다.
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -67,4 +76,4 @@ for zone in spokea spokeb; do
     { fail "Egress IP mismatch/unverified: $response"; exit 1; }
   route_proof "$zone" "$destination" VirtualAppliance "$fw_ip"
 done
-printf 'PASS: extension %s has matching route, NSG, HTTP, Firewall log and egress evidence.\n' "$2"
+printf 'PASS: extension %s has matching AVNM routes, admin rules, HTTP, Firewall log and egress evidence.\n' "$2"

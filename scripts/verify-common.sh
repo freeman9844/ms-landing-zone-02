@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NSG·Firewall 검증기가 source로 공유하는 증거 수집 함수입니다. 라우팅이나 NSG 설정을 변경하지 않습니다.
+# 보안 정책·Firewall 검증기가 source로 공유하는 증거 수집 함수입니다. Azure 설정은 변경하지 않습니다.
 # HTTP 확인은 Run Command로 게스트에서 실행하며, Azure API 조회 결과와 함께 판정해야 합니다.
 source "$(dirname "${BASH_SOURCE[0]}")/workshop-common.sh"
 VERIFY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,19 +24,27 @@ print(address)
 PY
 }
 
-# Network Watcher의 IP flow 판정은 NSG 증거입니다. 실제 HTTP 연결 성공이나 경로 존재를 보장하지 않습니다.
+# Network Watcher의 IP flow 판정은 Admin Rule 증거입니다. 실제 HTTP 연결 성공이나 경로 존재를 보장하지 않습니다.
 # local은 대상 VM의 8080, remote는 출발지 IP와 판정용 클라이언트 포트입니다.
 # 50000은 NSG 판정용 예시 출발지 포트입니다. 실제 curl이 그 포트를 사용했다는 뜻은 아닙니다.
-nsg_proof() {
-  local zone="$1" destination="$2" source="$3" expected="$4" result
+admin_proof() {
+  local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" result
   zone_context "$zone" || return 1
   result=$(az network watcher test-ip-flow -g "$RG" --vm "$VM" --direction Inbound \
     --protocol TCP --local "$destination:8080" --remote "$source:50000" -o json) || return 1
-  # Deny 실습은 다른 규칙의 우연한 차단이 아니라 교재의 test-deny-hub 규칙이 적용되어야 합니다.
-  jq -e --arg expected "$expected" '.access == $expected and (.ruleName | type == "string" and length > 0)
-    and ($expected != "Deny" or (.ruleName | split("/") | last) == "test-deny-hub")' \
-    <<< "$result" >/dev/null || { fail "NSG evidence does not show $expected: $result"; return 1; }
-  printf 'NSG: %s\n' "$result"
+  jq -e --arg expected "$expected" --arg rule "$rule" '
+    .access == $expected and
+    (.ruleName | type == "string") and
+    (.ruleName == $rule or
+      ((.ruleName | ascii_downcase) ==
+        ("/subscriptions/" + ($sub | ascii_downcase) + "/resourcegroups/" + ($rg | ascii_downcase) +
+         "/providers/microsoft.network/networkmanagers/" + ($manager | ascii_downcase) +
+         "/securityadminconfigurations/" + ($config | ascii_downcase) +
+         "/rulecollections/" + ($zone | ascii_downcase) + "/rules/" + ($rule | ascii_downcase))))
+  ' --arg sub "$SUBSCRIPTION_ID" --arg rg "$RG_HUB" --arg manager "$AVNM" \
+    --arg config "sc-lzbegin-http-$RUN_ID" --arg zone "$zone" \
+    <<< "$result" >/dev/null || { fail "Admin rule evidence does not show $rule/$expected: $result"; return 1; }
+  printf 'Admin rule: %s\n' "$result"
 }
 
 # 설정한 route table이 아니라 NIC의 유효 경로를 검사합니다. Firewall 경유 시 사설 next-hop IP도 비교합니다.

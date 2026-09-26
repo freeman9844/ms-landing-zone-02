@@ -1,701 +1,1065 @@
-# 04. 통신과 최소 권한
+# 04. 중앙 Firewall과 AVNM Routing
 
-> 목표 시간 30분. 공인 IP 없는 VM 3대로 “연결됨”과 “허용됨”을 구분합니다.
-> VM 준비 시간과 Run Command 대기 때문에 더 걸릴 수 있습니다.
+> 목표 시간 35–50분. Firewall 배포와 AVNM 전파에는 추가 시간이 걸릴 수 있습니다. **VM 생성 전** 완료하는 모듈입니다.
 
 ## 공통 준비
 
 👁️ **설명**
 
-모듈 03의 **AVNM Connectivity 배포가 만든 Hub↔Spoke Peering**이 먼저 필요합니다.
-모듈 01의 `STATE_FILE`을 사용합니다.
-준비는 한 번만 실행하며 이후 블록은 같은 Cloud Shell 세션을 공유합니다.
-재접속 후 활성 구독이 원래 구독과 같다면 공통 준비를 실행하세요.
-`STATE_FILE`이 비어 있으면 기존 JSON 경로를 묻습니다.
-**`.workshop-state/<실행 ID>.json`처럼 폴더 앞의 점까지** 입력하세요.
-활성 구독이 다르거나 다른 실습/구독으로 전환했다면
-[모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
-경로가 이미 설정돼 있으면 다시 묻지 않습니다.
-**한 블록 실행 → 확인 → 다음 설명** 순서로 진행합니다.
-실패하면 다음 단계로 넘어가지 않습니다. `&&`는 앞 명령 실패 시 다음 작업을 막되 셸을 종료하지 않습니다.
-현재 구독과 세 RG의 소유권은 **아래 준비에서 한 번만 확인**합니다.
-이후에는 같은 실습의 구독·RG 변수를 유지하고 개별 Azure CLI 명령을 실행합니다.
-자원 ID/IP를 되풀이해서 검사하는 `assert`는 사용하지 않으며, 조회 결과와 통신 검증으로 확인합니다.
-이 시점의 AVNM은 연결만 관리합니다. Spoke A→B 패킷을 대신 전달하지 않으므로,
-이 모듈에서는 NSG가 허용되어도 A→B가 계속 실패해야 정상입니다.
+모듈 03에서 AVNM의 `Connectivity`·`SecurityAdmin`·`Routing` 범위, Hub↔Spoke
+연결 및 서로 겹치지 않는 A/B Routing Group을 준비했습니다. 이 모듈은 Hub에
+Firewall Standard·Policy·로그를 먼저 설치하고, 네 Peering의 전달 허용을 확인한 다음
+AVNM으로 Spoke A/B의 경로를 배포합니다. **Spoke NAT Gateway/Public IP나 VM은
+만들지 않습니다.** Hub 관리 VM의 NAT는 다음 모듈에서 배포하며, 이 모듈에서는
+Hub NAT를 만들거나 기존 것을 분리하지 않습니다.
+
+모듈 01의 `STATE_FILE`을 사용합니다. 재접속했다면
+[세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구) 후 같은 Cloud Shell
+Bash에서 준비 블록을 다시 실행하세요. 경로를 입력해야 한다면
+`.workshop-state/<실행 ID>.json`의 앞 점도 포함합니다. 각 **🟢 실행 → 📋 확인**
+후 다음 블록으로 이동하세요. 오류나 다른 ID/상태가 나오면 **다음 단계로 진행하지
+마세요**. 함수는 실패를 반환하지만 Cloud Shell 전체를 종료하지 않습니다.
+공통 준비 직후 아래 **읽기 전용 함수 준비**도 실행합니다. 재접속하면 두 블록을
+다시 실행해야 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
+2-13, 4-9, 5절에서 이전 **읽기 전용 검사 함수**를 호출할 때 재접속으로 함수가
+없어졌다면 각각 2-11, 4-8, 4-10의 검사 블록을 다시 실행하세요. 이 블록들은
+자원을 변경하지 않습니다. 2-8/4-2/4-4 등 **생성 블록을 재실행해서 함수를
+복구하지 마세요**.
 
 🟢 **실행**
 
 <!-- exec:prepare-04 -->
 ```bash
-source scripts/workshop-common.sh &&
-ensure_state_file &&
-load_run "$STATE_FILE" &&
-assert_subscription &&
-assert_owned_rg "$RG_HUB" &&
-assert_owned_rg "$RG_SPOKEA" &&
-assert_owned_rg "$RG_SPOKEB"
+prepare_routing_session() {
+  source scripts/workshop-common.sh || return 1
+  source scripts/workshop-safety.sh || return 1
+  ensure_state_file || return 1
+  load_run "$STATE_FILE" || return 1
+  assert_subscription || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  assert_owned_rg "$RG_SPOKEA" || return 1
+  assert_owned_rg "$RG_SPOKEB"
+}
+prepare_routing_session
 ```
 
 📋 **확인**
 
-오류 없이 프롬프트로 돌아옵니다. 아직 자원을 배포하지 않았습니다.
+오류 없이 종료됩니다. `ROUTE_GROUP_A_ID`/`ROUTE_GROUP_B_ID`는 상태에서 파생한
+**서로 다른 전체 Group ID**입니다. 이후 블록은 같은 셸에서 실행합니다.
 
-## 1. VM과 NAT 배포 준비
-
-👁️ **설명**
-
-네트워킹이 학습 주제이므로 반복적인 VM/NIC/디스크 구성은 **하나의 보조 Bicep 배포**로 유지합니다.
-VM 3대·디스크·NIC·NAT Gateway 3개·Public IP 3개를 만들지만 기존 Subnet을 덮어쓰지 않습니다.
-Bicep은 원하는 자원 상태를 파일로 표현합니다. `what-if`는 미리 보기, `create`는 실제 배포입니다.
-세 RG를 대상으로 하므로 구독 범위의 `az deployment sub`를 사용합니다.
-NAT는 나가는 연결의 주소 변환이지 방화벽이 아닙니다.
-
-### 1-1. 로컬 SSH 키 준비
+### 공통 함수 준비 (Azure 변경 없음)
 
 👁️ **설명**
 
-공개 키만 VM 생성에 사용하며 SSH 인바운드를 열지는 않습니다. 개인 키를 Git에 올리지 마세요.
-이 단계는 로컬 파일만 준비합니다. 뒤의 미리 보기/배포는 키 경로를 직접 읽습니다.
+다음 단계에서 재사용하는 Peering·collection·rule 생성 함수의 **정의만**
+준비합니다. 실행만으로 Azure 요청을 보내지 않습니다. 기능은 앞 공통 준비에서
+불러온 `workshop-common.sh`·`workshop-safety.sh`의 검사를 사용합니다.
 
 🟢 **실행**
 
-<!-- exec:support-key -->
+<!-- exec:prepare-04-functions -->
 ```bash
-mkdir -p -m 700 ".workshop-keys/$RUN_ID" &&
-chmod 700 ".workshop-keys/$RUN_ID" &&
-if [[ ! -e ".workshop-keys/$RUN_ID/id_ed25519" && ! -e ".workshop-keys/$RUN_ID/id_ed25519.pub" ]]; then
-  ssh-keygen -t ed25519 -N '' -f ".workshop-keys/$RUN_ID/id_ed25519" -C "lz-beginner-$RUN_ID"
-else
-  test -s ".workshop-keys/$RUN_ID/id_ed25519" &&
-  test -s ".workshop-keys/$RUN_ID/id_ed25519.pub"
-fi
+forward_peering() {
+  local local_rg="$1" local_vnet="$2" remote_rg="$3" remote_vnet="$4" remote_id name before after
+  remote_id=$(az network vnet show -g "$remote_rg" -n "$remote_vnet" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  assert_resource_id "$remote_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/$remote_vnet" || return 1
+  name=$(peering_name_for_remote "$local_rg" "$local_vnet" "$remote_id") || return 1
+  before=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
+    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$remote_id" '.peeringState == "Connected" and
+    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)' <<< "$before" >/dev/null ||
+    { fail "Peering is not connected to the expected remote VNet."; return 1; }
+  az network vnet peering update -g "$local_rg" --vnet-name "$local_vnet" \
+    -n "$name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  after=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
+    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$remote_id" '.peeringState == "Connected" and .allowForwardedTraffic == true and
+    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)' <<< "$after" >/dev/null ||
+    { fail "Peering forwarding did not become active."; return 1; }
+  printf 'PASS: %s/%s -> %s\n' "$local_rg" "$local_vnet" "$remote_vnet"
+}
+create_routing_collection() {
+  local zone="$1" group="$2" applies result id
+  applies=$(jq -cn --arg id "$group" '[{networkGroupId:$id}]') || return 1
+  result=$(az network manager routing-config rule-collection create \
+    -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+    -n "$zone" --applies-to "$applies" --disable-bgp-route true \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$zone"
+  jq -e --arg id "$id" --arg group "$group" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    (.appliesTo | type == "array" and length == 1) and
+    (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
+  ' <<< "$result" >/dev/null || { fail "Unexpected routing collection or target: $zone"; return 1; }
+  printf '%s\n' "$result"
+}
+create_routing_rule() {
+  local zone="$1" name="$2" prefix="$3" fw_ip destination next_hop result id
+  fw_ip=$(firewall_ready_ip) || return 1
+  destination=$(jq -cn --arg prefix "$prefix" '{type:"AddressPrefix",destinationAddress:$prefix}') || return 1
+  next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') || return 1
+  result=$(az network manager routing-config rule-collection rule create \
+    -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+    --collection-name "$zone" -n "$name" \
+    --destination "$destination" --next-hop "$next_hop" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$zone/rules/$name"
+  jq -e --arg id "$id" --arg prefix "$prefix" --arg ip "$fw_ip" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .destination.type == "AddressPrefix" and .destination.destinationAddress == $prefix and
+    .nextHop.nextHopType == "VirtualAppliance" and .nextHop.nextHopAddress == $ip
+  ' <<< "$result" >/dev/null || { fail "Unexpected routing rule: $zone/$name"; return 1; }
+  printf '%s\n' "$result"
+}
 ```
 
 📋 **확인**
 
-새 키의 fingerprint가 나오거나 기존 키 쌍을 그대로 사용합니다.
-파일 한쪽만 있으면 실패합니다. 원인을 확인하고 다른 키를 덮어쓰지 않습니다.
+출력 없이 프롬프트가 돌아옵니다. 재접속 시 이 정의 블록은 안전하게 다시 실행할 수 있습니다.
 
-### 1-2. 배포 미리 보기
+## 1. CLI와 배포 전 점검
 
 👁️ **설명**
 
-`what-if`로 보조 템플릿이 만들거나 변경할 자원을 먼저 확인합니다.
-이 명령은 실제 VM과 NAT를 배포하지 않으며, 다음 단계의 유료 배포 범위를 검토하는 데 사용합니다.
+Provider는 구독의 자원 종류, 확장은 Cloud Shell의 명령을 준비합니다. 아직 유료
+자원을 배포하지 않습니다. AVNM Routing CLI는 `virtual-network-manager` 확장
+**3.0.2의 preview**이며, 이 교재의 구문은 해당 버전 기준입니다. 관리자 생성에
+사용한 ARM `2025-01-01`은 Routing 범위를 지원합니다.
+
+### 1-1. 로그 Provider 등록
 
 🟢 **실행**
 
-<!-- exec:support-preview -->
+<!-- exec:register-logs -->
 ```bash
-public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") &&
-[[ -n "$public_key" ]] &&
-az deployment sub what-if --name "support-$RUN_ID" --location "$LOCATION" \
-  --template-file infra/lab-support.bicep \
-  --parameters runId="$RUN_ID" location="$LOCATION" \
-    hubResourceGroup="$RG_HUB" spokeaResourceGroup="$RG_SPOKEA" spokebResourceGroup="$RG_SPOKEB" \
-    sshPublicKey="$public_key" --subscription "$SUBSCRIPTION_ID"
+az provider register --namespace Microsoft.OperationalInsights --wait --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-VM·NIC·Public IP·NAT와 모듈 배포가 추가됩니다.
-VNet/Subnet 삭제나 운영 자원 변경이 보이면 배포하지 마세요.
+등록에 실패하면 1-5의 사전 점검을 통과할 수 없습니다.
 
-### 1-3. 비용 확인 후 한 번의 지원 배포
-
-👁️ **설명**
-
-미리 보기에서 확인한 범위의 VM과 NAT를 실제로 배포합니다. 유료 자원 생성에 동의할 때만 `CREATE`를 입력합니다.
-
-⚠️ **주의**
-
-45분 timeout은 로컬 대기만 끝내며 Azure 배포를 취소하지 않습니다.
-시간 초과 후에는 Portal 배포 상태부터 확인합니다.
+### 1-2. Firewall CLI 확장
 
 🟢 **실행**
 
-<!-- exec:support-deploy -->
+<!-- exec:install-firewall-cli -->
 ```bash
-public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") &&
-[[ -n "$public_key" ]] &&
-read -rp "유료 VM 3대와 NAT 3개를 배포합니다. CREATE 입력: " confirm &&
-if [[ "$confirm" == CREATE ]]; then
-  timeout 2700 az deployment sub create --name "support-$RUN_ID" --location "$LOCATION" \
-    --template-file infra/lab-support.bicep \
-    --parameters runId="$RUN_ID" location="$LOCATION" \
-      hubResourceGroup="$RG_HUB" spokeaResourceGroup="$RG_SPOKEA" spokebResourceGroup="$RG_SPOKEB" \
-      sshPublicKey="$public_key" -o json --subscription "$SUBSCRIPTION_ID"
-else
-  fail "Cancelled"
-fi
+az extension add --name azure-firewall --version 2.2.1 --upgrade --yes
 ```
 
 📋 **확인**
 
-배포의 `provisioningState`가 `Succeeded`입니다. VM NIC에는 Public IP가 없습니다.
-Public IP는 NAT용이며 NAT를 생성하는 것만으로 Subnet에 연결되지는 않습니다.
+`azure-firewall 2.2.1`입니다. 다운로드가 제한되면 임의 버전으로 바꾸지 마세요.
 
-Azure Portal에서도 **Resource groups → Hub·Spoke A·Spoke B의 각 리소스 그룹 → Overview**에서
-생성된 **VM과 NAT Gateway를 각각 확인**할 수 있습니다.
-아래는 Hub 리소스 그룹의 예시이며, 두 Spoke에서도 같은 방법으로 확인하세요.
-화면의 실행 ID 대신 자신의 RG·실행 ID를 사용합니다.
-
-![Azure Portal의 Hub 리소스 그룹 Overview에 표시된 테스트 VM과 NAT Gateway](images/04-hub-vm-nat-resources.png)
-
-## 2. 각 NAT를 연결하고 따로 조회
-
-👁️ **설명**
-
-앞 배포가 성공해야 합니다. 같은 RG에 만든 NAT의 **이름을 직접 지정**하여 Subnet에 연결합니다.
-NAT ID 조회와 별도 ID 비교는 필요하지 않습니다.
-[공식 CLI 예시](https://learn.microsoft.com/azure/nat-gateway/manage-nat-gateway#create-a-nat-gateway-and-associate-it-with-an-existing-subnet)도 이 방식을 사용합니다.
-각 연결 후 JSON에서 NAT·NSG 이름과 `DefaultOutbound=false`를 직접 비교하세요.
-조회 명령의 성공이 설정의 정확성까지 자동 판정하는 것은 아닙니다. 값이 다르거나 `null`이면 다음 단계로 넘어가지 않습니다.
-
-### 2-1. Hub NAT 연결
-
-👁️ **설명**
-
-Hub의 관리 Subnet에 Hub NAT를 연결하여 검사 VM의 명시적인 인터넷 출구를 준비합니다.
-NAT를 생성하는 단계와 Subnet에 연결하는 단계는 별개입니다.
+### 1-3. 로그 조회 확장
 
 🟢 **실행**
 
-<!-- exec:attach-nat-hub -->
+<!-- exec:install-logs-cli -->
 ```bash
-az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
-  --nat-gateway "nat-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
+az extension add --name log-analytics --upgrade --yes
 ```
 
 📋 **확인**
 
-관리 Subnet의 `natGateway.id`가 Hub NAT입니다.
+확장이 준비됩니다. 실제 로그 조회는 모듈 06에서 트래픽을 발생시킨 후에 합니다.
 
-### 2-2. Hub 연결 결과 조회
+### 1-4. AVNM Routing CLI 확장 설치/업그레이드
 
 👁️ **설명**
 
-관리 Subnet에 저장된 NAT·NSG·기본 outbound 설정을 조회합니다. 응답의 각 값을 아래 기준과 직접 비교하세요.
+모듈 03에서 확장을 설치했더라도 Cloud Shell 환경이 바뀌었을 수 있습니다.
+Routing Configuration·rule collection·rule 명령을 제공하는 확인된
+`virtual-network-manager` **3.0.2**를 명시적으로 준비합니다. CLI 확장만
+변경하며 Azure 자원은 만들지 않습니다.
 
 🟢 **실행**
 
-<!-- exec:inspect-nat-hub -->
+<!-- exec:install-avnm-routing-cli -->
 ```bash
-az network vnet subnet show -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
-  --query '{Subnet:name,NatGateway:natGateway.id,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess}' \
+az extension add --name virtual-network-manager --version 3.0.2 --upgrade --yes
+```
+
+📋 **확인**
+
+확장 설치에 실패하면 Routing 명령을 시도하지 마세요. 다음 사전 점검에서
+설치된 버전을 다시 확인합니다.
+
+### 1-5. VM 없이 Firewall 사전 점검
+
+👁️ **설명**
+
+`--firewall`은 VM 존재·VM 용량을 요구하지 않고 리전·Provider를 확인합니다.
+다음 모듈에서 VM 용량을 별도로 확인합니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-preflight -->
+```bash
+check_firewall_preflight() {
+  [[ "$LOCATION" == koreacentral ]] || { fail "This workshop deploys to koreacentral only."; return 1; }
+  [[ "$(az extension show --name virtual-network-manager --query version -o tsv)" == 3.0.2 ]] ||
+    { fail "Install the virtual-network-manager CLI extension 3.0.2 before routing."; return 1; }
+  bash scripts/preflight.sh "$STATE_FILE" --firewall
+}
+check_firewall_preflight
+```
+
+📋 **확인**
+
+`PASS: Firewall provider preflight`입니다. 사전 점검 실패는 리소스 부재의 증거가
+아닙니다. 원인을 해결한 후에만 진행하세요.
+
+## 2. VM보다 먼저 Firewall·Policy·로그 설치
+
+👁️ **설명**
+
+순서는 **workspace → Firewall Public IP → Policy → Firewall → Hub
+AzureFirewallSubnet/IP 구성 → Policy 규칙 → 전용 진단**입니다. 여기부터
+Firewall Standard·Public IP·Log Analytics에 **배포 중에도 비용**이 발생합니다.
+[비용 안내](01-prerequisites.md#1-계정과-비용-확인)를 확인하고, 중단할 때는
+[정리 절차](07-cleanup-production.md)를 따르세요. 실패한 생성 명령을 무조건
+재실행하지 말고 실제 리소스의 ID/상태를 조회합니다.
+
+### 2-1. Log Analytics workspace
+
+🟢 **실행**
+
+<!-- exec:firewall-workspace -->
+```bash
+az monitor log-analytics workspace create -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+  -l "$LOCATION" --sku PerGB2018 --retention-time 30 \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
   -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-`Subnet=snet-management`, NAT ID의 마지막 이름은 `nat-lzbegin-hub-<실행 ID>`,
-NSG 이름은 `nsg-lzbegin-hub-<실행 ID>`, `DefaultOutbound=false`여야 합니다.
+이번 Hub RG의 workspace이며 보존 기간은 30일입니다. workspace 생성만으로
+Firewall 로그가 수집되지는 않습니다.
 
-### 2-3. Spoke A NAT 연결
-
-👁️ **설명**
-
-A 워크로드 Subnet에 같은 RG의 A NAT를 연결합니다. Peering이 있어도 Hub NAT가 A의 출구로 자동 공유되지는 않습니다.
+### 2-2. Firewall 전용 Public IP
 
 🟢 **실행**
 
-<!-- exec:attach-nat-spokea -->
+<!-- exec:firewall-public-ip -->
 ```bash
-az network vnet subnet update -g "$RG_SPOKEA" --vnet-name "vnet-lzbegin-spokea-$RUN_ID" -n snet-workload \
-  --nat-gateway "nat-lzbegin-spokea-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-A의 Subnet에 A NAT가 연결됩니다. Hub NAT를 공유하지 않습니다.
-
-### 2-4. Spoke A 연결 결과 조회
-
-👁️ **설명**
-
-A Subnet의 연결 설정을 조회합니다. NAT뿐 아니라 모듈 02에서 연결한 A NSG도 유지되는지 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-nat-spokea -->
-```bash
-az network vnet subnet show -g "$RG_SPOKEA" --vnet-name "vnet-lzbegin-spokea-$RUN_ID" -n snet-workload \
-  --query '{Subnet:name,NatGateway:natGateway.id,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess}' \
+az network public-ip create -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" \
+  -l "$LOCATION" --sku Standard --allocation-method Static --version IPv4 \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
   -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-`Subnet=snet-workload`, NAT 이름은 `nat-lzbegin-spokea-<실행 ID>`,
-NSG 이름은 `nsg-lzbegin-spokea-<실행 ID>`, `DefaultOutbound=false`여야 합니다.
+Standard·Static IP이며 Spoke VM/NAT용 IP가 아닙니다.
 
-### 2-5. Spoke B NAT 연결
-
-👁️ **설명**
-
-B VM의 관리 통신을 위해 B Subnet에 B NAT를 연결합니다. 대상 VNet·RG·NAT 이름을 모두 B로 지정합니다.
+### 2-3. Firewall Policy
 
 🟢 **실행**
 
-<!-- exec:attach-nat-spokeb -->
+<!-- exec:firewall-policy -->
 ```bash
-az network vnet subnet update -g "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" -n snet-workload \
-  --nat-gateway "nat-lzbegin-spokeb-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-B의 Subnet에 B NAT가 연결됩니다.
-
-### 2-6. Spoke B 연결 결과 조회
-
-👁️ **설명**
-
-B의 NAT 연결과 NSG·outbound 설정을 조회합니다. 세 구역 모두 관리용 출구가 준비되어야 뒤의 Run Command를 진행할 수 있습니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-nat-spokeb -->
-```bash
-az network vnet subnet show -g "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" -n snet-workload \
-  --query '{Subnet:name,NatGateway:natGateway.id,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess}' \
+az network firewall policy create -g "$RG_HUB" -n "fwpol-lzbegin-$RUN_ID" \
+  -l "$LOCATION" --sku Standard --threat-intel-mode Alert \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
   -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-`Subnet=snet-workload`, NAT 이름은 `nat-lzbegin-spokeb-<실행 ID>`,
-NSG 이름은 `nsg-lzbegin-spokeb-<실행 ID>`, `DefaultOutbound=false`여야 합니다.
-세 구역의 값이 모두 맞는지 비교한 뒤 Network Watcher와 응답 서비스 준비로 진행합니다.
+Policy는 `Standard`입니다. `Alert`만으로 통신이 허용되는 것은 아닙니다.
 
-## 3. 공유 Network Watcher 준비
+### 2-4. Standard Firewall
 
 👁️ **설명**
 
-Watcher는 경로/NSG 판정 도구입니다. 기존 리전 watcher는 그대로 사용합니다.
-공유 `NetworkWatcherRG`를 retag하거나 cleanup에서 삭제하지 않습니다.
-
-### 3-1. 현재 리전 Watcher 조회
-
-👁️ **설명**
-
-현재 실습 리전에 Network Watcher가 있는지 조회합니다. 기존 자원이 있으면 공유 자원으로 재사용하며 새로 만들지 않습니다.
+Policy를 연결하지만 아직 IP 구성은 없습니다. `timeout 2700`은 CLI 대기만
+끝내며 Azure 작업을 취소하지 않습니다.
 
 🟢 **실행**
 
-<!-- exec:inspect-watcher -->
+<!-- exec:firewall-create -->
 ```bash
-az network watcher list --query "[?location=='$LOCATION'].id" -o json --subscription "$SUBSCRIPTION_ID"
+timeout 2700 az network firewall create -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+  -l "$LOCATION" --sku AZFW_VNet --tier Standard \
+  --firewall-policy "fwpol-lzbegin-$RUN_ID" \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-ID 배열이 있으면 3-2를 건너뛰고 3-3으로 갑니다. `[]`이면 3-2가 필요합니다.
-오류를 빈 배열로 해석하지 않습니다.
+이번 Policy ID를 참조합니다. timeout/`Updating` 시 자원 상태를 조회하고
+완료 전에는 다음 쓰기 작업을 하지 마세요.
 
-### 3-2. 없는 경우에만 공유 RG 준비
+### 2-5. Hub의 예약 Firewall Subnet과 IP 연결
 
 👁️ **설명**
 
-Watcher를 새로 활성화해야 한다면 먼저 공유 `NetworkWatcherRG`를 준비합니다.
-기존 그룹의 태그를 바꾸지 않고, 이번 실습의 삭제 대상에도 포함하지 않습니다.
+모듈 02의 `AzureFirewallSubnet`과 방금 만든 Public IP를 `primary`로 묶습니다.
+Firewall 사설 IP는 뒤에서 **조회한 실제 값만** next hop으로 사용합니다.
+이 작업은 몇 분 이상 걸릴 수 있습니다.
 
 🟢 **실행**
 
-<!-- exec:watcher-group -->
+<!-- exec:firewall-ip-config -->
 ```bash
-exists=$(az group exists --name NetworkWatcherRG -o tsv --subscription "$SUBSCRIPTION_ID") &&
-case "$exists" in
-  true) printf '기존 공유 RG를 그대로 사용합니다.\n' ;;
-  false) az group create --name NetworkWatcherRG --location "$LOCATION" -o json --subscription "$SUBSCRIPTION_ID" ;;
-  *) fail "Cannot determine whether NetworkWatcherRG exists" ;;
-esac
+timeout 2700 az network firewall ip-config create -g "$RG_HUB" \
+  --firewall-name "fw-lzbegin-$RUN_ID" -n primary \
+  --public-ip-address "pip-lzbegin-fw-$RUN_ID" \
+  --vnet-name "vnet-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-기존 RG면 메시지만 나옵니다. 새 RG에도 실습 소유 태그를 붙이지 않습니다.
+`primary` IP 구성이 생깁니다. 오류/timeout은 성공으로 취급하지 않습니다.
 
-### 3-3. 리전 Watcher 활성화
+### 2-6. Firewall·Policy·IP 완료 확인
 
 👁️ **설명**
 
-앞의 조회 변수를 믿지 않고 현재 목록을 다시 읽습니다. 기존 watcher면 변경하지 않습니다.
+IP는 Hub의 `10.0.2.0/26` 안이어야 합니다. 상태/정책/전체 ID가 다른 경우
+규칙이나 경로 배포를 시작하지 마세요.
 
 🟢 **실행**
 
-<!-- exec:watcher-enable -->
+<!-- exec:inspect-firewall -->
 ```bash
-watchers=$(az network watcher list --query "[?location=='$LOCATION'].id" -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<< "$watchers" >/dev/null &&
-if [[ $(jq length <<< "$watchers") == 0 ]]; then
-  exists=$(az group exists --name NetworkWatcherRG -o tsv --subscription "$SUBSCRIPTION_ID") &&
-  [[ "$exists" == true ]] &&
-  az network watcher configure --locations "$LOCATION" --enabled true \
-    --resource-group NetworkWatcherRG -o json --subscription "$SUBSCRIPTION_ID"
-else
-  printf '기존 리전 Watcher를 사용합니다.\n'
-fi
-```
-
-📋 **확인**
-
-활성화 응답 또는 기존 watcher 사용 메시지가 나옵니다.
-권한 오류이면 운영자에게 요청하고 다음 단계로 넘어가지 않습니다.
-
-## 4. Spoke 응답 서비스 준비
-
-👁️ **설명**
-
-**네트워크를 시험하려면 요청에 응답할 서버가 먼저 있어야 합니다.**
-Spoke A에는 `spokea`, Spoke B에는 `spokeb`라는 짧은 문자열을 돌려주는 HTTP 서비스를 준비합니다.
-이후 Hub에서 응답 본문을 비교하면 단순히 연결이 된 것뿐 아니라 **의도한 Spoke에 도달했는지**도 알 수 있습니다.
-업무용 웹 애플리케이션이 아닌, TCP 8080의 비민감한 연결 확인용 서비스입니다.
-
-**실행 위치와 전달 흐름**
-
-```text
-Cloud Shell: run-vm.sh
-  → Azure VM Run Command / VM agent
-  → 선택한 Spoke VM: guest-server.sh
-  → systemd로 HTTP 서비스 실행
-  → VM 내부에서 응답 확인 → 결과를 Cloud Shell로 반환
-```
-
-Cloud Shell에서 VM의 사설 IP로 직접 SSH하는 방식이 아닙니다.
-Run Command는 VM agent를 통해 실행하고 Azure HTTPS endpoint로 결과를 반환합니다.
-따라서 공인 IP나 SSH 인바운드를 열지 않아도 되지만, VM agent와 관리용 outbound가 정상이어야 합니다.
-
-**`run-vm.sh` — Cloud Shell에서 하는 작업**
-
-[스크립트 소스](../scripts/run-vm.sh)를 읽을 때 아래 순서로 따라가세요.
-
-| 작업 | 실제 동작과 이유 |
-|---|---|
-| 실행 대상 확인 | 상태 JSON의 구독과 지정한 구역의 RG 소유권을 확인하고, `spokea` 또는 `spokeb`에 해당하는 VM 이름을 선택합니다. 공통 준비와 별개로, 독립 실행 스크립트 안의 안전 검사는 유지합니다. |
-| 전송할 스크립트 준비 | 로컬 `guest-server.sh`의 **내용**을 임시 파일에 담습니다. 첫 줄에 Bash shebang을 넣고 종료 코드를 기록할 `EXIT` trap을 추가합니다. 원본 파일은 바꾸지 않습니다. |
-| VM에서 실행 요청 | `az vm run-command invoke --command-id RunShellScript`로 내용을 전달합니다. `guest-server.sh`를 Cloud Shell 자체에서 실행하는 것이 아닙니다. |
-| 게스트 결과 판정 | API 응답의 stdout/stderr를 분리하고 오류 출력을 보존합니다. stdout의 마지막 `__LZ_EXIT__:0`을 확인한 뒤 제어용 마커를 제거하고 실제 결과만 보여 줍니다. API의 `Succeeded`만으로 성공을 판단하지 않습니다. |
-
-아래 실행 명령의 세 인수는 **기존 상태 파일 → 대상 구역 → VM에 보낼 로컬 스크립트 경로**입니다.
-
-**`guest-server.sh` — 선택한 Spoke VM 안에서 하는 작업**
-
-[스크립트 소스](../scripts/guest-server.sh)는 다음과 같이 파일과 서비스를 준비합니다.
-
-| 작업 | 실제 동작과 이유 |
-|---|---|
-| Spoke 식별과 Python 확인 | 이 교재 호출에서는 VM의 호스트 이름으로 A/B를 구분합니다. Hub 등 예상과 다른 이름이면 중단합니다. `python3`가 설치되어 있는지 확인하며 패키지를 새로 내려받지는 않습니다. |
-| 응답 파일 생성 | `/var/lib/lzbegin-http/index.html`에 `spokea` 또는 `spokeb`를 씁니다. 디렉터리는 `0755`, 파일은 `0644`로 설정하여 서비스 계정이 읽을 수 있게 합니다. |
-| systemd 서비스 등록 | `/etc/systemd/system/lzbegin-http.service`를 작성합니다. `/var/lib/lzbegin-http`를 기준으로 `python3 -m http.server 8080 --bind 0.0.0.0`을 실행하도록 지정합니다. |
-| 서비스 권한 제한 | 파일·서비스 설정은 관리 권한으로 준비하지만 HTTP 프로세스는 `nobody/nogroup`으로 실행합니다. 권한 상승, 시스템·홈 파일 접근 및 임시 디렉터리 공유도 제한합니다. |
-| 시작과 재부팅 자동 실행 | `systemctl daemon-reload`로 설정을 읽고 `systemctl enable --now`로 부팅 시 자동 실행과 현재 서비스 시작을 요청합니다. 이어서 `is-active`로 실행 상태를 확인합니다. |
-| 실제 응답 확인 | VM 내부에서 `http://127.0.0.1:8080/`에 접속해 본문이 자신의 Spoke 문자열인지 확인합니다. 시작 직후 연결 오류는 최대 10회 시도하며, 다른 본문이나 끝까지 응답이 없으면 실패로 종료합니다. |
-
-`0.0.0.0`은 VM의 모든 IPv4 인터페이스에서 수신한다는 뜻이지 공인 IP를 만든다는 뜻이 아닙니다.
-이 스크립트는 **NSG·Peering·NAT·UDR을 변경하지 않습니다.** 다른 VM에서 접근할 수 있는지는
-네트워크 경로와 NSG가 결정하므로 다음 단계에서 따로 확인합니다.
-
-⚠️ **주의**
-
-Run Command 자체는 높은 관리 권한으로 실행되므로 신뢰할 수 없는 스크립트를 전달하지 마세요.
-45분 timeout은 로컬 대기만 끝냅니다. 시간 초과 시 VM 안의 작업은 계속될 수 있으므로 무작정 재실행하지 않습니다.
-
-### 4-1. A 서비스
-
-👁️ **설명**
-
-Cloud Shell에서 A VM으로 서비스 준비 스크립트를 전달합니다.
-A 내부의 HTTP 응답을 먼저 확인하여 이후 네트워크 차단과 서버 미준비를 구분합니다.
-
-🟢 **실행**
-
-<!-- exec:service-spokea -->
-```bash
-bash scripts/run-vm.sh "$STATE_FILE" spokea scripts/guest-server.sh
-```
-
-📋 **확인**
-
-`PASS: local service spokea`. A VM **내부에서** TCP 8080 서비스가 `spokea`를 응답했습니다.
-아직 Hub→A 통신 성공을 의미하지는 않습니다.
-
-### 4-2. B 서비스
-
-👁️ **설명**
-
-B VM에도 같은 방식으로 응답 서비스를 준비합니다.
-응답 문자열은 `spokeb`이므로 이후 연결이 의도한 VM에 도달했는지 구분할 수 있습니다.
-
-🟢 **실행**
-
-<!-- exec:service-spokeb -->
-```bash
-bash scripts/run-vm.sh "$STATE_FILE" spokeb scripts/guest-server.sh
-```
-
-📋 **확인**
-
-`PASS: local service spokeb`. B VM 내부에서도 서비스가 준비되었습니다.
-A 성공이 B 성공을 대신하지 않습니다.
-
-두 로컬 서비스가 정상인 상태에서 5단계로 진행합니다. 그다음 연결이 실패하면
-“서버가 아직 준비되지 않았는지”와 “NSG 또는 경로가 막는지”를 구분하기가 쉬워집니다.
-
-## 5. 필요한 TCP 8080만 허용
-
-👁️ **설명**
-
-IP는 NIC에서 매번 조회하며 `.4`라고 추측하지 않습니다. `/32`는 VM 한 개입니다.
-출발지 포트는 클라이언트가 매번 고르므로 `*`, 목적지 포트는 `8080`으로 제한합니다.
-이 실습은 Subnet당 테스트 VM 한 대이며 운영 목적지 범위는 워크로드 경계에 맞춰 설계해야 합니다.
-
-### 5-1. Hub → A
-
-👁️ **설명**
-
-Hub VM의 실제 사설 IP를 조회하고 A NSG에서 해당 VM의 TCP 8080 연결만 허용합니다.
-VNet 전체가 아니라 `/32` 주소 하나로 출발지를 제한합니다.
-
-🟢 **실행**
-
-<!-- exec:allow-hub-spokea -->
-```bash
-source_ip=$(az network nic show -g "$RG_HUB" -n "nic-lzbegin-hub-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-az network nsg rule create -g "$RG_SPOKEA" --nsg-name "nsg-lzbegin-spokea-$RUN_ID" -n allow-hub-http \
-  --priority 200 --direction Inbound --access Allow --protocol Tcp \
-  --source-address-prefixes "$source_ip/32" --source-port-ranges '*' \
-  --destination-address-prefixes '*' --destination-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-A NSG의 `allow-hub-http`, 우선순위 `200`, 출발지는 Hub 한 대입니다.
-모듈 02의 `4000` 차단보다 먼저 평가됩니다.
-
-### 5-2. Hub → B
-
-👁️ **설명**
-
-B NSG에도 Hub VM의 HTTP 연결을 허용합니다. A와 B는 서로 다른 NSG이므로 각각 규칙을 만들어야 합니다.
-
-🟢 **실행**
-
-<!-- exec:allow-hub-spokeb -->
-```bash
-source_ip=$(az network nic show -g "$RG_HUB" -n "nic-lzbegin-hub-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-az network nsg rule create -g "$RG_SPOKEB" --nsg-name "nsg-lzbegin-spokeb-$RUN_ID" -n allow-hub-http \
-  --priority 200 --direction Inbound --access Allow --protocol Tcp \
-  --source-address-prefixes "$source_ip/32" --source-port-ranges '*' \
-  --destination-address-prefixes '*' --destination-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-같은 규칙이 이번에는 B NSG에 생성됩니다. A의 규칙이 자동 전파되지 않습니다.
-
-### 5-3. A → B를 NSG에서 허용
-
-👁️ **설명**
-
-경로 부재를 NSG 차단과 구분하기 위해 B의 NSG에서는 A를 허용합니다.
-
-🟢 **실행**
-
-<!-- exec:allow-spokea-spokeb -->
-```bash
-source_ip=$(az network nic show -g "$RG_SPOKEA" -n "nic-lzbegin-spokea-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-az network nsg rule create -g "$RG_SPOKEB" --nsg-name "nsg-lzbegin-spokeb-$RUN_ID" -n allow-spokea-http \
-  --priority 210 --direction Inbound --access Allow --protocol Tcp \
-  --source-address-prefixes "$source_ip/32" --source-port-ranges '*' \
-  --destination-address-prefixes '*' --destination-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-`allow-spokea-http`, 우선순위 `210`, 출발지는 A VM 한 대입니다.
-
-### 5-4. 기준 상태 검증
-
-👁️ **설명**
-
-검증기는 **현재 통신 상태를 증거로 판정**하는 단일 목적 스크립트입니다.
-새 HTTP 연결·NSG 판정·유효 경로를 함께 검사하는 안전 내부 동작은 수동으로 쪼개지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:verify-baseline -->
-```bash
-bash scripts/verify-core.sh "$STATE_FILE" baseline
-```
-
-📋 **확인**
-
-`PASS: core baseline evidence complete.` 및 아래 증거를 확인합니다.
-
-아래는 **출력 형식 예시**이며 현재 실행의 AVNM 실환경 증거가 아닙니다.
-IP와 실패까지 걸린 시간은 달라질 수 있습니다. A→B 차단의 `curl` 종료 코드는
-환경에 따라 `28`(시간 초과) 또는 `7`(연결 실패)입니다.
-차단 메시지만 보지 말고 NSG·유효 경로와 마지막 완료 문구까지 확인하세요.
-
-```text
-PASS: 10.10.1.4 /16 -> VNetPeering
-PASS: 10.20.1.4 /16 -> VNetPeering
-NSG: {
-  "access": "Allow",
-  "ruleName": "securityRules/allow-hub-http"
+inspect_firewall_before_rules() {
+  local fw ip
+  fw=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-$RUN_ID" \
+    --arg policy "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    (.firewallPolicy.id | ascii_downcase) == ($policy | ascii_downcase) and
+    (.ipConfigurations | type == "array" and length == 1) and
+    (.ipConfigurations[0].privateIPAddress | type == "string" and length > 0)
+  ' <<< "$fw" >/dev/null || { fail "Firewall ID, policy or provisioning is not ready."; return 1; }
+  ip=$(jq -er '.ipConfigurations[0].privateIPAddress' <<< "$fw") || return 1
+  assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
+  printf 'PASS: Firewall Succeeded; private IP %s\n' "$ip"
 }
-PASS: HTTP spokea
-NSG: {
-  "access": "Allow",
-  "ruleName": "securityRules/allow-hub-http"
-}
-PASS: HTTP spokeb
-NSG: {
-  "access": "Allow",
-  "ruleName": "securityRules/allow-spokea-http"
-}
-PASS: 10.20.1.4 /16 -> None
-PASS: connection blocked (curl 28); correlate NSG/route/firewall evidence.
-PASS: core baseline evidence complete.
+inspect_firewall_before_rules
 ```
 
-| 흐름 | NSG | 유효 next hop | HTTP |
+📋 **확인**
+
+`PASS`와 실제 사설 IP가 나옵니다. 아직 VM이 없어 NIC 유효 경로는 확인할 수 없습니다.
+
+### 2-7. Policy collection group
+
+👁️ **설명**
+
+`workshop` group 우선순위는 200입니다. 하위 collection의 100/200/300은
+**group 내부의 별도 우선순위**입니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-rule-group -->
+```bash
+az network firewall policy rule-collection-group create -g "$RG_HUB" \
+  --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop --priority 200 \
+  -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+group만 생성되며 세 collection은 다음 단계에서 각각 추가합니다.
+
+### 2-8. VM agent 관리 HTTPS 허용
+
+👁️ **설명**
+
+Spoke의 기본 인터넷 출구를 `/0 → Firewall`로 바꾸기 전에 TCP 443
+`AzureCloud`를 허용합니다. 이 서비스 태그는 **이 tenant 전용이 아닙니다**.
+운영 정책으로 복사하지 마세요.
+
+🟢 **실행**
+
+<!-- exec:firewall-management-rule -->
+```bash
+az network firewall policy rule-collection-group collection add-filter-collection \
+  -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n management \
+  --collection-priority 100 --action Allow --rule-name azure-management \
+  --rule-type NetworkRule --ip-protocols TCP \
+  --source-addresses 10.10.1.0/24 10.20.1.0/24 \
+  --destination-addresses AzureCloud --destination-ports 443 \
+  -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+두 Spoke workload Subnet에서 AzureCloud TCP/443만 관리 예외로 허용합니다.
+
+### 2-9. A → B HTTP 실험 규칙
+
+👁️ **설명**
+
+아직 VM/NIC가 없으므로 출발지 `10.10.1.0/24`와 목적지
+`10.20.1.0/24`의 **TCP/8080만** 최초 허용합니다. 다른 포트·Spoke 전체
+주소 공간을 열지 않습니다. 모듈 05에서 VM이 생성된 뒤 실제 NIC IP로
+규칙을 좁히려면 현재 collection·규칙을 확인한 후 Policy를 갱신해야 합니다.
+기준 검증에서는 이 CIDR 규칙을 유지합니다. Firewall은 상태를 추적하지만,
+응답용 B→A의 **네트워크 경로**는 별도로 필요합니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-http-rule -->
+```bash
+az network firewall policy rule-collection-group collection add-filter-collection \
+  -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n lab-http \
+  --collection-priority 200 --action Allow --rule-name spokea-to-spokeb \
+  --rule-type NetworkRule --ip-protocols TCP \
+  --source-addresses 10.10.1.0/24 --destination-addresses 10.20.1.0/24 \
+  --destination-ports 8080 -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+`lab-http`가 Allow·200·TCP/8080이며 A→B 방향입니다. 모듈 06에서
+**이 collection만** Deny/Allow로 전환합니다.
+
+### 2-10. 외부 출구 확인용 FQDN
+
+👁️ **설명**
+
+인터넷 전체를 열지 않고 `api.ipify.org`의 HTTPS만 허용합니다.
+Azure Firewall의 FQDN 검사와 기록은 AVNM Routing으로 대체되지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-egress-rule -->
+```bash
+az network firewall policy rule-collection-group collection add-filter-collection \
+  -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n egress-check \
+  --collection-priority 300 --action Allow --rule-name public-ip-check \
+  --rule-type ApplicationRule --source-addresses 10.10.1.0/24 10.20.1.0/24 \
+  --protocols Https=443 --target-fqdns api.ipify.org \
+  -o json --subscription "$SUBSCRIPTION_ID"
+```
+
+📋 **확인**
+
+세 collection은 독립적입니다. 앞선 Policy 변경이 실패했다면 다음
+`add-filter-collection`을 실행하지 마세요. 이미 저장된 내용부터 확인합니다.
+
+### 2-11. 저장된 Policy 규칙 조회
+
+🟢 **실행**
+
+<!-- exec:inspect-firewall-rules -->
+```bash
+check_firewall_policy_rules() {
+  local group
+  group=$(az network firewall policy rule-collection-group show -g "$RG_HUB" \
+    --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID/ruleCollectionGroups/workshop" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .priority == 200 and
+    (.ruleCollections | type == "array" and length == 3) and
+    ([.ruleCollections[].name] | sort) == (["management","lab-http","egress-check"] | sort) and
+    all(.ruleCollections[]; .action.type == "Allow") and
+    ([.ruleCollections[] | select(.name == "management")] |
+      length == 1 and .[0].priority == 100 and .[0].rules[0].name == "azure-management") and
+    ([.ruleCollections[] | select(.name == "lab-http")] |
+      length == 1 and .[0].priority == 200 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "spokea-to-spokeb" and .ruleType == "NetworkRule" and
+        .sourceAddresses == ["10.10.1.0/24"] and
+        .destinationAddresses == ["10.20.1.0/24"] and
+        .destinationPorts == ["8080"] and .ipProtocols == ["TCP"])) and
+    ([.ruleCollections[] | select(.name == "egress-check")] |
+      length == 1 and .[0].priority == 300 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "public-ip-check" and .ruleType == "ApplicationRule" and
+        .targetFqdns == ["api.ipify.org"]))
+  ' <<< "$group" >/dev/null || { fail "Policy collections or HTTP/FQDN rules are incomplete."; return 1; }
+  printf 'PASS: Policy workshop group and three Allow collections\n'
+}
+check_firewall_policy_rules
+```
+
+📋 **확인**
+
+group 우선순위 200, `management`·`lab-http`·`egress-check` 각각
+100/200/300·Allow, 위 주소·포트·FQDN이 저장돼 있어야 합니다.
+오류 후 `already exists`면 이름만 보고 다시 추가하지 말고 실제 규칙을 비교하세요.
+
+### 2-12. 전용 Firewall 진단 활성화
+
+👁️ **설명**
+
+`AZFWNetworkRule`과 `AZFWApplicationRule` category를 확인한 뒤 이번
+workspace로 전송합니다. `Dedicated`는 `AzureDiagnostics` 대신 전용
+로그 테이블을 사용하는 옵션입니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-diagnostics -->
+```bash
+create_firewall_diagnostics() {
+  local fw_id law_id categories
+  fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  assert_resource_id "$fw_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-$RUN_ID" || return 1
+  assert_resource_id "$law_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" || return 1
+  categories=$(az monitor diagnostic-settings categories list --resource "$fw_id" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e '(.value | type == "array") and
+    ([.value[].name] | index("AZFWNetworkRule") != null and index("AZFWApplicationRule") != null)' \
+    <<< "$categories" >/dev/null || { fail "Required Firewall log categories are missing."; return 1; }
+  az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
+    --workspace "$law_id" --export-to-resource-specific true \
+    --logs '[{"category":"AZFWNetworkRule","enabled":true},{"category":"AZFWApplicationRule","enabled":true}]' \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+create_firewall_diagnostics
+```
+
+📋 **확인**
+
+두 category가 활성화됩니다. 설정 성공은 아직 실제 패킷/로그의 증거가 아닙니다.
+
+### 2-13. 경로 배포 전 Firewall 최종 검사
+
+👁️ **설명**
+
+읽기 전용 안전 함수가 Firewall의 전체 ID, 완료 상태, Policy, 사설 IP,
+이번 workspace와 전용 진단, 세 Allow collection과 관리 규칙을 다시 검사합니다.
+
+🟢 **실행**
+
+<!-- exec:firewall-ready -->
+```bash
+check_firewall_ready() {
+  local fw_ip policy workspace public_ip base
+  base="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers"
+  policy=$(az network firewall policy show -g "$RG_HUB" -n "fwpol-lzbegin-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$base/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded"
+  ' <<< "$policy" >/dev/null || { fail "Firewall Policy ID/state not ready."; return 1; }
+  workspace=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$base/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .location == "koreacentral"
+  ' <<< "$workspace" >/dev/null || { fail "Log workspace ID/state not ready."; return 1; }
+  public_ip=$(az network public-ip show -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$base/Microsoft.Network/publicIPAddresses/pip-lzbegin-fw-$RUN_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .publicIPAllocationMethod == "Static" and
+    .sku.name == "Standard"
+  ' <<< "$public_ip" >/dev/null || { fail "Firewall Public IP ID/state not ready."; return 1; }
+  check_firewall_policy_rules || return 1
+  fw_ip=$(firewall_ready_ip) || return 1
+  printf 'PASS: Firewall Policy, diagnostics, private IP %s\n' "$fw_ip"
+}
+check_firewall_ready
+```
+
+📋 **확인**
+
+`PASS`가 아니면 Peering·Routing을 변경하지 마세요. 특히 `Updating`/
+`FirewallPolicyUpdateFailed`는 규칙 저장 상태와 Activity Log를 확인한 뒤 복구합니다.
+
+## 3. 네 방향 Hub↔Spoke Peering 전달 허용
+
+👁️ **설명**
+
+AVNM은 Connectivity Peering을 만들지만 Firewall로 들어온 패킷을
+다른 VNet으로 전달하려면 **기존 네 방향**의 `allowForwardedTraffic`도
+켜야 합니다. AVNM 이름을 추측하지 않고 **remote VNet의 전체 ID**로 정확히
+한 Peering을 찾습니다. 직접 A↔B Peering, Gateway 공유 및 새 Peering은
+만들지 않습니다. 이 설정만으로 경로나 Firewall Allow가 생기지 않습니다.
+
+### 3-1. Hub → Spoke A
+
+🟢 **실행**
+
+<!-- exec:forward-hub-to-spokea -->
+```bash
+forward_peering "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID"
+```
+
+📋 **확인**
+
+Hub에서 A를 향한 Connected Peering 하나만 수정하고 PASS가 나옵니다.
+
+### 3-2. Spoke A → Hub
+
+🟢 **실행**
+
+<!-- exec:forward-spokea-to-hub -->
+```bash
+forward_peering "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID"
+```
+
+📋 **확인**
+
+A에서 Hub 방향도 `allowForwardedTraffic=true`입니다.
+
+### 3-3. Hub → Spoke B
+
+🟢 **실행**
+
+<!-- exec:forward-hub-to-spokeb -->
+```bash
+forward_peering "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID"
+```
+
+📋 **확인**
+
+Hub에서 B 방향도 true입니다.
+
+### 3-4. Spoke B → Hub
+
+🟢 **실행**
+
+<!-- exec:forward-spokeb-to-hub -->
+```bash
+forward_peering "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID"
+```
+
+📋 **확인**
+
+네 방향이 모두 Connected/forwarding=true여야 합니다.
+
+## 4. Spoke별 AVNM Routing 구성
+
+👁️ **설명**
+
+한 Routing Configuration 안의 **서로 다른 A/B collection**을 각각
+`ROUTE_GROUP_A_ID`/`ROUTE_GROUP_B_ID`에 적용합니다. 같은 Group에 양쪽
+`/16`이나 충돌하는 `/0`을 넣지 않습니다. AVNM이 배포 시 관리형 route
+table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 않습니다.
+기존 테이블을 자동 채택하지 않고 AVNM 기본 관리 방식만 사용합니다.
+`/16`은 상대 Spoke 요청/반환, `/0`은 Spoke의 인터넷 출구를 담당하며
+모든 next hop은 **현재 Firewall 사설 IP**입니다.
+
+| 대상 collection / Group | 목적지 1 | 목적지 2 | 두 next hop |
 |---|---|---|---|
-| Hub→A/B | Allow | `VNetPeering` | 각각 `spokea`, `spokeb` |
-| A→B | Allow | `None` | 연결 실패가 정상 |
+| `spokea` / A 전용 | `10.20.0.0/16` | `0.0.0.0/0` | Firewall 사설 IP |
+| `spokeb` / B 전용 | `10.10.0.0/16` | `0.0.0.0/0` | Firewall 사설 IP |
 
-`None`은 버림 경로 유형입니다. 직접 A↔B Peering이 없는 현재 구성에서
-실제 유효 경로와 차단을 확인하는 것이지, 실패만으로 비전이성을 증명하지 않습니다.
-
-Azure Portal에서도 **Network security groups → 해당 Spoke의 NSG → Overview**에서
-설정한 인바운드 규칙을 확인할 수 있습니다. 아래 Spoke A 예시처럼 `allow-hub-http`의
-우선순위 `200`·TCP `8080` 허용과 `deny-other-vnet-inbound`의 우선순위 `4000` 차단을 비교하세요.
-Spoke B에서는 `allow-spokea-http`(`210`)도 확인합니다. 화면의 실행 ID와 IP는 예시이므로 자신의 실습 값과 대조하세요.
-
-![Azure Portal의 Spoke A NSG Overview에 표시된 Hub HTTP 허용 규칙과 VNet 인바운드 차단 규칙](images/04-spokea-nsg-rules.png)
-
-## 6. 임시 NSG 차단과 복구
-
-### 6-1. A에 임시 Deny 생성
+### 4-1. Routing Configuration 최초 생성
 
 👁️ **설명**
 
-A NSG에 기존 Allow보다 먼저 평가되는 임시 Deny를 추가합니다.
-다른 조건은 유지한 채 NSG 규칙 하나가 Hub→A 통신에 미치는 영향을 비교합니다.
+모듈 03의 manager 세 범위와 A/B Group의 **정확한 멤버**를 다시 읽고,
+기존 Routing Configuration이 없을 때만 만듭니다. 예상 밖의 자원을
+덮어쓰지 않습니다.
 
 🟢 **실행**
 
-<!-- exec:deny-hub -->
+<!-- exec:routing-config-create -->
 ```bash
-source_ip=$(az network nic show -g "$RG_HUB" -n "nic-lzbegin-hub-$RUN_ID" \
-  --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") &&
-az network nsg rule create -g "$RG_SPOKEA" --nsg-name "nsg-lzbegin-spokea-$RUN_ID" -n test-deny-hub \
-  --priority 100 --direction Inbound --access Deny --protocol Tcp \
-  --source-address-prefixes "$source_ip/32" --source-port-ranges '*' \
-  --destination-address-prefixes '*' --destination-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
+create_routing_config() {
+  local manager groups members zone group expected existing result id
+  manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$AVNM_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<< "$manager" >/dev/null || { fail "AVNM Routing scope is not ready."; return 1; }
+  [[ "${ROUTE_GROUP_A_ID,,}" != "${ROUTE_GROUP_B_ID,,}" ]] ||
+    { fail "Routing target groups must differ."; return 1; }
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then group="$ROUTE_GROUP_A_ID"; expected="$RG_SPOKEA"
+    else group="$ROUTE_GROUP_B_ID"; expected="$RG_SPOKEB"; fi
+    groups=$(az network manager group show --ids "$group" \
+      -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$group" '(.id | ascii_downcase) == ($id | ascii_downcase) and
+      .provisioningState == "Succeeded"' <<< "$groups" >/dev/null ||
+      { fail "Routing group not ready: $zone"; return 1; }
+    members=$(az network manager group static-member list \
+      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
+      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$expected/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
+      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
+      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
+    ' <<< "$members" >/dev/null || { fail "Unexpected routing group member: $zone"; return 1; }
+  done
+  existing=$(az network manager routing-config list -g "$RG_HUB" --manager-name "$AVNM" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<< "$existing" >/dev/null ||
+    { fail "Routing configuration already exists; inspect before changing it."; return 1; }
+  result=$(az network manager routing-config create -g "$RG_HUB" --manager-name "$AVNM" \
+    -n "rc-lzbegin-spokes-$RUN_ID" --description "Spoke routes via Hub Firewall" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
+  jq -e --arg id "$id" '(.id | ascii_downcase) == ($id | ascii_downcase)' \
+    <<< "$result" >/dev/null || { fail "Unexpected routing configuration ID."; return 1; }
+  printf '%s\n' "$result"
+}
+create_routing_config
 ```
 
 📋 **확인**
 
-`100`이 `200`보다 먼저 평가됩니다. 기존 Allow는 지우지 않았습니다.
+전체 ID가 `.../routingConfigurations/rc-lzbegin-spokes-<실행 ID>`입니다.
+`Updating`이면 다음 생성 대신 조회·대기하세요.
 
-### 6-2. 차단 원인 검증
+### 4-2. A 전용 rule collection
 
 👁️ **설명**
 
-새 HTTP 연결과 NSG 판정을 함께 확인합니다.
-서버 중단이나 경로 문제를 NSG 차단 성공으로 오인하지 않도록 검증 스크립트를 사용합니다.
+`--applies-to`는 A의 Group **전체 ID** 한 개만 전달합니다.
+이 실습에는 VNet Gateway/BGP가 없으며, BGP 경로 전파는 비활성화합니다.
 
 🟢 **실행**
 
-<!-- exec:verify-nsg-denied -->
+<!-- exec:routing-collection-spokea -->
 ```bash
-bash scripts/verify-core.sh "$STATE_FILE" nsg-denied
+create_routing_collection spokea "$ROUTE_GROUP_A_ID"
 ```
 
 📋 **확인**
 
-A의 로컬 서비스는 살아 있고 `test-deny-hub`가 차단 원인입니다. Hub→B는 유지됩니다.
-기존 TCP 연결은 살아 있을 수 있어 검증은 매번 새 연결을 사용합니다.
+A collection의 유일한 대상은 A Group입니다. 연결용 A+B Group을 사용하지 않습니다.
 
-### 6-3. 임시 규칙만 삭제
-
-👁️ **설명**
-
-실험을 위해 추가한 `test-deny-hub`만 제거하여 기존 Allow 규칙이 다시 적용되도록 합니다.
-
-⚠️ **주의**
-
-**앞 검증이 실패했어도 이 복구는 수행합니다.** NSG 전체나 기존 Allow를 삭제하지 않습니다.
+### 4-3. B 전용 rule collection
 
 🟢 **실행**
 
-<!-- exec:restore-hub -->
+<!-- exec:routing-collection-spokeb -->
 ```bash
-az network nsg rule delete -g "$RG_SPOKEA" --nsg-name "nsg-lzbegin-spokea-$RUN_ID" \
-  -n test-deny-hub --subscription "$SUBSCRIPTION_ID"
+create_routing_collection spokeb "$ROUTE_GROUP_B_ID"
 ```
 
 📋 **확인**
 
-오류 없이 삭제됩니다. 실제 복구는 다음 검증으로 확인합니다.
+B collection은 B Group만 대상으로 합니다.
 
-### 6-4. 복구 상태 검증
+### 4-4. A → B `/16` rule
 
 👁️ **설명**
 
-임시 Deny를 제거한 뒤 처음의 통신 상태로 돌아왔는지 검사합니다.
-규칙 삭제 명령의 성공과 실제 HTTP 연결의 복구를 구분해서 확인합니다.
+각 규칙을 만들 때마다 `firewall_ready_ip`가 **현재** Firewall 상태·Policy·진단을
+확인합니다. 빈 IP/오류 결과로 규칙을 생성하지 않습니다.
 
 🟢 **실행**
 
-<!-- exec:verify-restored -->
+<!-- exec:routing-rule-spokea-other -->
 ```bash
-bash scripts/verify-core.sh "$STATE_FILE" restored
+create_routing_rule spokea to-other-spoke 10.20.0.0/16
 ```
 
 📋 **확인**
 
-Hub→A/B 정상 HTTP와 A→B의 현재 `None` 경로 차단이 기준 상태로 돌아왔습니다.
+A의 `10.20.0.0/16 → VirtualAppliance (Firewall 사설 IP)`입니다.
 
-<a id="트러블슈팅"></a>
+### 4-5. A → 인터넷 `/0` rule
+
+🟢 **실행**
+
+<!-- exec:routing-rule-spokea-internet -->
+```bash
+create_routing_rule spokea to-internet 0.0.0.0/0
+```
+
+📋 **확인**
+
+A의 default route는 같은 Firewall 사설 IP입니다.
+
+### 4-6. B → A `/16` rule
+
+🟢 **실행**
+
+<!-- exec:routing-rule-spokeb-other -->
+```bash
+create_routing_rule spokeb to-other-spoke 10.10.0.0/16
+```
+
+📋 **확인**
+
+B의 `10.10.0.0/16 → VirtualAppliance`는 A→B의 **응답 경로**입니다.
+
+### 4-7. B → 인터넷 `/0` rule
+
+🟢 **실행**
+
+<!-- exec:routing-rule-spokeb-internet -->
+```bash
+create_routing_rule spokeb to-internet 0.0.0.0/0
+```
+
+📋 **확인**
+
+B의 default route도 같은 Firewall 사설 IP입니다.
+
+### 4-8. 네 규칙·대상·Subnet 사전 확인
+
+👁️ **설명**
+
+**배포 전** A/B 그룹, collection의 전체 ID·목적지·next hop,
+Spoke의 workload Subnet을 다시 조회합니다. 신규 VM이 아직 없으므로
+Subnet에 기존/외부 route table이나 NAT가 붙어 있으면 덮어쓰지 않습니다.
+모든 검사에 통과해야 다음 단계에서 Routing을 commit합니다.
+
+🟢 **실행**
+
+<!-- exec:routing-before-commit -->
+```bash
+inspect_routing_before_commit() {
+  local fw_ip config_id config collections rules zone rg group remote collection rule prefix data subnet members peerings target local_rg local_vnet remote_id
+  fw_ip=$(firewall_ready_ip) || return 1
+  config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
+  config=$(az network manager routing-config show -g "$RG_HUB" --manager-name "$AVNM" \
+    -n "rc-lzbegin-spokes-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$config_id" '(.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    (.routeTableUsageMode == null or .routeTableUsageMode == "ManagedOnly")' <<< "$config" >/dev/null ||
+    { fail "Routing configuration is not ready."; return 1; }
+  collections=$(az network manager routing-config rule-collection list -g "$RG_HUB" \
+    --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$config_id" '
+    type == "array" and length == 2 and
+    ([.[].name] | sort) == ["spokea","spokeb"] and
+    all(.[]; (.id | ascii_downcase) ==
+      (($id + "/ruleCollections/" + .name) | ascii_downcase))
+  ' <<< "$collections" >/dev/null ||
+    { fail "Unexpected or missing routing collection."; return 1; }
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; group="$ROUTE_GROUP_A_ID"; remote=10.20.0.0/16
+    else rg="$RG_SPOKEB"; group="$ROUTE_GROUP_B_ID"; remote=10.10.0.0/16; fi
+    collection=$(az network manager routing-config rule-collection show -g "$RG_HUB" \
+      --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+      -n "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$config_id/ruleCollections/$zone" --arg group "$group" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and .provisioningState == "Succeeded" and
+      (.appliesTo | type == "array" and length == 1) and
+      (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
+    ' <<< "$collection" >/dev/null || { fail "Wrong routing target: $zone"; return 1; }
+    members=$(az network manager group static-member list \
+      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
+      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
+      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
+      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
+    ' <<< "$members" >/dev/null || { fail "Routing group membership changed: $zone"; return 1; }
+    rules=$(az network manager routing-config rule-collection rule list -g "$RG_HUB" \
+      --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+      --collection-name "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$config_id/ruleCollections/$zone" '
+      type == "array" and length == 2 and
+      ([.[].name] | sort) == ["to-internet","to-other-spoke"] and
+      all(.[]; (.id | ascii_downcase) ==
+        (($id + "/rules/" + .name) | ascii_downcase))
+    ' <<< "$rules" >/dev/null || { fail "Unexpected or missing routing rule: $zone"; return 1; }
+    for rule in to-other-spoke to-internet; do
+      if [[ "$rule" == to-other-spoke ]]; then prefix="$remote"; else prefix=0.0.0.0/0; fi
+      data=$(az network manager routing-config rule-collection rule show -g "$RG_HUB" \
+        --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+        --collection-name "$zone" -n "$rule" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+      jq -e --arg id "$config_id/ruleCollections/$zone/rules/$rule" --arg prefix "$prefix" --arg ip "$fw_ip" '
+        (.id | ascii_downcase) == ($id | ascii_downcase) and .provisioningState == "Succeeded" and
+        .destination.type == "AddressPrefix" and .destination.destinationAddress == $prefix and
+        .nextHop.nextHopType == "VirtualAppliance" and .nextHop.nextHopAddress == $ip
+      ' <<< "$data" >/dev/null || { fail "Wrong routing rule: $zone/$rule"; return 1; }
+    done
+    subnet=$(az network vnet subnet show -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
+      -n snet-workload -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/snet-workload" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and
+      .routeTable == null and .natGateway == null
+    ' <<< "$subnet" >/dev/null || { fail "Unexpected Subnet route table or NAT: $zone"; return 1; }
+    remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID"
+    for target in hub spoke; do
+      if [[ "$target" == hub ]]; then
+        local_rg="$RG_HUB"; local_vnet="vnet-lzbegin-hub-$RUN_ID"
+        peerings=$(az network vnet peering list -g "$local_rg" --vnet-name "$local_vnet" \
+          -o json --subscription "$SUBSCRIPTION_ID") || return 1
+      else
+        local_rg="$rg"; local_vnet="vnet-lzbegin-$zone-$RUN_ID"
+        remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+        peerings=$(az network vnet peering list -g "$local_rg" --vnet-name "$local_vnet" \
+          -o json --subscription "$SUBSCRIPTION_ID") || return 1
+      fi
+      jq -e --arg id "$remote_id" '
+        type == "array" and
+        ([.[] | select((.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase))] |
+          length == 1 and .[0].peeringState == "Connected" and
+          .[0].allowForwardedTraffic == true)
+      ' <<< "$peerings" >/dev/null ||
+        { fail "Peering forwarding is not ready: $zone/$target"; return 1; }
+    done
+  done
+  assert_no_spoke_nat || return 1
+  printf 'PASS: Two separate targets, four rules, no Spoke NAT/route-table attachment\n'
+}
+inspect_routing_before_commit
+```
+
+📋 **확인**
+
+`PASS`가 아니면 commit하지 마세요. 기존 route table을 찾았다면 소유자와
+충돌을 조사하고 임의 삭제/교체하지 않습니다.
+
+### 4-9. koreacentral에 Routing 배포
+
+👁️ **설명**
+
+AVNM의 **Routing만** commit합니다. 이 manager/리전에는 한 번에 하나의
+Routing Configuration만 배포할 수 있으므로 A/B collection 둘을 **한 구성**
+안에서 함께 적용합니다. 배포 요청 성공만으로 Subnet 적용을 가정하지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:routing-commit -->
+```bash
+commit_routing() {
+  local config_id
+  inspect_routing_before_commit || return 1
+  config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
+  az network manager post-commit --network-manager-name "$AVNM" \
+    --commit-type Routing --configuration-ids "$config_id" \
+    --target-locations "$LOCATION" --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+commit_routing
+```
+
+📋 **확인**
+
+Routing commit 요청이 성공해야 합니다. timeout/오류는 배포 취소나 성공을
+뜻하지 않습니다. 배포가 비동기이므로 다음 읽기 전용 조회를 1–2분 간격으로
+재실행할 수 있습니다.
+
+### 4-10. koreacentral Routing 배포 상태 확인
+
+👁️ **설명**
+
+`list-deploy-status`의 **이번 구성 ID·Routing·koreacentral**의 가장 최근
+commit이 `Deployed`여야 합니다. 전체 배포 성공은 개별 Subnet의 경로가
+준비됐다는 뜻이 아니므로 5절을 이어서 검사합니다.
+
+🟢 **실행**
+
+<!-- exec:routing-deploy-status -->
+```bash
+inspect_routing_deployment() {
+  local result
+  result=$(az network manager list-deploy-status --network-manager-name "$AVNM" \
+    --resource-group "$RG_HUB" --deployment-types Routing --regions "$LOCATION" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" \
+    --arg region "$LOCATION" '
+    if type == "array" then .
+    elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+    else error("Invalid or incomplete deployment status page") end
+    | [.[] | select(.deploymentType == "Routing" and .region == $region)] |
+      if length == 0 then error("No Routing deployment in the target region")
+      else sort_by(.commitTime) | last end |
+    .deploymentStatus == "Deployed" and
+    (.configurationIds | type == "array" and length == 1) and
+    (.configurationIds[0] | ascii_downcase) == ($id | ascii_downcase)
+  ' <<< "$result" >/dev/null ||
+    { fail "Routing deployment has not reached Deployed in koreacentral."; return 1; }
+  printf 'PASS: latest Routing deployment in %s is Deployed\n' "$LOCATION"
+}
+inspect_routing_deployment
+```
+
+📋 **확인**
+
+PASS가 나와야 합니다. `Deploying`/`Failed` 또는 다른 구성 ID라면 **VM을
+만들지 마세요**. 실패 원인을 AVNM Deployments에서 확인합니다.
+
+## 5. VM 생성 전 실제 적용 확인
+
+👁️ **설명**
+
+관리형 route table의 **이름·RG·태그를 추측하지 않습니다**. 양쪽
+`snet-workload.routeTable.id`를 조회한 뒤 그 **반환된 전체 ID**로 테이블의
+두 경로·next hop을 검증합니다. `assert_avnm_routes_ready`는 구성/대상
+Group/규칙과 Subnet 연결을 함께 검사하고, `assert_no_spoke_nat`는
+Spoke NAT 연결/리소스 및 Public IP 부재를 확인합니다. AVNM 배포 페이지의
+성공 상태만으로 특정 Subnet의 적용을 대신하지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-avnm-routing-subnets -->
+```bash
+inspect_avnm_routing_subnets() {
+  local fw_ip
+  inspect_routing_deployment || return 1
+  fw_ip=$(firewall_ready_ip) || return 1
+  assert_avnm_routes_ready "$fw_ip" || return 1
+  assert_no_spoke_nat || return 1
+  printf 'PASS: A /16 + /0 and B /16 + /0 use Firewall %s; no Spoke NAT\n' "$fw_ip"
+}
+inspect_avnm_routing_subnets
+```
+
+📋 **확인**
+
+**두 Spoke 모두** PASS여야 다음 모듈의 VM/Hub NAT를 배포할 수 있습니다.
+검사 실패/한쪽만 반영/CLI 조회 오류는 성공이 아닙니다. 수동 테이블을 만들어
+우회하지 마세요. 아직 VM/NIC가 없어 NIC 유효 경로 또는 HTTP 로그는
+증명할 수 없으며 모듈 05·06에서 별도 검증합니다. 기본 암묵적 outbound
+access에 Spoke VM agent의 인터넷 접속을 맡기지 않습니다.
+
 ## Portal 확인과 트러블슈팅
 
 👁️ **설명**
 
-NSG 규칙 목록과 NIC에 실제 적용되는 경로·보안 규칙을 함께 봅니다. 규칙 생성 결과와 유효 설정을 구분하는 단계입니다.
-
-🟢 **실행**
-
-**VM → Networking → Network settings**, **NIC → Effective routes / Effective security rules**에서 대조합니다.
-
-📋 **확인**
-
-Hub→Spoke의 경로와 HTTP 허용 규칙이 유지되고, 임시 `test-deny-hub`가 제거되었는지 확인합니다.
-통신 검증이 실패했다면 아래 표로 원인을 구분합니다.
+**Azure Firewall → Overview**에서 이번 Hub RG의 Standard Firewall,
+실제 사설 IP, 이번 Policy와 Firewall Public IP를 확인합니다.
+**Firewall Policy → Rule collections**에서 `workshop`의 관리/HTTP/FQDN
+세 collection을 확인하고 **Firewall → Diagnostic settings**에서
+이번 workspace와 `AZFWNetworkRule`·`AZFWApplicationRule`의 활성화를
+확인합니다. **Virtual Network Manager → Routing configurations →
+`rc-lzbegin-spokes-<실행 ID>`**에서 A/B rule collection과 각각의
+대상 Group·두 규칙을 확인합니다. **Deployments**에서
+`koreacentral`의 Routing 결과를 보고, 마지막으로 두
+**Virtual network → Subnets → snet-workload → Route table** 연결을
+확인하세요. 스크린샷의 이전 VM/NAT 구성은 새 실습의 증거가 아닙니다.
 
 | 증상 | 조치 |
 |---|---|
-| Run Command 결과 없음 | NAT 연결·VM agent·Azure HTTPS outbound 확인; public SSH를 열지 않기 |
-| guest marker 누락/Invalid Run Command response | stderr·stdout 구분자·출력 잘림 확인; API 성공을 게스트 성공으로 해석하지 않기 |
-| NSG Allow인데 timeout | 로컬 서비스·실제 IP·유효 경로를 순서대로 확인 |
-| A→B가 모듈 04에서 성공 | 직접 Peering/임의 UDR 추가 여부 확인 |
-| watcher 권한 오류 | 리전 watcher 활성화와 구독 진단 권한을 운영자에게 요청 |
-| NSG 변경 전파 지연 | 규칙 상태를 확인하고 잠시 후 새 연결로 재검증 |
+| Firewall IP 없음/`Updating` | 생성·IP 구성의 실제 상태와 Activity Log 확인; 사설 IP 확보 전 Routing 금지 |
+| `FirewallPolicyUpdateFailed` | Firewall·Policy·group의 현재 상태 및 이미 저장된 collection 확인; 중복 생성 금지 |
+| 진단 category 없음 | Firewall SKU/지원 category 확인; 검사를 생략하지 않기 |
+| Peering 변경 실패/비연결 | 실제 remote VNet ID·Connected·AVNM Connectivity 배포/Peering enforcement 확인; 직접 A↔B 연결 금지 |
+| Routing 구성 또는 규칙 `Updating` | 읽기 전용 조회로 완료까지 대기; 잘못된 Group/next hop은 commit 금지 |
+| commit 성공인데 Subnet에 table 없음 | 배포/전파 대기 후 5절 재검사; A/B 그룹의 멤버·대상 리전·배포 실패 사유 확인 |
+| 한쪽 `/16` 또는 `/0`만 존재 | 해당 collection/규칙·Firewall IP와 양쪽 Subnet 연결 확인; VM 생성 금지 |
+| 기존 table/NAT 발견 | 다른 작업 소유인지 확인하고 중단; 기존 자원을 강제로 덮어쓰지 않기 |
 
 ## 완료 체크
 
-- Hub→A/B 연결과 NSG 차단/복구를 확인했습니다.
-- NSG가 허용해도 경로가 없으면 연결되지 않음을 확인했습니다.
-- `test-deny-hub`를 제거했습니다.
+- 이번 Hub의 Firewall Standard·Policy·세 Allow collection·전용 진단이 완료됐습니다.
+- AVNM Connectivity 네 Peering이 전달 트래픽을 허용하며, A/B Routing Group은 겹치지 않습니다.
+- Routing 구성 하나의 네 규칙이 `koreacentral`의 **두 실제 Subnet**에 적용됐습니다.
+- Spoke NAT/PIP와 VM은 없으며 Hub NAT는 다음 모듈에서만 만듭니다.
 
 ## 다음 단계
 
-- [이전: AVNM 연결 관리](03-avnm-connectivity.md)
-- [다음: 중앙 Firewall](05-firewall.md)
-- [중단 시 정리](07-cleanup-production.md)
+- [이전: AVNM 연결과 Group](03-avnm-connectivity.md)
+- [다음: VM과 AVNM Security Admin](05-firewall.md)
+
+참고: [AVNM UDR 관리](https://learn.microsoft.com/azure/virtual-network-manager/concept-user-defined-route),
+[AVNM 배포/전파](https://learn.microsoft.com/azure/virtual-network-manager/concept-deployments),
+[ARM 2025-01-01 Routing Configuration](https://learn.microsoft.com/azure/templates/microsoft.network/2025-01-01/networkmanagers/routingconfigurations),
+[ARM 2025-01-01 Rule Collection](https://learn.microsoft.com/azure/templates/microsoft.network/2025-01-01/networkmanagers/routingconfigurations/rulecollections),
+[ARM 2025-01-01 Routing Rule](https://learn.microsoft.com/azure/templates/microsoft.network/2025-01-01/networkmanagers/routingconfigurations/rulecollections/rules).

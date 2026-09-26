@@ -5,8 +5,10 @@
 
 ## 목표
 
-정상 완료와 중간 실패 모두에서 **이번 실행의 정확한 세 RG만** 삭제합니다.
-공유 자원과 다른 참가자의 리소스는 보존합니다.
+정상 완료와 중간 실패 모두에서 AVNM의 세 종류 구성을 먼저 해제한 뒤
+**이번 실행의 정확한 세 RG만** 삭제합니다. 관리형 경로 테이블의 연결이나
+잔존 테이블이 발견되면 중단하고 상태를 확인합니다. 공유 자원과 다른 참가자의
+리소스는 보존합니다.
 
 ## 공통 준비
 
@@ -40,14 +42,19 @@ assert_subscription
 👁️ **설명**
 
 리소스 이름뿐 아니라 활성 구독과 네 개의 소유 태그를 검사합니다.
-삭제 요청 접수는 완료가 아닙니다. 스크립트는 최대 45분 동안 잔존 여부를 확인합니다.
+AVNM의 Routing·Security Admin·Connectivity 목표 상태를 리전에서 `None`으로 전환한
+뒤 각 배포 완료와 Subnet의 관리형 경로 테이블 연결 해제·잔존 테이블 제거를
+최대 10분씩 기다립니다. 남아 있으면
+Azure Portal에서 배포 상태와 테이블을 확인한 뒤 다시 실행하세요. **관리형 RG를
+수동으로 일괄 삭제하지 마세요.** 삭제 요청 접수는 완료가 아닙니다. 스크립트는
+최대 45분 동안 잔존 여부를 확인합니다.
 **정리라는 한 목적의 안전 스크립트**는 그대로 사용합니다. RG별 raw delete로 쪼개면
 전체 대상의 사전 검사·정확한 확인 문구·삭제 완료 대기가 빠질 수 있습니다.
 스크립트 자체의 구독/소유권 재검사는 독립 실행 시에도 안전하게 하려는 내부 보호입니다.
 
 ⚠️ **주의**
 
-이 작업은 해당 RG 안의 VM·디스크·NAT·Public IP·Firewall·로그까지
+이 작업은 해당 RG 안의 VM·디스크·Hub NAT·Public IP·Firewall·로그까지
 삭제합니다. 필요한 학습 증거는 비밀을 제외하고 먼저 내려받으세요.
 VM 정지/deallocate만으로 NAT, 디스크, Public IP, Firewall 비용은 없어지지 않습니다.
 
@@ -176,15 +183,15 @@ JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 �
 | 이번 실습 | 운영 환경에서 추가할 설계 |
 |---|---|
 | 단일 구독과 RG 3개 | 관리 그룹, Connectivity/Management 구독, 워크로드별 구독 |
-| Connectivity-only AVNM | 운영에서는 Connectivity와 Security Admin Rules를 분리해 거버넌스 범위를 설계 |
+| Connectivity·Security Admin·Routing AVNM | 운영에서는 지역·구독별 정책 소유자와 배포 권한·변경 승인을 분리 |
 | Spoke A/B의 정적 Network Group membership | 운영에서는 Azure Policy 기반 동적 membership도 검토하되 별도 검증 후 도입 |
 | Hub-and-Spoke Connectivity Configuration 1개 | 필요 시 다중 region/scope와 선택적 peering enforcement를 검토 |
 | Hub 테스트 VM | 공유 네트워크 기능만 Hub에 배치, 실제 앱은 Spoke |
 | 실습용 Contributor 권한 | 최소 역할, PIM, 역할 분리, 정기 access review |
 | 이름과 태그 | Azure Policy 상속, 예외 승인, 배포 표준 |
 | 사설 HTTP | 인증·인가·TLS, 인증서 수명 주기 |
-| NAT에서 중앙 Firewall로 전환 | 외부 통신 요구사항 분석, 관리 경로 분리, HA·DR·하이브리드 연결 |
-| 두 Spoke의 수동 UDR | **Preview**인 AVNM Routing Configuration 또는 중앙 경로 자동화는 별도 검증 후 도입 |
+| Hub NAT·Spoke Firewall egress | 외부 통신 요구사항 분석, 관리 경로 분리, HA·DR·하이브리드 연결 |
+| 두 Spoke의 AVNM 관리형 UDR | **Preview**인 Routing Configuration의 운영 지원 상태와 정책·락·관리형 RG 요구를 별도 검증 |
 | Firewall 로그 | 중앙 진단 정책, 경고, 보존·비용 정책 |
 | 관리형 디스크 기본 암호화 | 규제 요구에 따른 host encryption·키 관리·백업 |
 

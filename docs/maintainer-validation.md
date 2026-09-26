@@ -12,34 +12,36 @@
 `<!-- exec:... -->`는 Bash fence 바로 앞에 유지하고 실행 표시는 그 주석보다 앞에 둡니다.
 형식을 수정할 때 명령·실행 순서·스크린샷·안전 검사를 바꾸거나 개별 블록을 합치지 않습니다.
 
-학습 대상인 VNet·Subnet·NSG·Peering·NAT 연결·UDR은 Hub·Spoke A·Spoke B별
-Azure CLI 명령을 명시합니다. 참가자가 대상 RG, 주소 범위, 연결 방향을 비교할 수 있도록
-`for`나 `zone_context`로 숨기지 않습니다. 한글 주석은 명령이 만드는 관계와 확인할 결과를 설명합니다.
-의도적인 반복이므로 단순히 코드 길이를 줄이기 위해 다시 반복문으로 합치지 마세요.
+VNet·Subnet·NSG는 모듈 02, AVNM Connectivity·Routing 대상 Group은 모듈 03,
+Firewall과 중앙 경로는 모듈 04, VM·Hub NAT·Security Admin은 모듈 05에서 다룹니다.
+참가자가 구독·RG·전체 자원 ID·Group 범위·주소를 비교할 수 있도록 각 생성/배포와
+읽기 전용 확인을 분리합니다. 특히 **Routing 적용 전 Firewall이 준비**돼야 하고,
+**VM 생성 전 두 Spoke의 AVNM 경로와 `/0` 출구**가 준비돼야 합니다.
+대상별 실습 동작을 숨기지 않되, 안전 함수·검증기의 내부 반복은 유지합니다.
 
 모듈 02는 **생성 16개·조회 3개의 독립 코드 블록**으로 구성합니다.
 모든 자원을 하나의 `( ... )` 또는 `{ ...; }`로 다시 묶지 않습니다.
 모듈 02–07의 시작에서 **한 번만 source/ensure_state_file/load_run/assert_subscription**으로 준비합니다.
 `ensure_state_file`은 경로가 비어 있을 때만 기존 JSON 경로를 묻고, 취소·빈 입력 시 이전 대상 변수를 지웁니다.
 잘못된 경로/JSON은 `load_run`에서 실패하며, 구독 불일치는 자동 전환하지 않습니다.
-모듈 05는 비용 안내를 배포 전 읽도록 유지하되 각 자원 생성마다 반복 입력을 요구하지 않습니다.
-모듈 03과 05는 실행 블록에 `&&`를 사용하지 않고 각 조회·생성·검증 결과를 확인한 뒤
-참가자가 다음 블록으로 이동합니다. 생성 블록 내부의 보호 검사는 함수의 실패
-반환으로 Azure CLI 생성을 막고, 참가자 Cloud Shell은 종료하지 않습니다.
-모듈 05의 HTTP 규칙은 두 NIC 조회 실패 시 추가하지 않으며, 진단 설정은
-Firewall·workspace ID 조회와 두 필수 category 검사를 통과한 경우에만 생성합니다.
-저장된 진단 설정은 읽기 전용 검사에서 workspace 전체 ID·전용 로그 범주를 다시 확인합니다.
-나머지 모듈은 준비된 같은 세션에서 필요한 조회/의존 상태 검사와 한 CLI 작업만 `&&`로 연결합니다.
+모듈 04 Firewall과 모듈 05 VM의 비용 안내는 생성 전에 배치하며 각 조회/변경은
+실패 시 후속 작업을 멈춥니다. 실패한 검사 때문에 참가자 Cloud Shell까지 종료하지
+않도록 함수의 실패 반환을 사용합니다. Firewall 진단은 Firewall·workspace 전체 ID와
+`AZFWNetworkRule`·`AZFWApplicationRule` 전용 category를 확인한 뒤 생성하고,
+저장된 workspace/두 category도 다시 읽습니다. 모듈 05의 Security Admin 규칙은
+세 VM의 실제 NIC IP 조회가 성공해야 만들며, `AlwaysAllow`가 기존 NSG Deny를
+우회한다는 점을 함께 설명합니다. 임시 Security Admin Deny를 제거하지 못했다면
+모듈 06 Firewall 실험으로 넘어가지 않습니다.
 재접속·상태 파일 변경·실습/구독 전환 시 준비를 다시 수행하도록 안내합니다.
 직접 Azure 자원 명령은 `--subscription "$SUBSCRIPTION_ID"`로 대상을 고정합니다.
 모듈 03–06은 공통 준비에서 세 RG의 소유권을 한 번 확인하고, 일반 작업의 중복 `assert`는 생략합니다.
 모듈 02는 RG 생성 분기에서 기존 RG의 소유권을 확인합니다. 중간 재개 시에도 해당 RG 생성 단계를 다시 실행합니다.
-Peering과 진단 설정의 ID, NSG/Firewall 규칙의 NIC IP는 명시적인 구독·RG·이름으로 조회하여 그대로 전달합니다.
-일반 작업에 ID/IP 형식 검사를 다시 추가하지 않습니다. 조회 실패는 모듈 03·05의
-함수 반환 또는 나머지 모듈의 `&&`로 변경 명령에 전파합니다.
-모듈 05의 진단 category·저장된 workspace/전용 테이블 확인과 모듈 06의 전환·삭제 안전 검사는 유지합니다.
-모듈 04의 NAT는 같은 RG의 명시적인 이름으로 연결하며, 연결 결과는 JSON으로 보여 주고 참가자가 NAT·NSG·outbound 값을 비교합니다.
-이 조회를 자동 PASS 판정으로 설명하지 않습니다. 비용 승인과 독립 통신 검증 스크립트는 유지합니다.
+Peering과 진단 설정의 전체 ID, Security Admin 규칙의 실제 NIC IP는 명시적인
+구독·RG·이름으로 조회합니다. 실패를 빈 응답이나 배포 완료로 해석하지 않습니다.
+Hub NAT만 모듈 05의 Hub 관리 Subnet에 연결합니다. **Spoke NAT·Public IP는
+만들거나 연결하지 않으며**, 모듈 05–06에서 부재를 확인합니다.
+모듈 04의 `allowForwardedTraffic`은 AVNM이 만든 네 기존 Peering을 remote VNet의
+전체 ID로 찾아 업데이트하며, 직접 A↔B Peering 생성이나 수동 UDR과 다릅니다.
 독립 실행 스크립트의 내부 구독·소유권 검사는 유지합니다.
 `load_run`은 새 JSON을 읽기 전에 이전 실습의 구독·실행 ID·세 RG와 `zone_context` 파생 변수를 비웁니다.
 상태 로딩 실패 후에도 참가자 셸은 유지하지만 이전 대상 변수를 재사용하지 않습니다.
@@ -53,49 +55,51 @@ Peering과 진단 설정의 ID, NSG/Firewall 규칙의 NIC IP는 명시적인 �
 검사 실패 시 자원을 변경하지 않고 참가자 셸도 종료하지 않는지 확인합니다.
 생성 응답은 JSON으로 보여 주고 각 단계 바로 아래에 확인할 필드를 설명합니다.
 
-AVNM manager/group/static member/connectivity configuration/commit/effective-configuration,
-NAT 배포/개별 연결/조회, NSG 변경/검증, Firewall 자원/collection/진단,
-UDR 테이블/각 route/연결/검증은 별도 블록입니다.
-모듈 03의 manager/group/정적 멤버는 읽기 전용 목록 조회와 **최초 생성 전용**
-블록을 각각 제공합니다. 같은 이름의 기존 자원 검증·재사용 분기는 없습니다.
-자원이 이미 있거나 목록 조회가 실패하면 덮어쓰지 않고 중단합니다. 구성 생성 전에는
-정적 A/B 멤버 반영 대기와 Hub VNet 전체 ID 조회를 읽기 전용 블록에서 따로
-수행합니다. 새 실행 전용 구성 생성 블록은 앞 블록의 임시 변수에 의존하지 않고
-상태 파일에서 파생된 Hub·Group ID와 빈 구성 목록으로 Azure CLI 생성 한 번만 수행합니다.
-멤버와 Hub의 재조회는 생략하므로 5-1/5-2를 통과하지 못하면 5-3으로 진행하지 않습니다.
-부분 실행 후에는 생성 블록을 재실행하지 말고 현재 상태와 남은 단계를 확인합니다.
-두 Spoke 테이블과 네 전달 Peering을 완성한 뒤 각 Subnet 연결 직전에 현재 준비 상태를 검사합니다.
-NAT 제거는 Spoke별 **분리 → NAT 삭제 → Public IP 삭제** 여섯 작업이며 매 작업 안에
-새 통신 검증·현재 소유/참조 확인·삭제 확인 입력이 있습니다. 마지막 제거 후 검증도 별도입니다.
-`workshop-safety.sh`는 읽기 전용이며 성공 티켓/새 상태 스키마/숨겨진 변경 래퍼가 아닙니다.
-확인 입력을 별도 선행 승인 블록으로 빼거나 오래된 성공 플래그로 대체하지 마세요.
+모듈 03의 manager는 `Connectivity`, `SecurityAdmin`, `Routing` 세 scope access를
+가지며 Connectivity용 Spoke Group과 **서로 분리된 A/B Routing Group**의 정적
+멤버를 조회·생성·반영 확인합니다. Connectivity commit 후 두 Spoke effective
+configuration과 실제 Hub↔Spoke 양방향 Peering을 검증합니다. 생성 실패·멤버
+전파 지연을 성공으로 바꾸거나 같은 이름을 무심코 재생성하지 않습니다.
+모듈 04에서는 Firewall Standard·Policy·관리/HTTP/FQDN egress collection·
+workspace·전용 로그를 확인한 후, 두 Group에 각각 상대 Spoke `/16`과 인터넷
+`/0`을 같은 Firewall 사설 IP로 보내는 AVNM Routing을 배포합니다. 양쪽
+Subnet의 적용을 확인하되 관리형 route table 이름·RG·태그는 가정하지 않습니다.
+모듈 05의 VM 생성 후 양쪽 NIC의 Active `/16`·`/0`을 재확인합니다.
+Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개와 더 높은 우선순위의
+임시 Hub→A Deny를 한 구성의 지역 배포/재배포로 검증합니다.
+모듈 06은 Firewall `lab-http` Allow→Deny→Allow에서 새 HTTP 요청과 **매번
+새 UTC 시각 이후의 `AZFWNetworkRule` 로그**, 두 Spoke의 Firewall egress를
+검증합니다. 로그 지연이나 AVNM 비동기 적용에는 읽기 전용 재조회로 대응합니다.
+`workshop-safety.sh`의 `assert_avnm_routes_ready "$firewall_ip"`와
+`assert_no_spoke_nat`는 읽기 전용이며 성공 티켓·숨겨진 변경 래퍼가 아닙니다.
 
 보조 Bicep과 내부 검증·정리 스크립트의 반복 처리는 유지합니다.
-구독·소유권 확인, 유료 배포/삭제 확인 문구, NAT 제거 전후 검증은 교재에서도 생략하지 않습니다.
+구독·소유권 확인, 유료 배포/삭제 안내와 상태별 독립 검증은 교재에서도 생략하지 않습니다.
 명령을 펼친 뒤에는 CLI mock으로 대상과 인수·호출 순서를 확인하고 문서 Bash 구문을 검사합니다.
-아래 실제 Azure 리허설은 이 편집 이전의 기록이며, 명시적 명령으로 편집한 교재의 재리허설을 뜻하지 않습니다.
-원본 워크숍의 NAT 없는 Firewall 선행 순서는 이 변형에 이식하지 않았습니다. 원본의
-`/0 → Firewall` 리허설에서 확인된 경로 선택은 모듈 06 설명에 반영하고,
-관리 규칙 세부 검사는 Spoke NAT 제거 전 `firewall_ready_ip`에 반영했습니다.
-이 변경의 검증은 로컬/mock이며 아래 AVNM 실전 리허설을 재실행한 것은 아닙니다.
-2026-09-25 원본의 후속 변경에서는 모듈 04의 NSG Deny 실습을 제거하고 Firewall
-경로 화면·모듈 06의 Allow 출력과 반환 경로 화면을 추가했습니다. AVNM 교재는
-기존 NSG 차단·복구 학습과 Spoke NAT→Firewall 전환 순서를 유지하므로 Deny
-제거와 모듈 04의 NAT 없는 Firewall 경로 화면은 이식하지 않았습니다.
-모듈 04 기준 상태와 모듈 06 Allow의 출력 형식 예시 및 모듈 06 반환 경로
-화면만 현재 실행 순서에 맞게 반영했습니다. 출력 예시는 AVNM 실환경 재검증 결과가 아닙니다.
+아래 2026-09-21~24 Azure 리허설은 **이 개편 이전 아키텍처의 역사적 기록**입니다.
+이번 Firewall·Routing 선행 / Hub NAT만 / Security Admin 과정을 Azure에서
+재실행한 증거가 아닙니다. 현재 변경의 증거는 별도의 로컬/mock 검사로 제한합니다.
 
 ## 단일 과정 구성
 
-현재 참가자 경로는 **00 → 01 → 02 → 03 → 04 → 05 Firewall → 06 경로·로그 검증 → 07 정리**입니다.
+현재 참가자 경로는 **00 → 01 → 02 → 03 AVNM Connectivity·Routing Group →
+04 Firewall·AVNM Routing → 05 VM·AVNM Security Admin → 06 통신·Firewall 로그 검증 →
+07 정리**입니다.
 기존 운영 기초·종료 선택 모듈은 내용 전체를 제거했으며 다른 모듈로 이관하지 않았습니다.
-Firewall·왕복 UDR·Allow/Deny 로그·Spoke NAT 제거는 모두 정규 과정입니다.
-README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대기 때문에 늘어날 수 있습니다.
+AVNM의 Connectivity·Routing·Security Admin, Firewall 허용/차단/복구와
+Hub NAT만 정규 과정입니다. Spoke NAT 제거 단계는 존재하지 않습니다.
+README의 목표 시간 합계는 **185–220분**이며 Azure 배포·AVNM 전파·로그 수집·삭제
+대기 때문에 더 길어질 수 있습니다.
 중간 실패·중단 시의 cleanup 경로는 계속 제공하되 별도의 기본 과정 완료 분기로 안내하지 않습니다.
 
-`verify-core.sh`는 모듈 04의 NSG·비전이성 검증, `verify-extension.sh`는 모듈 06의 Firewall 검증을 담당합니다.
-`preflight.sh --extension`은 모듈 05의 기존 VM 재사용 점검 옵션입니다.
-이 파일명과 옵션은 기존 호출 호환성을 위해 유지하며 선택 과정이라는 의미는 아닙니다.
+`preflight.sh "$STATE_FILE" --firewall`은 모듈 04에서 **VM 생성 전**
+Provider·CLI 준비를 읽기 전용으로 확인하고, 옵션 없는 호출은 모듈 05에서
+실제 VM 수요에 따른 SKU·vCPU quota를 확인합니다. 성공해도 용량 예약은 아닙니다.
+`verify-core.sh "$STATE_FILE" baseline|admin-denied|restored`는 모듈 05의
+Security Admin/HTTP·NIC 경로 증거를, `verify-extension.sh "$STATE_FILE"
+allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 증거를 담당합니다.
+이 파일명은 이전 과정과 같지만 검증 의미는 달라졌으며 `--extension` 옵션은
+현재 계약에 없습니다.
 `docs/superpowers/`의 설계·계획은 최초 제작 당시의 이력이며 현재 진행 순서의 기준은 README입니다.
 
 ## AVNM 변형 유지 계약
@@ -104,7 +108,7 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
   역사적 이력일 뿐 현재 경로에 다시 넣지 않습니다.
 - 상태 파일은 `schemaVersion: 2`, `topology: "avnm-hub-spoke"`만 허용합니다. 다른 schema/topology는
   Azure API 호출 전에 거부해야 합니다.
-- 참가자 문서에는 수동 VNet peering 생성 CLI가 남아 있으면 안 됩니다. 모듈 06의 `peering update`
+- 참가자 문서에는 수동 VNet peering 생성 CLI가 남아 있으면 안 됩니다. 모듈 04의 `peering update`
   는 AVNM이 만든 기존 Peering의 `allowForwardedTraffic`만 바꾸는 용도로 유지합니다.
 - 모듈 03의 완료 조건은 commit 성공 메시지가 아니라 **두 Spoke의 effective connectivity
   configuration**과 실제 Hub↔Spoke Peering 상태입니다. 별도로 지정한 Hub는 정적 Network
@@ -116,9 +120,16 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
   `Succeeded` 상태만 기다립니다.
 - AVNM이 만든 Peering 이름은 안정적인 계약이 아닙니다. 테스트와 스크립트는 remote VNet의 **전체 resource ID**
   로 정확히 하나를 찾아야 하며, suffix 비교나 생성 규칙 추정에 의존하지 않습니다.
-- 실행 경로는 Connectivity-only입니다. 참가자 문서와 예제에는 Security Admin configuration,
-  AVNM Routing configuration, 동적 membership 실행, direct connectivity, global mesh, hub gateway,
-  peering enforcement, peering deletion이 들어가면 안 됩니다.
+- 관리자 범위는 `Connectivity`, `SecurityAdmin`, `Routing` 세 가지입니다. 모듈 03에서
+  Connectivity Group과 Spoke A/B 별도 Routing Group을 만들고, 모듈 04의
+  Routing collection 두 개에서 각각 상대 Spoke `/16`과 `/0`을 같은 Firewall
+  사설 IP로 지정합니다. 두 Group을 합치거나 중복 충돌 `/0`을 배포하지 않습니다.
+- 모듈 05의 Security Admin 구성 `sc-lzbegin-http-$RUN_ID`는 대상 Group이 분리된
+  `spokea`·`spokeb` collection으로 실제 VM IP의 TCP/8080 `AlwaysAllow`를 배포합니다.
+  임시 Hub→A Deny는 우선순위가 높고 복구 시 삭제 후 지역에 재배포해야 합니다.
+  기존 NSG deny를 지우거나 Security Admin `Allow`로 대체하면 기준 상태가 달라집니다.
+- 직접 A↔B connectivity, global mesh, hub gateway 공유, peering enforcement,
+  peering deletion, 동적 membership은 이 과정의 변경 대상이 아닙니다.
 
 ## 스크립트 읽는 순서
 
@@ -129,29 +140,30 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 2/topology 검증, 구독·RG 소유 확인, AVNM 이름 파생 |
-| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, Firewall/진단/Allow 준비, 양쪽 경로·Peering, 단계별 NAT 소유/참조의 읽기 전용 검사 |
-| `preflight.sh` | 읽기 전용 사전 점검, 기존 VM 재사용, SKU 제한과 quota 판정 |
+| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
+| `preflight.sh` | 모듈 04 `--firewall`의 Provider·CLI 점검과 모듈 05 옵션 없는 VM SKU/quota 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
-| `verify-common.sh`, `assert-route.py` | IP·NSG·HTTP 증거와 최장 접두사 유효 경로 판정 |
-| `verify-core.sh`, `verify-extension.sh` | 기본·확장 단계의 여러 증거를 함께 비교하는 순서 |
+| `verify-common.sh`, `assert-route.py` | IP·Security Admin IP Flow Verify·HTTP 증거와 최장 접두사 NIC 유효 경로 판정 |
+| `verify-core.sh`, `verify-extension.sh` | 모듈 05 Admin baseline/admin-denied/restored와 모듈 06 Firewall allowed/denied/restored의 독립 증거 |
 | `firewall-logs.sh` | 이번 흐름의 로그 필터, 수집 지연 대기와 조회 오류 구분 |
 | `cleanup.sh` | 정확한 삭제 범위, 사용자 확인, 삭제 요청 후 실제 부재 확인 |
 
 ## Bicep 읽는 순서
 
 한글 주석은 구독/RG 배포 범위, 모듈의 의존 관계, 공개 키와 사설 NIC,
-VM 보안 설정 및 NAT 연결이 별도 단계인 이유를 설명합니다.
+VM 보안 설정 및 **Hub NAT 연결만** 별도 단계인 이유를 설명합니다.
 리소스 설정과 Checkov 예외 식별자는 설명 주석과 구분해서 읽으세요.
 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
-| `infra/lab-support.bicep` | 기존 세 RG에 보조 모듈 배포, 구독을 명시한 Subnet ID, 구역별 출력 |
-| `infra/modules/nat.bicep` | NAT 출구용 고정 Public IP, 참조로 생기는 의존 관계, CLI에서 별도로 수행하는 Subnet 연결 |
+| `infra/lab-support.bicep` | 기존 세 RG에 VM과 Hub NAT만 보조 배포, 구독을 명시한 Subnet ID, 구역별 출력 |
+| `infra/modules/nat.bicep` | Hub 관리 Subnet용 NAT와 고정 Public IP, 참조로 생기는 의존 관계, CLI에서 별도로 수행하는 Hub 연결 |
 | `infra/modules/test-vm.bicep` | 공인 IP 없는 NIC, SSH 공개 키/VM agent, Trusted Launch, VM 삭제 시 디스크·NIC 수명 |
 
-이 템플릿은 네트워크 뼈대를 다시 만들지 않습니다. VNet·NSG·Subnet 생성과
-NAT·Peering·UDR 연결은 교재의 개별 Azure CLI 작업으로 유지합니다.
+이 템플릿은 네트워크 뼈대를 다시 만들지 않습니다. VNet·NSG·Subnet은
+모듈 02, AVNM Connectivity는 03, Firewall·AVNM Routing은 04에서 관리합니다.
+보조 템플릿에는 Spoke NAT/PIP와 수동 route table을 추가하지 않습니다.
 
 ## 로컬 검사
 
@@ -177,11 +189,16 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 난수 ID와 기존 RG 충돌 거부, 기존 VM 재사용 시 quota 계산, Network Watcher
 신규 활성화와 공유 RG 보존도 로컬 회귀 검사에 포함됩니다.
 모듈 02–07의 개별 블록은 공통 준비 뒤 독립 실행하며, 실패한 조회/잘못된 응답,
-소유권 불일치, 승인 거절, 전환 준비 누락, NAT 삭제 순서/범위를 검사합니다.
+소유권 불일치, 승인 거절, Firewall/AVNM 배포 준비 누락과 Spoke NAT 부재를 검사합니다.
 `tests/test_docs.py`는 README와 활성 참가자 모듈에서 이전 수동-peering 링크와
-수동 peering 생성 CLI가 남지 않았는지, AVNM 범위가 Connectivity-only인지 확인합니다.
-모듈 03 mock은 AVNM manager/group/static member/connectivity configuration/commit/effective-configuration
-블록의 호출 순서와 인수를 확인합니다.
+수동 peering 생성 CLI가 남지 않았는지, AVNM에 세 scope access가 있는지 확인해야 합니다.
+모듈 03 mock은 manager/Connectivity Group/A·B Routing Group/정적 멤버/
+connectivity configuration/commit/effective-configuration의 호출 순서와 인수를 확인합니다.
+모듈 04–06 mock은 Firewall 선행, 서로 다른 Group 대상 `/16`·`/0` 경로와
+실제 Subnet/NIC 적용, VM·Hub NAT만 생성, Security Admin의
+`baseline|admin-denied|restored` 및 Firewall의 `allowed|denied|restored`
+증거를 검사합니다. 실제 NIC IP와 관리자 규칙의 범위·우선순위·동작, 단측 경로,
+늦은 배포, 불완전한 Firewall 및 Spoke NAT/PIP가 있으면 실패해야 합니다.
 상태·복구 테스트는 schema 2/topology 거부, generated-name 불안정성에 영향받지 않는
 full-ID 비교, 독립 저장소 경로 `$HOME/ms-landing-zone-02` 복구 동작을 회귀 검사합니다.
 `bash tests/validate.sh`의 최종 요약은 `PASS: local validation only; no Azure resources were deployed.`여야 합니다.
@@ -190,8 +207,9 @@ full-ID 비교, 독립 저장소 경로 `$HOME/ms-landing-zone-02` 복구 동작
 복구 회귀 검사는 이미 준비된 셸에서 잘못된 상태를 읽은 뒤 대상 변수가 남지 않는지 직접 확인합니다.
 교재의 실제 복구 블록을 실행하여 디렉터리 이동 실패·입력 EOF·JSON 오류 시 구독 변경이 없는지,
 상태 디렉터리 밖에 업로드한 JSON으로도 복구할 수 있는지 검사합니다.
-이후 문서 개정은 **로컬/mock만** 검증합니다. 아래 2026-09-24 Azure 리허설을
-새로 변경한 설명이나 브라우저 Cloud Shell 조작의 재실행 결과로 해석하지 않습니다.
+이번 개편의 확인은 **로컬/mock만**으로 한정합니다. 아래 2026-09-24 Azure
+리허설은 **VM 우선·수동 UDR·Spoke NAT 2개가 있던 이전 아키텍처**의 기록이며,
+Firewall/AVNM Routing 선행·Hub NAT만·Security Admin 구성의 실행 증거가 아닙니다.
 
 도구가 없으면 먼저 누락 오류를 확인한 뒤 조직이 승인한 방법으로 설치하세요.
 예를 들어 별도 환경에서 `uv tool install checkov`를 사용하고 해당 executable을 PATH에 둡니다.
@@ -222,7 +240,12 @@ Trusted Launch·Secure Boot·vTPM, 비특권 응답 서비스는 적용합니다
 관리형 디스크 SSE는 host cache/temporary disk 암호화와 같지 않습니다.
 실습에는 고객 데이터·자격 증명·업무 워크로드를 올리지 않습니다.
 
-## 실제 Azure 리허설
+## 이전 아키텍처의 실제 Azure 리허설 기록 (현재 개편의 검증 아님)
+
+아래 체크·시간·PASS는 수행 당시의 **VM 우선·수동 UDR·Spoke NAT/NSG**
+과정 또는 수동 Peering 원본에 대한 실제 관측입니다. 기록은 보존하지만
+현재의 Firewall·AVNM Routing 선행, Hub NAT만 사용하는 VM,
+AVNM Security Admin 차단·복구가 Azure에서 성공했다는 증거가 아닙니다.
 
 ### 2026-09-21 수동 Peering 원본 워크숍 이력
 
@@ -280,10 +303,11 @@ Firewall 생성 전 중단 상황의 별도 배포·cleanup, 새 ID의 중도 �
 이번 실행의 세 RG는 모두 삭제 완료했으며 기존 공유 Network Watcher는 `Succeeded`로 유지됩니다.
 실행 기록은 로컬 `evidence/rehearsal-18560e683452/`에 보관했습니다(Git 제외).
 
-### AVNM 변형 리허설 체크리스트
+### 이전 AVNM 변형 리허설 체크리스트 (현재 과정의 완료표 아님)
 
-아래 항목은 **현재 AVNM 교재**의 실제 관측값입니다. 로컬 터미널의 인증된
-Azure CLI로 진행했으며 브라우저 Cloud Shell 재접속은 시험하지 않았습니다.
+아래 항목은 **당시 Connectivity-only AVNM 교재**의 실제 관측값입니다.
+현재 개편의 체크리스트가 아니며, 로컬 터미널의 인증된 Azure CLI로 진행했고
+브라우저 Cloud Shell 재접속은 시험하지 않았습니다.
 
 - [ ] Cloud Shell의 Azure CLI·Bicep·`virtual-network-manager` extension·Checkov 버전을 기록했다.
 - [x] 모듈 03에서 AVNM, Network Group, 정적 Spoke A/B membership, Connectivity Configuration을 만들었다.
@@ -370,8 +394,9 @@ Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
 동일 명령을 실행하거나 세션 재연결을 시험했다는 의미는 아닙니다.
 로컬 최종 검사는 139 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
 
-### 2026-09-24 게시 버전 실제 AVNM Azure 재리허설
+### 2026-09-24 게시 버전 실제 AVNM Azure 재리허설 (이전 아키텍처 이력)
 
+**이 검증은 현재 AVNM Routing·Security Admin 개편 이전의 게시본에만 해당합니다.**
 게시 저장소 `main`의 `b8c7893`에서 Korea Central의 새 실행 `8c43433227ef`을
 인증된 로컬 Azure CLI로 실행했습니다. 시작 전 별도 실행 `98f2d58f5774`의 세 RG가
 존재하는 것을 확인했으며, 그 실행의 자원은 변경하거나 삭제하지 않았습니다.
@@ -405,10 +430,11 @@ Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
 증거: 로컬 `evidence/rehearsal-8c43433227ef/` (Git 제외).
 이 리허설은 브라우저 Cloud Shell 재접속이나 다른 구독·지역에서의 동작 검증이 아닙니다.
 기록 추가 후 로컬 최종 검사는 141 tests, Checkov 7 passed / 0 failed / 3 skipped입니다.
-2026-09-25 원본 워크숍의 세션 복구 설명, Hub Subnet Portal 예시, Firewall IP 연결
-대기 안내를 AVNM 과정에 맞춰 이관했습니다. 수동 Peering 생성 예시와 원본의
-Spoke NAT 없는 Firewall 선행 흐름은 이관하지 않았습니다. 이 문서 변경 후 Azure
-리허설을 다시 수행하지 않았으며, 위 결과는 변경 전 게시본의 검증 증거입니다.
+2026-09-25 당시에는 원본 워크숍의 세션 복구 설명, Hub Subnet Portal 예시와
+Firewall IP 연결 대기 안내만 이관하고, Spoke NAT 없는 Firewall 선행 흐름은
+이관하지 않았습니다. **이 설명은 당시 작업 이력**입니다. 이후 현재 과정은
+Spoke NAT를 제거하고 Firewall·AVNM Routing을 VM보다 먼저 배치하도록 다시
+설계했습니다. 이 새 순서로 Azure 리허설을 수행했다는 뜻이 아닙니다.
 
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기
@@ -416,10 +442,11 @@ Spoke NAT 없는 Firewall 선행 흐름은 이관하지 않았습니다. 이 문
 
 ## 설계와 구현의 작은 차이
 
-검증기 사이의 IP·HTTP·NSG·경로 확인을 중복하지 않기 위해
+검증기 사이의 IP·HTTP·Security Admin·경로 확인을 중복하지 않기 위해
 `scripts/verify-common.sh`와 `scripts/assert-route.py`를 추가했습니다.
 경로 판정은 문자열 포함 검사가 아니라 **active route의 longest-prefix match**를 계산합니다.
-보조 템플릿은 Subnet을 소유하지 않으며, NAT 연결은 CLI로 기존 Subnet의 해당 속성만 변경합니다.
+보조 템플릿은 Subnet을 소유하지 않으며, **Hub NAT만** CLI로 기존 관리
+Subnet에 연결합니다. Spoke NAT를 분리하거나 삭제하는 실습은 없습니다.
 Firewall 차단 실습은 관리용 collection을 건드리지 않고 `lab-http`를 명시적 Deny로 전환합니다.
 이는 단순 네트워크 장애와 정책 차단을 구분하는 로그를 확보하기 위한 것입니다.
 

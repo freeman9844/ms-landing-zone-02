@@ -15,7 +15,13 @@ from test_network_docs import (
     rg,
     vnet,
 )
+import test_avnm_redesign as redesign
+from test_workshop_safety import ready_calls, admin_calls, CONFIG
 from tests.test_run_vm import invoke
+
+
+def admin_rule_id(zone, name):
+    return f"{CONFIG}/ruleCollections/{zone}/rules/{name}"
 
 
 class RouteTests(unittest.TestCase):
@@ -123,15 +129,146 @@ class CoreGateTests(unittest.TestCase):
             self.peering_list_call("spokeb"),
         ]
 
-    def test_unrelated_nsg_deny_is_not_the_lab_rule(self):
+    def network_calls(self):
+        return self.gate_calls() + [
+            call(["network", "nic", "show", "-g", rg(zone),
+                  "-n", f"nic-lzbegin-{zone}-demo123",
+                  "--query", "ipConfigurations[0].privateIPAddress", "-o", "tsv"], ip)
+            for zone, ip in (("hub", "10.0.1.4"), ("spokea", "10.10.1.4"),
+                             ("spokeb", "10.20.1.4"))
+        ] + ready_calls() + redesign.route_calls()
+
+    def test_all_stages_reject_wrong_route_or_nat_before_http(self):
+        routes = redesign.route_calls()
+        routes[-1] = copy.deepcopy(routes[-1])
+        table = json.loads(routes[-1]["stdout"])
+        table["routes"][0]["nextHopIpAddress"] = "10.0.2.9"
+        routes[-1]["stdout"] = json.dumps(table)
+        prefix = self.network_calls()[:-len(redesign.route_calls())]
+        for stage in ("baseline", "admin-denied", "restored"):
+            with self.subTest(stage=stage, issue="route"):
+                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                             prefix + routes)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Subnet routes", result.stderr)
+            with self.subTest(stage=stage, issue="nat"):
+                nat = redesign.SpokeNatAbsenceTests().calls(nat={"name": "unexpected"})
+                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                             self.network_calls() + nat)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Unexpected Spoke NAT", result.stderr)
+
+    def test_stage_specific_admin_rule_is_checked_before_http(self):
+        for stage, fixture_stage, rule_name in (
+            ("baseline", "baseline", "hub-to-a"),
+            ("admin-denied", "denied", "deny-hub-to-a"),
+            ("restored", "restored", "a-to-b"),
+        ):
+            security = admin_calls(fixture_stage)
+            index = next(i for i, entry in enumerate(security) if
+                         "--rule-name" in entry["argv"] and
+                         entry["argv"][entry["argv"].index("--rule-name") + 1] == rule_name)
+            security = copy.deepcopy(security[:index + 1])
+            bad = json.loads(security[-1]["stdout"])
+            bad["priority"] = 999
+            security[-1]["stdout"] = json.dumps(bad)
+            with self.subTest(stage=stage):
+                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                             self.network_calls() + redesign.SpokeNatAbsenceTests().calls() + security)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Security Admin rule", result.stderr)
+
+    def test_admin_denied_requires_blocked_hub_a_but_keeps_hub_b_and_a_b_working(self):
+        def route(zone, prefix, hop, next_ip=None):
+            return call(["network", "nic", "show-effective-route-table", "-g", rg(zone),
+                         "-n", f"nic-lzbegin-{zone}-demo123", "-o", "json"],
+                        {"value": [{"state": "Active", "addressPrefix": [prefix],
+                                    "nextHopType": hop, "nextHopIpAddress": [next_ip] if next_ip else []}]})
+
+        def flow(zone, local, remote, access, rule):
+            return call(["network", "watcher", "test-ip-flow", "-g", rg(zone),
+                         "--vm", f"vm-lzbegin-{zone}-demo123", "--direction", "Inbound",
+                         "--protocol", "TCP", "--local", f"{local}:8080",
+                         "--remote", f"{remote}:50000", "-o", "json"],
+                        {"access": access, "ruleName": admin_rule_id(zone, rule)})
+
+        def guest(zone):
+            response = call(["vm", "run-command", "invoke", "--resource-group", rg(zone),
+                             "--name", f"vm-lzbegin-{zone}-demo123",
+                             "--command-id", "RunShellScript",
+                             "--scripts", {"regex": "@/.+/lzbegin-run\\.[A-Za-z0-9]+"}, "-o", "json"])
+            response["run_guest"] = True
+            return [account(), group(zone), response]
+
+        calls = self.network_calls() + redesign.SpokeNatAbsenceTests().calls() + admin_calls("denied")
+        calls += [
+            route("hub", "10.10.0.0/16", "VNetPeering"),
+            route("hub", "10.20.0.0/16", "VNetPeering"),
+            route("spokea", "10.20.0.0/16", "VirtualAppliance", "10.0.2.4"),
+            route("spokeb", "10.10.0.0/16", "VirtualAppliance", "10.0.2.4"),
+            route("spokea", "0.0.0.0/0", "VirtualAppliance", "10.0.2.4"),
+            route("spokeb", "0.0.0.0/0", "VirtualAppliance", "10.0.2.4"),
+            *guest("spokea"),
+            flow("spokea", "10.10.1.4", "10.0.1.4", "Deny", "deny-hub-to-a"),
+            *guest("hub"),
+            flow("spokeb", "10.20.1.4", "10.0.1.4", "Allow", "hub-to-b"),
+            *guest("hub"),
+            flow("spokeb", "10.20.1.4", "10.10.1.4", "Allow", "a-to-b"),
+            *guest("spokea"),
+        ]
+        curl = """#!/bin/sh
+case "$*" in
+  *127.0.0.1:8080/*) printf 'spokea\\n' ;;
+  *10.10.1.4:8080/*) exit 7 ;;
+  *10.20.1.4:8080/*) printf 'spokeb\\n' ;;
+  *) exit 99 ;;
+esac
+"""
+        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json admin-denied',
+                     calls, files={"bin/curl": curl})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PASS: core admin-denied evidence complete", result.stdout)
+
+    def test_unrelated_nsg_deny_is_not_the_admin_rule(self):
         result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
-                     'nsg_proof spokea 10.10.1.4 10.0.1.4 Deny', [
+                     'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a', [
             call(["network", "watcher", "test-ip-flow", "-g", STATE["resourceGroups"]["spokea"],
                   "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound", "--protocol", "TCP",
                   "--local", "10.10.1.4:8080", "--remote", "10.0.1.4:50000", "-o", "json"],
                  {"access": "Deny", "ruleName": "defaultSecurityRules/DenyAllInBound"}),
         ])
         self.assertNotEqual(result.returncode, 0)
+
+    def test_matching_nsg_rule_name_is_not_avnm_admin_evidence(self):
+        args = ["network", "watcher", "test-ip-flow", "-g", rg("spokea"),
+                "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound",
+                "--protocol", "TCP", "--local", "10.10.1.4:8080",
+                "--remote", "10.0.1.4:50000", "-o", "json"]
+        result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                     'admin_proof spokea 10.10.1.4 10.0.1.4 Allow hub-to-a',
+                     [call(args, {"access": "Allow", "ruleName": "defaultSecurityRules/hub-to-a"})])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Admin rule evidence", result.stderr)
+
+    def test_admin_proof_requires_matching_action_and_rule(self):
+        args = ["network", "watcher", "test-ip-flow", "-g", rg("spokea"),
+                "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound",
+                "--protocol", "TCP", "--local", "10.10.1.4:8080",
+                "--remote", "10.0.1.4:50000", "-o", "json"]
+        for access, rule, valid in (
+            ("Deny", "deny-hub-to-a", True),
+            ("Deny", f"{admin_rule_id('spokea', 'deny-hub-to-a')}", True),
+            ("Allow", "deny-hub-to-a", False),
+            ("Deny", "hub-to-b", False),
+            ("Deny", "defaultSecurityRules/deny-hub-to-a", False),
+            ("Deny", "securityAdminRules/deny-hub-to-a", False),
+            ("Deny", admin_rule_id("spokeb", "deny-hub-to-a"), False),
+        ):
+            with self.subTest(access=access, rule=rule):
+                result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                             'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a',
+                             [call(args, {"access": access, "ruleName": rule})])
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
 
     def test_missing_effective_configuration_stops_before_http(self):
         result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [

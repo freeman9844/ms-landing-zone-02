@@ -34,6 +34,122 @@ assert_subscription
 for rg in "${present[@]}"; do
   assert_owned_rg "$rg"
 done
+# 관리형 테이블 ID를 해제 전 실제 Subnet에서 수집합니다. 이름·RG·태그를 추측하지 않습니다.
+associated_tables=()
+for zone in spokea spokeb; do
+  if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
+  [[ " ${present[*]} " == *" $rg "* ]] || continue
+  vnets=$(az network vnet list -g "$rg" -o json --subscription "$SUBSCRIPTION_ID")
+  jq -e --arg name "vnet-lzbegin-$zone-$RUN_ID" '
+    type == "array" and length <= 1 and all(.[]; .name == $name)
+  ' <<< "$vnets" >/dev/null || { fail "Unexpected VNet in Spoke RG: $rg"; exit 1; }
+  if [[ $(jq 'length' <<< "$vnets") == 1 ]]; then
+    subnets=$(az network vnet subnet list -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
+      -o json --subscription "$SUBSCRIPTION_ID")
+    table_id=$(jq -er '
+      if type != "array" then error("Invalid subnet listing") else . end |
+      [.[] | select(.name == "snet-workload")] |
+      if length > 1 then error("Duplicate workload subnet") else .[0].routeTable.id // "" end
+    ' <<< "$subnets") || { fail "Cannot inspect existing Spoke route tables."; exit 1; }
+    if [[ -n "$table_id" ]]; then
+      jq -ne --arg id "$table_id" --arg sub "$SUBSCRIPTION_ID" '
+        $id | ascii_downcase |
+        test("^/subscriptions/" + ($sub | ascii_downcase) +
+             "/resourcegroups/[^/]+/providers/microsoft.network/routetables/[^/]+$")
+      ' >/dev/null || { fail "Unexpected associated route table ID: $table_id"; exit 1; }
+      associated_tables+=("$table_id")
+    fi
+  fi
+done
+# None 배포로 목표 상태를 먼저 제거합니다. 관리형 경로 테이블 RG는 이 스크립트의 삭제 대상이 아닙니다.
+if [[ " ${present[*]} " == *" $RG_HUB "* ]]; then
+  managers=$(az network manager list -g "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID")
+  jq -e --arg id "$AVNM_ID" '
+    type == "array" and length <= 1 and all(.[]; (.id | ascii_downcase) == ($id | ascii_downcase))
+  ' <<< "$managers" >/dev/null || { fail "Unexpected AVNM in Hub RG; cleanup stopped."; exit 1; }
+  if [[ $(jq 'length' <<< "$managers") == 1 ]]; then
+    for kind in Routing SecurityAdmin Connectivity; do
+      case "$kind" in
+        Routing) resource=routingConfigurations/rc-lzbegin-spokes-"$RUN_ID"; command=routing-config ;;
+        SecurityAdmin) resource=securityAdminConfigurations/sc-lzbegin-http-"$RUN_ID"; command=security-admin-config ;;
+        Connectivity) resource=connectivityConfigurations/cc-lzbegin-hub-spoke-"$RUN_ID"; command=connect-config ;;
+      esac
+      configurations=$(az network manager "$command" list -g "$RG_HUB" \
+        --manager-name "$AVNM" -o json --subscription "$SUBSCRIPTION_ID")
+      jq -e --arg id "$AVNM_ID/$resource" '
+        type == "array" and length <= 1 and
+        all(.[]; (.id | ascii_downcase) == ($id | ascii_downcase))
+      ' <<< "$configurations" >/dev/null ||
+        { fail "Unexpected $kind configuration; refusing to overwrite its deployment."; exit 1; }
+    done
+    for kind in Routing SecurityAdmin Connectivity; do
+      az network manager post-commit -g "$RG_HUB" -n "$AVNM" \
+        --commit-type "$kind" --configuration-ids '[]' --target-locations "$LOCATION" \
+        -o none --subscription "$SUBSCRIPTION_ID"
+      deployed=false
+      for ((attempt=0; attempt<40; attempt++)); do
+        status=$(az network manager list-deploy-status -g "$RG_HUB" -n "$AVNM" \
+          --deployment-types "$kind" --regions "$LOCATION" -o json \
+          --subscription "$SUBSCRIPTION_ID")
+        result=$(jq -cer --arg kind "$kind" --arg region "$LOCATION" '
+          if type == "array" then .
+          elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+          else error("Invalid deployment status response") end
+          | [.[] | select(.deploymentType == $kind and .region == $region)] |
+            if length == 0 then "Pending"
+            else (sort_by(.commitTime) | last) |
+              if .configurationIds == [] and .deploymentStatus == "Failed" then error("AVNM undeployment failed")
+              elif .configurationIds == [] and .deploymentStatus == "Deployed" then "Deployed"
+              else "Pending" end end
+        ' <<< "$status") || { fail "Cannot verify $kind undeployment."; exit 1; }
+        if [[ "$result" == Deployed ]]; then deployed=true; break; fi
+        sleep 15
+      done
+      [[ "$deployed" == true ]] ||
+        { fail "$kind undeployment did not complete within 10 minutes; rerun cleanup."; exit 1; }
+      printf 'Undeployed AVNM %s from %s.\n' "$kind" "$LOCATION"
+    done
+  fi
+fi
+# None 배포 성공 뒤 Subnet 반영도 비동기입니다. 만료 전까지 실제 연결이 없어졌는지 다시 조회합니다.
+for ((attempt=0; attempt<40; attempt++)); do
+  pending=false
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
+    [[ " ${present[*]} " == *" $rg "* ]] || continue
+    vnets=$(az network vnet list -g "$rg" -o json --subscription "$SUBSCRIPTION_ID")
+    jq -e --arg name "vnet-lzbegin-$zone-$RUN_ID" '
+      type == "array" and length <= 1 and all(.[]; .name == $name)
+    ' <<< "$vnets" >/dev/null || { fail "Unexpected VNet in Spoke RG: $rg"; exit 1; }
+    if [[ $(jq 'length' <<< "$vnets") == 1 ]]; then
+      subnets=$(az network vnet subnet list -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
+        -o json --subscription "$SUBSCRIPTION_ID")
+      jq -e 'type == "array" and all(.[]; .name == "snet-workload")' <<< "$subnets" >/dev/null ||
+        { fail "Unexpected subnet listing: $zone"; exit 1; }
+      if ! jq -e 'all(.[]; .routeTable == null)' <<< "$subnets" >/dev/null; then pending=true; fi
+    fi
+  done
+  [[ "$pending" == false ]] && break
+  sleep 15
+done
+[[ "$pending" == false ]] ||
+  { fail "AVNM route-table associations did not clear within 10 minutes; inspect deployment and rerun cleanup."; exit 1; }
+if [[ ${#associated_tables[@]} -gt 0 ]]; then
+  expected=$(printf '%s\n' "${associated_tables[@]}" | jq -Rs 'split("\n") | map(select(length > 0) | ascii_downcase)')
+  cleared=false
+  for ((attempt=0; attempt<40; attempt++)); do
+    tables=$(az resource list --resource-type Microsoft.Network/routeTables -o json \
+      --subscription "$SUBSCRIPTION_ID")
+    jq -e 'type == "array" and all(.[]; .id | type == "string")' <<< "$tables" >/dev/null ||
+      { fail "Cannot inspect route-table inventory."; exit 1; }
+    if jq -e --argjson ids "$expected" '
+      all(.[]; (.id | ascii_downcase) as $id | ($ids | index($id)) == null)
+    ' <<< "$tables" >/dev/null; then cleared=true; break; fi
+    sleep 15
+  done
+  [[ "$cleared" == true ]] ||
+    { fail "Previously associated AVNM route tables still exist. Inspect their managed RG; do not delete it blindly."; exit 1; }
+fi
 # --no-wait는 삭제 요청만 보냅니다. 요청 접수를 완료로 오인하지 않도록 아래에서 실제 부재를 기다립니다.
 # 세 RG 삭제는 하나의 원자적 작업이 아닙니다. 중간 실패 후 재실행하면 남아 있는 그룹부터 다시 확인합니다.
 for rg in "${present[@]}"; do
