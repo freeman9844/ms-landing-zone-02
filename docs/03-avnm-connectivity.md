@@ -816,6 +816,13 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 - Hub에는 두 개, 각 Spoke에는 하나의 `Connected` Peering이 있습니다.
 - Spoke A↔B 직접 Peering은 없습니다.
 
+아래는 **Hub VNet → Peerings** 관리 콘솔 화면의 예시입니다. Hub의 두 Peering이
+`Connected`이고 동기화 상태가 `Fully Synchronized`인지 확인하세요. 화면의
+구독·실행 ID와 AVNM이 생성한 Peering 이름은 자신의 실습 값과 다를 수 있습니다.
+각 Spoke의 Hub 방향 Peering과 A↔B 직접 Peering 부재는 해당 Spoke 화면에서 별도로 확인합니다.
+
+![Azure Portal Hub VNet Peerings 화면에서 AVNM이 생성한 두 Peering의 Connected 및 Fully Synchronized 상태](images/03-hub-avnm-peerings.png)
+
 | 증상 | 조치 |
 |---|---|
 | commit은 성공했지만 effective configuration이 안 보임 | 잠시 기다린 뒤 effective 블록을 다시 실행 |
