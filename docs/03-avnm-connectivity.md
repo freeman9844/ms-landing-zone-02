@@ -109,6 +109,13 @@ create_avnm_if_empty
 Hub RG에 `avnm-lzbegin-<runId>`가 만들어집니다. 응답의 scope access가
 Connectivity이고 구독 scope가 이번 구독인지 확인하세요.
 
+Azure Portal의 **Virtual Network Manager → Network managers → 이번 실행의 AVNM → Overview**에서도
+생성된 자원을 확인할 수 있습니다. 아래 화면처럼 **Enabled features: Connectivity**,
+**Scope (In-tenant): Subscriptions (1)**, **Provisioning state: Succeeded**인지
+확인하세요. 화면의 이름·구독·실행 ID는 예시이므로 자신의 값과 대조합니다.
+
+![Azure Portal의 AVNM Overview에 표시된 Connectivity 기능, 구독 범위 및 생성 완료 상태](images/03-avnm-overview.png)
+
 ## 2. Spoke 전용 Network Group 만들기
 
 👁️ **설명**
