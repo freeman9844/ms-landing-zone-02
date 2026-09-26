@@ -278,20 +278,6 @@ def avnm_cases():
         ],
         "connectivity-config-create": [
             az([
-                "network", "manager", "group", "static-member", "list",
-                "--network-group", "ng-lzbegin-spokes-demo123",
-                "--network-manager", "avnm-lzbegin-demo123",
-                "--resource-group", rg("hub"),
-                "-o", "json",
-            ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")]),
-            az([
-                "network", "vnet", "show",
-                "-g", rg("hub"),
-                "-n", vnet("hub"),
-                "--query", "id",
-                "-o", "tsv",
-            ], hub),
-            az([
                 "network", "manager", "connect-config", "list",
                 "--network-manager-name", "avnm-lzbegin-demo123",
                 "--resource-group", rg("hub"),
@@ -407,29 +393,48 @@ class NetworkDocsTests(unittest.TestCase):
                 self.assertNotIn("&&", script)
 
     def test_configuration_waits_for_both_static_members_before_create(self):
-        calls = avnm_cases()["connectivity-config-create"]
+        calls = [az([
+            "network", "manager", "group", "static-member", "list",
+            "--network-group", network_group_name(),
+            "--network-manager", avnm_name(),
+            "--resource-group", rg("hub"), "-o", "json",
+        ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])]
         result = self.execute(3, "inspect-static-members", [
             dict(calls[0], stdout=json.dumps([static_member("spokea", "spokea")])),
             calls[0],
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_configuration_preflight_checks_hub_separately_and_create_rechecks_members(self):
-        hub_call = avnm_cases()["connectivity-config-create"][1]
+    def test_configuration_preflight_checks_hub_separately_and_create_uses_verified_ids(self):
+        hub_call = az(["network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
+                       "--query", "id", "-o", "tsv"], netid("hub", "virtualNetworks", vnet("hub")))
         result = self.execute(3, "inspect-avnm-hub", [hub_call])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(netid("hub", "virtualNetworks", vnet("hub")), result.stdout)
-        for name, calls in (
-            ("inspect-avnm-hub", [dict(hub_call, stdout="unexpected")]),
-            ("connectivity-config-create", [
-                dict(avnm_cases()["connectivity-config-create"][0], stdout=json.dumps([
-                    static_member("spokea", "spokea")
-                ]))
-            ]),
-        ):
-            with self.subTest(step=name):
-                result = self.execute(3, name, calls)
-                self.assertNotEqual(result.returncode, 0)
+        result = self.execute(3, "inspect-avnm-hub", [dict(hub_call, stdout="unexpected")])
+        self.assertNotEqual(result.returncode, 0)
+        script = blocks(DOCS[3])["connectivity-config-create"]
+        self.assertNotIn("static-member list", script)
+        self.assertNotIn("network vnet show", script)
+        self.assertNotIn("&&", script)
+
+    def test_configuration_creation_follows_member_and_hub_checks(self):
+        steps = blocks(DOCS[3])
+        members = az([
+            "network", "manager", "group", "static-member", "list",
+            "--network-group", network_group_name(), "--network-manager", avnm_name(),
+            "--resource-group", rg("hub"), "-o", "json",
+        ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])
+        hub = az(["network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
+                  "--query", "id", "-o", "tsv"], netid("hub", "virtualNetworks", vnet("hub")))
+        actions = ["prepare-03", "inspect-static-members", "inspect-avnm-hub", "connectivity-config-create"]
+        script = 'export STATE_FILE=state.json\n' + " || exit 1\n".join(steps[action] for action in actions)
+        result = run(script, [*preparation_calls(3), members, hub,
+                              *avnm_cases()["connectivity-config-create"]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = run(script, [*preparation_calls(3),
+                              dict(members, stdout=json.dumps([static_member("hub", "hub")]))])
+        self.assertNotEqual(result.returncode, 0)
 
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=STATE):
         steps = blocks(DOCS[module])
@@ -528,8 +533,14 @@ printf 'SHELL_ALIVE\\n'
                     self.assertEqual(result.returncode, 0, result.stderr)
         config_calls = avnm_cases()["connectivity-config-create"]
         for name, calls in (
-            ("inspect-static-members", config_calls[:1]),
-            ("inspect-avnm-hub", config_calls[1:2]),
+            ("inspect-static-members", [az([
+                "network", "manager", "group", "static-member", "list",
+                "--network-group", network_group_name(), "--network-manager", avnm_name(),
+                "--resource-group", rg("hub"), "-o", "json",
+            ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])]),
+            ("inspect-avnm-hub", [az(["network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
+                                      "--query", "id", "-o", "tsv"],
+                                     netid("hub", "virtualNetworks", vnet("hub")))]),
         ):
             with self.subTest(step=name):
                 result = self.execute(3, name, calls)
@@ -632,9 +643,8 @@ printf 'SHELL_ALIVE\\n'
         ):
             with self.subTest(step=name):
                 calls = copy.deepcopy(cases[name])
-                lookup = 2 if name == "connectivity-config-create" else 0
-                calls[lookup]["stdout"] = json.dumps(payload)
-                result = self.execute(3, name, calls[:lookup + 1])
+                calls[0]["stdout"] = json.dumps(payload)
+                result = self.execute(3, name, calls[:1])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 
@@ -643,9 +653,8 @@ printf 'SHELL_ALIVE\\n'
                      "member-spokeb", "connectivity-config-create"):
             with self.subTest(step=name):
                 calls = copy.deepcopy(avnm_cases()[name])
-                lookup = 2 if name == "connectivity-config-create" else 0
-                calls[lookup]["stdout"] = '{"unexpected":true}'
-                result = self.execute(3, name, calls[:lookup + 1])
+                calls[0]["stdout"] = '{"unexpected":true}'
+                result = self.execute(3, name, calls[:1])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 
@@ -673,10 +682,7 @@ printf 'SHELL_ALIVE\\n'
                     "--resource-group", rg("hub"),
                     "-o", "json",
                 ], members)]
-                if label.startswith("missing-"):
-                    result = self.execute(3, "inspect-static-members", calls * 12)
-                else:
-                    result = self.execute(3, "connectivity-config-create", calls)
+                result = self.execute(3, "inspect-static-members", calls * 12 if label.startswith("missing-") else calls)
                 self.assertNotEqual(result.returncode, 0)
 
     def test_foundation_and_avnm_propagate_final_cli_errors(self):

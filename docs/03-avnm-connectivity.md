@@ -320,9 +320,9 @@ Azure Portal의 **Virtual Network Manager → 이번 실행의 AVNM → Network 
 
 이 단계가 수동 Peering 생성 대신 AVNM이 연결을 관리하도록 선언하는 부분입니다.
 먼저 정적 멤버가 **정확히 A/B 두 개**로 반영됐는지 기다린 뒤 Hub VNet ID를
-조회합니다. 생성 시에는 두 조건을 다시 확인하고 compact JSON으로
-configuration payload를 만듭니다. 기존 Connectivity Configuration은
-재사용하거나 갱신하지 않습니다.
+조회합니다. 매번 새 실습을 시작하므로 생성 단계에서는 앞의 두 확인을
+반복하지 않고, 이번 상태 파일의 ID로 구성 값을 만듭니다. 기존 Connectivity
+Configuration이 있으면 덮어쓰지 않고 중단합니다.
 
 ### 5-1. 두 Spoke의 정적 멤버 반영 확인
 
@@ -406,35 +406,19 @@ inspect_avnm_hub
 
 👁️ **설명**
 
-이 블록은 다른 블록의 임시 변수나 검사 결과를 신뢰하지 않습니다. A/B 멤버와
-Hub VNet을 다시 조회하고 기존 구성이 없을 때만 새 구성을 만듭니다.
-목록 조회 실패나 기존 구성의 존재를 구성 부재로 취급하지 않습니다.
+**5-1의 두 멤버와 5-2의 Hub ID 확인을 마친 뒤** 실행합니다. 앞 블록의
+임시 변수 대신 상태 파일의 ID를 사용합니다. 새 실습용 AVNM에 이미 구성이
+있거나 목록 조회에 실패하면 생성하지 않습니다. 오류가 났다면 처음부터
+붙여 넣지 말고 현재 상태를 확인하세요.
 
 🟢 **실행**
 
 <!-- exec:connectivity-config-create -->
 ```bash
-# 두 멤버와 Hub ID를 확인하고 기존 구성이 없는 경우에만 새 구성을 만듭니다.
+# 앞 단계에서 확인한 Hub와 Spoke Group의 ID로 새 HubAndSpoke 구성을 만듭니다.
 create_connectivity_config_if_empty() {
-  local spokea_id spokeb_id members hub_id expected_hub_id hubs groups configs
-  spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
-  spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
-  members=$(az network manager group static-member list \
-    --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
-    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
-    type == "array" and length == 2 and
-    ([.[].name] | sort == ["spokea", "spokeb"]) and
-    ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
-    all(.[]; .provisioningState == "Succeeded")
-  ' <<<"$members" >/dev/null ||
-    { fail "Spoke A/B static members are not ready or do not match."; return 1; }
-  hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
-    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
-    { fail "Unexpected Hub VNet ID: $hub_id"; return 1; }
-  hubs=$(jq -cn --arg id "$hub_id" \
+  local hubs groups configs
+  hubs=$(jq -cn --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" \
     '[{resourceId:$id,resourceType:"Microsoft.Network/virtualNetworks"}]') || return 1
   groups=$(jq -cn --arg id "$NETWORK_GROUP_ID" \
     '[{networkGroupId:$id,groupConnectivity:"None",isGlobal:false,useHubGateway:false}]') || return 1
