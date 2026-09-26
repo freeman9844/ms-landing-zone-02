@@ -306,6 +306,14 @@ create_spokeb_member_after_a
 
 이제 group에는 Spoke A와 Spoke B만 있어야 합니다. Hub를 member로 넣지 않습니다.
 
+Azure Portal의 **Virtual Network Manager → 이번 실행의 AVNM → Network groups → Spoke 그룹 → Group members**에서도
+두 VNet의 등록을 확인할 수 있습니다. 아래 화면처럼 A/B 두 항목의 **Source**가
+`Manually added`인지 확인하세요. 목록에 바로 보이지 않으면 **Refresh**를 누릅니다.
+화면의 구독·실행 ID는 예시이므로 자신의 값과 대조하세요. 이 화면은 그룹 멤버십만
+확인하며, 실제 Hub↔Spoke 연결은 이후 commit과 Peering 검사에서 확인합니다.
+
+![Azure Portal의 AVNM Network Group에 정적으로 등록된 Spoke A와 B의 Group members 목록](images/03-spoke-group-members.png)
+
 ## 5. Hub-and-Spoke Connectivity Configuration 만들기
 
 👁️ **설명**
