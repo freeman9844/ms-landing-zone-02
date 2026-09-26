@@ -696,19 +696,20 @@ inspect_hub_peerings
 📋 **확인**
 
 Hub에는 Spoke A와 Spoke B를 향한 두 개의 `Connected` Peering이 보여야 합니다. 이름은 고정 문자열로 가정하지 않습니다.
-아래는 출력의 **형식 예시**입니다. `Remote`에는 각각 다른 Spoke의 전체 VNet ID가
-표시되어야 하며, 실제 `Name`은 AVNM이 생성한 값이므로 예시 이름과 비교하지 마세요.
-구독 UUID와 실행 ID도 자신의 값으로 대조합니다.
+아래는 Hub에서 확인한 결과를 바탕으로 한 **출력 예시**입니다. `Remote`에는
+각각 다른 Spoke의 전체 VNet ID가 표시되어야 합니다. `Name`은 AVNM이 자동
+생성하므로 예시의 접두어·숫자·형식을 기준으로 검사하지 마세요. 구독 UUID와
+실행 ID는 자신의 값으로 바꿔 비교합니다.
 
 ```json
 [
   {
-    "Name": "<AVNM이 생성한 A 방향 이름>",
+    "Name": "ANM_22740FFA83EB4B03043CC7E_gin-hub-<실행 ID>_-spokea-<실행 ID>_9610771880",
     "State": "Connected",
     "Remote": "/subscriptions/<구독 UUID>/resourceGroups/rg-lzbegin-spokea-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-<실행 ID>"
   },
   {
-    "Name": "<AVNM이 생성한 B 방향 이름>",
+    "Name": "ANM_22740FFA83EB4B03043CC7E_gin-hub-<실행 ID>_-spokeb-<실행 ID>_7200113890",
     "State": "Connected",
     "Remote": "/subscriptions/<구독 UUID>/resourceGroups/rg-lzbegin-spokeb-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-<실행 ID>"
   }
