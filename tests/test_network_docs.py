@@ -575,6 +575,26 @@ printf 'SHELL_ALIVE\\n'
                 result = self.execute(3, "effective-hub", [dict(expected_call, stdout=json.dumps(value))])
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
+    def test_spoke_effective_checks_preserve_exact_ids_and_status(self):
+        for zone in ("spokea", "spokeb"):
+            expected_call = avnm_cases()[f"effective-{zone}"][0]
+            valid = effective_configuration(zone)
+            variants = [
+                (valid, True),
+                ({"value": [dict(valid["value"][0], deleteExistingPeering=False, isGlobal=False)]}, True),
+                ({"value": []}, False),
+                ({"value": {}}, False),
+                ({"value": [dict(valid["value"][0], id="unexpected")]}, False),
+                ({"value": [dict(valid["value"][0], provisioningState="Updating")]}, False),
+                ({"value": [dict(valid["value"][0], hubs=[{"resourceId": "unexpected"}])]}, False),
+                ({"value": [dict(valid["value"][0], appliesToGroups=[{"networkGroupId": "unexpected"}])]}, False),
+            ]
+            for response, accepted in variants:
+                with self.subTest(zone=zone, response=response):
+                    result = self.execute(3, f"effective-{zone}",
+                                          [dict(expected_call, stdout=json.dumps(response))])
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
     def test_foundation_and_avnm_actions_stop_on_each_failed_lookup(self):
         for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
             for name, calls in cases.items():

@@ -110,7 +110,10 @@ README의 목표 시간 합계는 160–190분이며 배포·수집·삭제 대�
   configuration**과 실제 Hub↔Spoke Peering 상태입니다. 별도로 지정한 Hub는 정적 Network
   Group 밖에 있어 effective 목록이 비어 있으며, 실제 CLI 응답에는
   `targetVirtualNetwork.id`가 없습니다. 로컬 VNet을 대상으로 조회하고 전체 remote VNet ID로
-  양방향 Peering을 검사합니다.
+  양방향 Peering을 검사합니다. Hub의 빈 목록 또는 승인된 구성 하나만 허용하고,
+  Spoke A/B의 구성 ID·Hub·Group·상태 및 Peering의 전체 remote ID 검사는 유지합니다.
+  정적 멤버 반영 대기에서는 이름·전체 ID가 다르면 즉시 중단하고, 올바른 멤버의
+  `Succeeded` 상태만 기다립니다.
 - AVNM이 만든 Peering 이름은 안정적인 계약이 아닙니다. 테스트와 스크립트는 remote VNet의 **전체 resource ID**
   로 정확히 하나를 찾아야 하며, suffix 비교나 생성 규칙 추정에 의존하지 않습니다.
 - 실행 경로는 Connectivity-only입니다. 참가자 문서와 예제에는 Security Admin configuration,

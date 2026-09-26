@@ -336,9 +336,9 @@ Spoke A/B만 있는지 읽기 전용으로 확인합니다. 다른 이름이나 
 
 <!-- exec:inspect-static-members -->
 ```bash
-# group 목록에서 A/B의 전체 VNet ID와 Succeeded 상태를 확인합니다.
+# 먼저 멤버의 이름과 전체 ID를 검사하고, A/B가 모두 준비될 때까지 기다립니다.
 wait_static_members() {
-  local members ready spokea_id spokeb_id
+  local members ready spokea_id spokeb_id attempt
   spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
   spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
   for ((attempt=1; attempt<=12; attempt++)); do
@@ -346,13 +346,6 @@ wait_static_members() {
       --network-group "$NETWORK_GROUP" --network-manager "$AVNM" \
       --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") ||
       { fail "Cannot read static members."; return 1; }
-    ready=$(jq -r --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
-      type == "array" and length == 2 and
-      ([.[].name] | sort == ["spokea", "spokeb"]) and
-      ([.[].resourceId | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
-      all(.[]; .provisioningState == "Succeeded")
-    ' <<<"$members") || { fail "Invalid static-member response."; return 1; }
-    if [[ "$ready" == true ]]; then return 0; fi
     jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
       type == "array" and length <= 2 and
       ([.[].name] | unique | length) == length and
@@ -362,6 +355,9 @@ wait_static_members() {
         ((.resourceId | ascii_downcase) == ($spokeb | ascii_downcase))))
     ' <<<"$members" >/dev/null ||
       { fail "Unexpected static-member identity; do not retry."; return 1; }
+    ready=$(jq -r 'length == 2 and all(.[]; .provisioningState == "Succeeded")' <<<"$members") ||
+      { fail "Invalid static-member response."; return 1; }
+    if [[ "$ready" == true ]]; then return 0; fi
     if ((attempt < 12)); then sleep 10 || return 1; fi
   done
   fail "Spoke A/B static members were not ready after two minutes."
@@ -489,7 +485,7 @@ effective 목록은 비어 있거나, 의도한 configuration 하나를 반환�
 
 <!-- exec:effective-hub -->
 ```bash
-# Hub는 그룹 밖이므로 빈 응답 또는 이번 구성이 적용된 응답만 허용합니다.
+# Hub는 그룹 밖이므로 빈 목록 또는 이번 구성 하나만 허용합니다.
 inspect_effective_hub() {
   local effective hub_id
   effective=$(az network manager list-effective-connectivity-config \
@@ -498,29 +494,24 @@ inspect_effective_hub() {
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
-  def falsey: . == false or . == "False";
-  (.value | type == "array") and
-  ((.value | length == 0) or
-    ((.value | length == 1) and (.value[0] as $cfg |
-      ($cfg.id | type == "string") and
-      (($cfg.id | ascii_downcase) == ($config | ascii_downcase)) and
-      $cfg.connectivityTopology == "HubAndSpoke" and
-      $cfg.provisioningState == "Succeeded" and
-      ($cfg.deleteExistingPeering | falsey) and
-      ($cfg.isGlobal | falsey) and
-      (($cfg.hubs // []) | length == 1) and
-      ($cfg.hubs[0].resourceId | type == "string") and
-      (($cfg.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
-      ($cfg.targetVirtualNetwork.id == null or
-        (($cfg.targetVirtualNetwork.id | type == "string") and
-         (($cfg.targetVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)))) and
-      (($cfg.appliesToGroups // []) | length == 1) and
-      ($cfg.appliesToGroups[0].networkGroupId | type == "string") and
-      (($cfg.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
-      $cfg.appliesToGroups[0].groupConnectivity == "None" and
-      ($cfg.appliesToGroups[0].isGlobal | falsey) and
-      ($cfg.appliesToGroups[0].useHubGateway | falsey)
-    )))
+    def falsey: . == false or . == "False";
+    (.value | type == "array" and length <= 1) and
+    all(.value[];
+      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
+      .connectivityTopology == "HubAndSpoke" and
+      .provisioningState == "Succeeded" and
+      (.deleteExistingPeering | falsey) and
+      (.isGlobal | falsey) and
+      (.hubs | length == 1) and
+      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      (.targetVirtualNetwork.id == null or
+        ((.targetVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase))) and
+      (.appliesToGroups | length == 1) and
+      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
+      .appliesToGroups[0].groupConnectivity == "None" and
+      (.appliesToGroups[0].isGlobal | falsey) and
+      (.appliesToGroups[0].useHubGateway | falsey)
+    )
 ' <<<"$effective" >/dev/null ||
     { fail "Unexpected Hub effective connectivity."; return 1; }
   printf '%s\n' "$effective"
@@ -530,8 +521,9 @@ inspect_effective_hub
 
 📋 **확인**
 
-Hub는 group member가 아니므로 `value: []`도 정상입니다. 의도한 configuration 하나가
-반환되어도 정상이며, 배포 성공 여부는 두 Spoke의 effective configuration과 뒤의 양방향
+Hub는 group member가 아니므로 `value: []`도 정상입니다. `all(.value[]; ...)`은
+빈 목록이면 통과하고, 구성이 하나 반환되면 해당 구성의 ID·Hub·Group·설정을 검사합니다.
+배포 성공 여부는 두 Spoke의 effective configuration과 뒤의 양방향
 Peering 검사로 판단합니다.
 
 ## 8. Spoke A의 effective connectivity 확인
@@ -553,17 +545,19 @@ inspect_effective_spokea() {
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-  (.value | type == "array") and
-  (.value | length == 1) and
-  ((.value[0].id | ascii_downcase) == ($config | ascii_downcase)) and
-  .value[0].connectivityTopology == "HubAndSpoke" and
-  .value[0].provisioningState == "Succeeded" and
-  ((.value[0].deleteExistingPeering == "False") or (.value[0].deleteExistingPeering == false)) and
-  ((.value[0].isGlobal == "False") or (.value[0].isGlobal == false)) and
-  (((.value[0].hubs // []) | length) == 1) and
-  (((.value[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
-  (((.value[0].appliesToGroups // []) | length) == 1) and
-  (((.value[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase))
+    def falsey: . == false or . == "False";
+    (.value | type == "array" and length == 1) and
+    all(.value[];
+      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
+      .connectivityTopology == "HubAndSpoke" and
+      .provisioningState == "Succeeded" and
+      (.deleteExistingPeering | falsey) and
+      (.isGlobal | falsey) and
+      (.hubs | length == 1) and
+      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      (.appliesToGroups | length == 1) and
+      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase))
+    )
 ' <<<"$effective" >/dev/null ||
     { fail "Unexpected Spoke A effective connectivity."; return 1; }
   printf '%s\n' "$effective"
@@ -640,17 +634,19 @@ inspect_effective_spokeb() {
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-  (.value | type == "array") and
-  (.value | length == 1) and
-  ((.value[0].id | ascii_downcase) == ($config | ascii_downcase)) and
-  .value[0].connectivityTopology == "HubAndSpoke" and
-  .value[0].provisioningState == "Succeeded" and
-  ((.value[0].deleteExistingPeering == "False") or (.value[0].deleteExistingPeering == false)) and
-  ((.value[0].isGlobal == "False") or (.value[0].isGlobal == false)) and
-  (((.value[0].hubs // []) | length) == 1) and
-  (((.value[0].hubs[0].resourceId // "") | ascii_downcase) == ($hub | ascii_downcase)) and
-  (((.value[0].appliesToGroups // []) | length) == 1) and
-  (((.value[0].appliesToGroups[0].networkGroupId // "") | ascii_downcase) == ($group | ascii_downcase))
+    def falsey: . == false or . == "False";
+    (.value | type == "array" and length == 1) and
+    all(.value[];
+      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
+      .connectivityTopology == "HubAndSpoke" and
+      .provisioningState == "Succeeded" and
+      (.deleteExistingPeering | falsey) and
+      (.isGlobal | falsey) and
+      (.hubs | length == 1) and
+      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
+      (.appliesToGroups | length == 1) and
+      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase))
+    )
 ' <<<"$effective" >/dev/null ||
     { fail "Unexpected Spoke B effective connectivity."; return 1; }
   printf '%s\n' "$effective"
@@ -682,10 +678,11 @@ inspect_hub_peerings() {
   spokea_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
   spokeb_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
   jq -e --arg spokea "$spokea_id" --arg spokeb "$spokeb_id" '
-  type == "array" and
-  length == 2 and
-  ([.[].remoteVirtualNetwork.id | ascii_downcase] | sort) == ([($spokea | ascii_downcase), ($spokeb | ascii_downcase)] | sort) and
-  all(.[]; .peeringState == "Connected")
+    type == "array" and
+    length == 2 and
+    ([.[].remoteVirtualNetwork.id | ascii_downcase] | sort) ==
+      ([$spokea, $spokeb] | map(ascii_downcase) | sort) and
+    all(.[]; .peeringState == "Connected")
 ' <<<"$peerings" >/dev/null ||
     { fail "Unexpected Hub peerings."; return 1; }
   jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
@@ -734,10 +731,9 @@ inspect_spokea_peerings() {
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   jq -e --arg hub "$hub_id" '
-  type == "array" and
-  length == 1 and
-  ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
-  .[0].peeringState == "Connected"
+    type == "array" and length == 1 and
+    ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
+    .[0].peeringState == "Connected"
 ' <<<"$peerings" >/dev/null ||
     { fail "Unexpected Spoke A peerings."; return 1; }
   jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
@@ -767,10 +763,9 @@ inspect_spokeb_peerings() {
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   jq -e --arg hub "$hub_id" '
-  type == "array" and
-  length == 1 and
-  ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
-  .[0].peeringState == "Connected"
+    type == "array" and length == 1 and
+    ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
+    .[0].peeringState == "Connected"
 ' <<<"$peerings" >/dev/null ||
     { fail "Unexpected Spoke B peerings."; return 1; }
   jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
