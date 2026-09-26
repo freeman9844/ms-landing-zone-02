@@ -30,6 +30,89 @@ peering_name_for_remote() {
   }
 }
 
+# AVNM이 만든 네 Peering을 실제 remote ID로 확인합니다. Enforced 전후에 같은 검사를 사용합니다.
+assert_forwarded_peerings() {
+  local zone rg vnet expected peerings hub_id a_id b_id
+  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  a_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEA/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokea-$RUN_ID"
+  b_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_SPOKEB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-spokeb-$RUN_ID"
+  for zone in hub spokea spokeb; do
+    case "$zone" in
+      hub) rg="$RG_HUB"; expected=$(jq -cn --arg a "$a_id" --arg b "$b_id" '[$a,$b]') ;;
+      spokea) rg="$RG_SPOKEA"; expected=$(jq -cn --arg hub "$hub_id" '[$hub]') ;;
+      spokeb) rg="$RG_SPOKEB"; expected=$(jq -cn --arg hub "$hub_id" '[$hub]') ;;
+    esac
+    assert_owned_rg "$rg" || return 1
+    vnet="vnet-lzbegin-$zone-$RUN_ID"
+    peerings=$(az network vnet peering list -g "$rg" --vnet-name "$vnet" \
+      -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --argjson expected "$expected" '
+      type == "array" and length == ($expected | length) and
+      all(.[]; .peeringState == "Connected" and .allowForwardedTraffic == true and
+        .allowVirtualNetworkAccess == true and (.remoteVirtualNetwork.id | type == "string")) and
+      ([.[].remoteVirtualNetwork.id | ascii_downcase] | sort) ==
+      ([$expected[] | ascii_downcase] | sort)
+    ' <<< "$peerings" >/dev/null ||
+      { fail "Unexpected or non-forwarding AVNM peerings: $zone"; return 1; }
+  done
+}
+
+# 새 Connectivity 목표 상태와 Spoke의 실제 적용 상태를 별도로 확인합니다.
+assert_enforced_connectivity() {
+  local config status effective zone rg vnet hub_id
+  assert_owned_rg "$RG_HUB" || return 1
+  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+  config=$(az network manager connect-config show -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke" and
+    (.deleteExistingPeering == false or .deleteExistingPeering == "False") and
+    (.isGlobal == false or .isGlobal == "False") and
+    (.hubs | type == "array" and length == 1) and
+    (.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase) and
+    (.appliesToGroups | type == "array" and length == 1) and
+    (.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase) and
+    .appliesToGroups[0].groupConnectivity == "None" and
+    (.appliesToGroups[0].useHubGateway == false or .appliesToGroups[0].useHubGateway == "False") and
+    .connectivityCapabilities.peeringEnforcement == "Enforced" and
+    .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
+    .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard"
+  ' <<< "$config" >/dev/null || { fail "Unexpected or unenforced Connectivity Configuration."; return 1; }
+  status=$(az network manager list-deploy-status -g "$RG_HUB" --network-manager-name "$AVNM" \
+    --deployment-types Connectivity --regions "$LOCATION" -o json \
+    --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" --arg loc "$LOCATION" '
+    if type == "array" then .
+    elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+    else error("Invalid deployment status") end |
+    [.[] | select(.deploymentType == "Connectivity" and .region == $loc)] |
+    if length == 0 then error("Missing Connectivity deployment") else sort_by(.commitTime) | last end |
+    .deploymentStatus == "Deployed" and
+    (.configurationIds | type == "array" and length == 1) and
+    (.configurationIds[0] | ascii_downcase) == ($id | ascii_downcase)
+  ' <<< "$status" >/dev/null || { fail "Connectivity enforcement deployment is not complete."; return 1; }
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
+    assert_owned_rg "$rg" || return 1
+    vnet="vnet-lzbegin-$zone-$RUN_ID"
+    effective=$(az network manager list-effective-connectivity-config \
+      --resource-group "$rg" --virtual-network-name "$vnet" -o json \
+      --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+      (.skipToken == null or .skipToken == "") and
+      (.value | type == "array" and length == 1) and
+      (.value[0].id | ascii_downcase) == ($id | ascii_downcase) and
+      .value[0].provisioningState == "Succeeded" and
+      .value[0].connectivityCapabilities.peeringEnforcement == "Enforced"
+    ' <<< "$effective" >/dev/null ||
+      { fail "Enforced Connectivity is not effective on $zone."; return 1; }
+  done
+  assert_forwarded_peerings || return 1
+  printf 'PASS: Enforced Connectivity is effective on both spokes; four forwarded peerings are connected.\n'
+}
+
 # 임의의 사설 IP가 아니라 지정한 Subnet 안의 IPv4 호스트 주소인지 확인합니다.
 # 네트워크/브로드캐스트 주소도 거부합니다. Azure의 모든 주소 예약·할당 규칙을 재현하는 검사는 아닙니다.
 assert_ipv4_in_subnet() {

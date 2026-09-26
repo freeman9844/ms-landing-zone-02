@@ -61,7 +61,8 @@ Hub NAT만 모듈 05의 Hub 관리 Subnet에 연결합니다. **Spoke NAT·Publi
 configuration과 실제 Hub↔Spoke 양방향 Peering을 검증합니다. 생성 실패·멤버
 전파 지연을 성공으로 바꾸거나 같은 이름을 무심코 재생성하지 않습니다.
 모듈 04에서는 Firewall Standard·Policy·관리/HTTP/FQDN egress collection·
-workspace·전용 로그를 확인한 후, 두 Group에 각각 상대 Spoke `/16`과 인터넷
+workspace·전용 로그를 확인하고 네 방향의 전달 허용을 설정한 뒤,
+Connectivity 구성을 `Enforced`로 재배포·적용 확인합니다. 그 후 두 Group에 각각 상대 Spoke `/16`과 인터넷
 `/0`을 같은 Firewall 사설 IP로 보내는 AVNM Routing을 배포합니다. 양쪽
 Subnet의 적용을 확인하되 관리형 route table 이름·RG·태그는 가정하지 않습니다.
 모듈 05의 VM 생성 후 양쪽 NIC의 Active `/16`·`/0`을 재확인합니다.
@@ -83,7 +84,7 @@ Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개와 더 높은 우선순�
 ## 단일 과정 구성
 
 현재 참가자 경로는 **00 → 01 → 02 → 03 AVNM Connectivity·Routing Group →
-04 Firewall·AVNM Routing → 05 VM·AVNM Security Admin → 06 통신·Firewall 로그 검증 →
+04 Firewall·AVNM 피어링 강제·Routing → 05 VM·AVNM Security Admin → 06 통신·Firewall 로그 검증 →
 07 정리**입니다.
 기존 운영 기초·종료 선택 모듈은 내용 전체를 제거했으며 다른 모듈로 이관하지 않았습니다.
 AVNM의 Connectivity·Routing·Security Admin, Firewall 허용/차단/복구와
@@ -109,7 +110,11 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 - 상태 파일은 `schemaVersion: 2`, `topology: "avnm-hub-spoke"`만 허용합니다. 다른 schema/topology는
   Azure API 호출 전에 거부해야 합니다.
 - 참가자 문서에는 수동 VNet peering 생성 CLI가 남아 있으면 안 됩니다. 모듈 04의 `peering update`
-  는 AVNM이 만든 기존 Peering의 `allowForwardedTraffic`만 바꾸는 용도로 유지합니다.
+  는 AVNM이 만든 기존 Peering의 `allowForwardedTraffic`만 바꾸는 용도로, 강제 배포 이전에 유지합니다.
+- 모듈 04에서 네 피어링의 forwarding·remote ID를 검증하고 `peeringEnforcement=Enforced`를
+  저장·재배포합니다. 이전 Connectivity commit과 ID가 같으므로 최신 배포 상태뿐 아니라
+  양쪽 Spoke의 effective `Enforced`와 네 피어링의 forwarding을 확인합니다.
+  강제 적용 후 피어링을 직접 수정하거나 삭제하지 않습니다.
 - 모듈 03의 완료 조건은 commit 성공 메시지가 아니라 **두 Spoke의 effective connectivity
   configuration**과 실제 Hub↔Spoke Peering 상태입니다. 별도로 지정한 Hub는 정적 Network
   Group 밖에 있어 effective 목록이 비어 있으며, 실제 CLI 응답에는
@@ -128,8 +133,8 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
   `spokea`·`spokeb` collection으로 실제 VM IP의 TCP/8080 `AlwaysAllow`를 배포합니다.
   임시 Hub→A Deny는 우선순위가 높고 복구 시 삭제 후 지역에 재배포해야 합니다.
   기존 NSG deny를 지우거나 Security Admin `Allow`로 대체하면 기준 상태가 달라집니다.
-- 직접 A↔B connectivity, global mesh, hub gateway 공유, peering enforcement,
-  peering deletion, 동적 membership은 이 과정의 변경 대상이 아닙니다.
+- 직접 A↔B connectivity, global mesh, hub gateway 공유, 수동 peering deletion,
+  동적 membership은 이 과정의 변경 대상이 아닙니다.
 
 ## 스크립트 읽는 순서
 
@@ -140,7 +145,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 2/topology 검증, 구독·RG 소유 확인, AVNM 이름 파생 |
-| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
+| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 04 `--firewall`의 Provider·CLI 점검과 모듈 05 옵션 없는 VM SKU/quota 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |

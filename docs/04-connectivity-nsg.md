@@ -9,7 +9,7 @@
 모듈 03에서 AVNM의 `Connectivity`·`SecurityAdmin`·`Routing` 범위, Hub↔Spoke
 연결 및 서로 겹치지 않는 A/B Routing Group을 준비했습니다. 이 모듈은 Hub에
 Firewall Standard·Policy·로그를 먼저 설치하고, 네 Peering의 전달 허용을 확인한 다음
-AVNM으로 Spoke A/B의 경로를 배포합니다. **Spoke NAT Gateway/Public IP나 VM은
+AVNM Peering enforcement와 Spoke A/B의 경로를 배포합니다. **Spoke NAT Gateway/Public IP나 VM은
 만들지 않습니다.** Hub 관리 VM의 NAT는 다음 모듈에서 배포하며, 이 모듈에서는
 Hub NAT를 만들거나 기존 것을 분리하지 않습니다.
 
@@ -642,6 +642,94 @@ forward_peering "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
 
 네 방향이 모두 Connected/forwarding=true여야 합니다.
 
+### 3-5. 네 방향 확인 후 피어링 강제 설정
+
+👁️ **설명**
+
+모듈 03에서는 피어링을 수정할 수 있게 Connectivity를 배포했습니다. 이제 네 방향
+`allowForwardedTraffic=true`를 확인한 다음에만 AVNM 피어링 강제를 설정합니다.
+강제 구성을 재배포하면 AVNM이 관리하는 피어링을 Portal이나 CLI에서 직접 변경·삭제할
+수 없습니다. 다시 수정해야 한다면 `Unenforced`로 변경하고 재배포한 뒤 작업하세요.
+
+🟢 **실행**
+
+<!-- exec:enforce-peering -->
+```bash
+enforce_peering() {
+  local current updated
+  assert_forwarded_peerings || return 1
+  current=$(az network manager connect-config show -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke"
+  ' <<< "$current" >/dev/null || { fail "Unexpected Connectivity Configuration."; return 1; }
+  updated=$(az network manager connect-config update -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+    --connect-capabilities '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}' \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
+    .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard" and
+    .connectivityCapabilities.peeringEnforcement == "Enforced"
+  ' <<< "$updated" >/dev/null || { fail "Peering enforcement update did not succeed."; return 1; }
+}
+enforce_peering
+```
+
+📋 **확인**
+
+`peeringEnforcement=Enforced`가 저장됐습니다. 아직 **설정만 변경**했으므로
+다음 단계에서 반드시 Connectivity를 재배포합니다.
+
+### 3-6. 강제 설정 재배포
+
+🟢 **실행**
+
+<!-- exec:commit-enforced-connectivity -->
+```bash
+commit_enforced_connectivity() {
+  local current
+  assert_forwarded_peerings || return 1
+  current=$(az network manager connect-config show -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    .connectivityCapabilities.peeringEnforcement == "Enforced"
+  ' <<< "$current" >/dev/null || { fail "Enforced configuration is not ready."; return 1; }
+  az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
+    --commit-type Connectivity --configuration-ids "$CONNECTIVITY_CONFIG_ID" \
+    --target-locations "$LOCATION" --subscription "$SUBSCRIPTION_ID"
+}
+commit_enforced_connectivity
+```
+
+📋 **확인**
+
+재배포 요청이 접수됐습니다. 기존 배포와 구성 ID가 같으므로 `Deployed`만으로
+이번 변경의 적용을 판단하지 않습니다.
+
+### 3-7. Spoke 적용과 피어링 유지 확인
+
+🟢 **실행**
+
+<!-- exec:inspect-enforced-connectivity -->
+```bash
+assert_enforced_connectivity
+```
+
+📋 **확인**
+
+`PASS`가 나오면 최신 Connectivity 배포가 `Deployed`이고 양쪽 Spoke effective 구성에서
+`peeringEnforcement=Enforced`가 확인됩니다. 네 방향 피어링은 모두 예상 remote ID,
+`Connected`, `Forwarded=True`를 유지합니다. 적용 중이면 이 **읽기 전용 블록**만
+잠시 후 다시 실행하세요. 실패한 상태로 Routing에 진입하지 않습니다.
+
 ## 4. Spoke별 AVNM Routing 구성
 
 👁️ **설명**
@@ -673,6 +761,7 @@ table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 
 ```bash
 create_routing_config() {
   local manager groups members zone group expected existing result id
+  assert_enforced_connectivity || return 1
   manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg id "$AVNM_ID" '
@@ -821,6 +910,7 @@ Subnet에 기존/외부 route table이나 NAT가 붙어 있으면 덮어쓰지 �
 ```bash
 inspect_routing_before_commit() {
   local fw_ip config_id config collections rules zone rg group remote collection rule prefix data subnet members peerings target local_rg local_vnet remote_id
+  assert_enforced_connectivity || return 1
   fw_ip=$(firewall_ready_ip) || return 1
   config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
   config=$(az network manager routing-config show -g "$RG_HUB" --manager-name "$AVNM" \

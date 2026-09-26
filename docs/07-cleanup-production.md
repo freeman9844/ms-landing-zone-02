@@ -48,6 +48,8 @@ AVNM의 Routing·Security Admin·Connectivity 목표 상태를 리전에서 `Non
 Azure Portal에서 배포 상태와 테이블을 확인한 뒤 다시 실행하세요. **관리형 RG를
 수동으로 일괄 삭제하지 마세요.** 삭제 요청 접수는 완료가 아닙니다. 스크립트는
 최대 45분 동안 잔존 여부를 확인합니다.
+모듈 04의 피어링 강제가 활성화된 상태에서 피어링을 수동으로 삭제하지 마세요.
+Connectivity 배포를 먼저 해제하는 아래 스크립트의 순서를 따릅니다.
 **정리라는 한 목적의 안전 스크립트**는 그대로 사용합니다. RG별 raw delete로 쪼개면
 전체 대상의 사전 검사·정확한 확인 문구·삭제 완료 대기가 빠질 수 있습니다.
 스크립트 자체의 구독/소유권 재검사는 독립 실행 시에도 안전하게 하려는 내부 보호입니다.
@@ -185,7 +187,7 @@ JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 �
 | 단일 구독과 RG 3개 | 관리 그룹, Connectivity/Management 구독, 워크로드별 구독 |
 | Connectivity·Security Admin·Routing AVNM | 운영에서는 지역·구독별 정책 소유자와 배포 권한·변경 승인을 분리 |
 | Spoke A/B의 정적 Network Group membership | 운영에서는 Azure Policy 기반 동적 membership도 검토하되 별도 검증 후 도입 |
-| Hub-and-Spoke Connectivity Configuration 1개 | 필요 시 다중 region/scope와 선택적 peering enforcement를 검토 |
+| Hub-and-Spoke Connectivity Configuration 1개와 피어링 강제 | 다중 region/scope 및 강제 설정 변경 권한·배포 절차를 별도 검토 |
 | Hub 테스트 VM | 공유 네트워크 기능만 Hub에 배치, 실제 앱은 Spoke |
 | 실습용 Contributor 권한 | 최소 역할, PIM, 역할 분리, 정기 access review |
 | 이름과 태그 | Azure Policy 상속, 예외 승인, 배포 표준 |
@@ -199,8 +201,8 @@ JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 �
 
 이 교재의 Run Command용 `AzureCloud:443` 허용은 다른 Azure 고객의 공인 주소도
 포함할 수 있습니다. 운영용 tenant 제한 정책으로 복사하지 마세요.
-또한 위 표의 동적 membership, peering enforcement, AVNM Routing Preview, Security Admin Rules는
-**운영 설계 검토 항목**이지 현재 워크숍의 대체 실행 경로가 아닙니다.
+또한 위 표의 동적 membership, 다중 region의 피어링 강제, AVNM Routing Preview,
+Security Admin Rules는 **운영 설계 검토 항목**이지 현재 워크숍의 대체 실행 경로가 아닙니다.
 
 ## 트러블슈팅
 

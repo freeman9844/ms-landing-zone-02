@@ -263,7 +263,7 @@ NSG 이름은 `nsg-lzbegin-spokea-<실행 ID>`입니다.
 👁️ **설명**
 
 A VNet 안에 VM이 들어갈 `10.10.1.0/24` Subnet을 만들고 A의 NSG를 연결합니다.
-인터넷 출구는 암묵적으로 사용하지 않고 모듈 04에서 NAT로 준비합니다.
+인터넷 출구는 암묵적으로 사용하지 않고 모듈 04에서 Firewall·AVNM Routing으로 준비합니다.
 
 🟢 **실행**
 
@@ -284,13 +284,13 @@ az network vnet subnet create --resource-group "$RG_SPOKEA" --vnet-name "vnet-lz
 👁️ **설명**
 
 A에서도 VNet 내부 트래픽의 기본 허용보다 앞서 차단합니다.
-Hub HTTP 연결은 모듈 04에서 명시적인 Allow 규칙으로 예외를 추가합니다.
+Hub HTTP 연결은 모듈 05에서 AVNM Security Admin `Always Allow` 규칙으로 허용합니다.
 
 🟢 **실행**
 
 <!-- exec:foundation-spokea-deny -->
 ```bash
-# 허용이 필요한 트래픽은 나중에 더 작은 우선순위 번호로 예외를 추가합니다.
+# 허용할 HTTP 트래픽은 모듈 05의 AVNM Security Admin 규칙으로 설정합니다.
 az network nsg rule create --resource-group "$RG_SPOKEA" --nsg-name "nsg-lzbegin-spokea-$RUN_ID" \
   --name deny-other-vnet-inbound --priority 4000 --direction Inbound --access Deny \
   --protocol '*' --source-address-prefixes VirtualNetwork --source-port-ranges '*' \
@@ -405,7 +405,7 @@ az network vnet subnet create --resource-group "$RG_SPOKEB" --vnet-name "vnet-lz
 👁️ **설명**
 
 B에도 우선순위 `4000`의 기본 차단 규칙을 추가합니다.
-이후 Hub→B와 A→B의 HTTP 허용을 각각 더 높은 우선순위로 추가합니다.
+Hub→B와 A→B의 HTTP는 모듈 05에서 AVNM Security Admin 규칙으로 허용합니다.
 
 🟢 **실행**
 
@@ -431,7 +431,7 @@ Azure Portal에서도 **Resource groups → `rg-lzbegin-spokeb-<실행 ID>` → 
 
 👁️ **설명**
 
-모듈 05에서 사용할 주소 공간만 Hub 안에 준비합니다. **이 단계는 유료 Firewall 장비를 배포하지 않습니다.**
+모듈 04에서 사용할 주소 공간만 Hub 안에 준비합니다. **이 단계는 유료 Firewall 장비를 배포하지 않습니다.**
 
 🟢 **실행**
 

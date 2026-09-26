@@ -29,8 +29,10 @@ Azure Virtual Network Manager를 사용하는 독립 저장소
 
 구독·리소스 그룹·리전을 구분하고, 겹치지 않는 네트워크를 설계합니다.
 모듈 03에서는 AVNM(Azure Virtual Network Manager)의 세 범위와 Network Group으로
-Hub↔Spoke 연결을 배포합니다. 모듈 04에서는 VM을 만들기 전에 Firewall과 AVNM
-Routing으로 Spoke의 왕복 경로와 인터넷 출구를 준비합니다. 모듈 05에서는 사설 VM과
+Hub↔Spoke 연결을 배포합니다. 모듈 04에서는 네 방향 피어링의 전달 허용을 먼저 설정하고
+AVNM 피어링 강제를 배포한 뒤, VM을 만들기 전에 Firewall과 AVNM Routing으로
+Spoke의 왕복 경로와 인터넷 출구를 준비합니다. 강제 배포 후에는 피어링을 AVNM 외부에서
+직접 변경·삭제할 수 없습니다. 모듈 05에서는 사설 VM과
 AVNM Security Admin 규칙으로 정상·차단·복구 통신을 검증합니다. 모듈 06에서는
 Firewall의 Allow/Deny 로그와 아웃바운드를 확인합니다. AVNM은 연결·경로·L4 정책을
 중앙 관리하지만 Firewall의 FQDN 검사·로그나 NAT 주소 변환을 대신하지 않습니다.
@@ -110,7 +112,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 | 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·quota 확인 | 15분 |
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
 | 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위·Network Group·Hub-and-Spoke 연결 배포 | 25분 |
-| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·진단 및 VM 생성 전 왕복 경로 준비 | 35–45분 |
+| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–45분 |
 | 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·차단·복구 | 35–45분 |
 | 06 | [경로와 Firewall 검증](docs/06-routing-validation.md) | 실제 경로·Allow/Deny 로그·egress 검증 | 30–40분 |
 | 07 | [정리와 운영 전환](docs/07-cleanup-production.md) | 정확한 실습 리소스 삭제와 운영 차이 이해 | 10–15분 |

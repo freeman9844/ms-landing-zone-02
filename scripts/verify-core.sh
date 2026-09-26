@@ -8,6 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
   { fail "Usage: verify-core.sh STATE_FILE baseline|admin-denied|restored"; exit 1; }
 load_run "$1"
 assert_subscription
+assert_enforced_connectivity
 # baseline과 restored는 같은 정상 통신을 기대합니다. 인수 자체가 규칙을 변경하지는 않습니다.
 # Spoke effective configuration과 Hub↔Spoke Peering 집합이 정확해야 보안·HTTP 증거를 해석할 수 있습니다.
 hub_vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"

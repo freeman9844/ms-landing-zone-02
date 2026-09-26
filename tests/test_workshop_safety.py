@@ -4,7 +4,7 @@ import unittest
 
 from harness import run, group
 import test_avnm_redesign as redesign
-from test_network_docs import az, rg, netid, rid, vnet, foreign_ids
+from test_network_docs import az, rg, netid, rid, vnet, foreign_ids, enforced_connectivity_calls
 
 FW = netid("hub", "azureFirewalls", "fw-lzbegin-demo123")
 LAW = rid("hub", "Microsoft.OperationalInsights/workspaces", "log-lzbegin-demo123")
@@ -104,6 +104,66 @@ class SafetyTests(unittest.TestCase):
             with self.subTest(peerings=peerings):
                 result = self.execute(command, [az(args, peerings)])
                 self.assertEqual(result.returncode == 0, valid, result.stderr)
+
+    def test_enforced_connectivity_requires_exact_config_deployment_and_four_forwarded_peerings(self):
+        command = "assert_enforced_connectivity"
+        self.assertEqual(self.execute(command, enforced_connectivity_calls()).returncode, 0)
+        effective = json.loads(enforced_connectivity_calls()[4]["stdout"])["value"][0]
+        for index, path, bad in (
+            (1, ("id",), netid("hub", "networkManagers", "other") +
+             "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123"),
+            (1, ("connectivityTopology",), "Mesh"),
+            (1, ("hubs", 0, "resourceId"), netid("spokea", "virtualNetworks", vnet("spokea"))),
+            (1, ("appliesToGroups", 0, "networkGroupId"), "wrong-group"),
+            (1, ("connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
+            (1, ("connectivityCapabilities", "connectedGroupAddressOverlap"), "Disallowed"),
+            (1, ("connectivityCapabilities", "connectedGroupPrivateEndpointsScale"), "HighScale"),
+            (2, ("deploymentStatus",), "NotStarted"),
+            (2, ("deploymentStatus",), "Failed"),
+            (2, ("configurationIds", 0), "wrong-configuration"),
+            (4, ("value",), []),
+            (4, ("value",), [effective, effective]),
+            (4, ("value", 0, "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
+            (6, ("value", 0, "id"), "wrong-effective-configuration"),
+            (6, ("value", 0, "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
+            (8, (0, "allowForwardedTraffic"), False),
+            (8, (1, "allowForwardedTraffic"), False),
+            (8, (1, "allowVirtualNetworkAccess"), False),
+            (10, (0, "allowForwardedTraffic"), False),
+            (10, (0, "peeringState"), "Initiated"),
+            (12, (0, "allowForwardedTraffic"), False),
+            (12, (0, "remoteVirtualNetwork", "id"), netid("spokea", "virtualNetworks", vnet("spokea"))),
+        ):
+            with self.subTest(index=index, path=path, bad=bad):
+                calls = copy.deepcopy(enforced_connectivity_calls()[:index + 1])
+                value = json.loads(calls[-1]["stdout"])
+                if index == 2:
+                    value = value[0]
+                cursor = value
+                for key in path[:-1]:
+                    cursor = cursor[key]
+                cursor[path[-1]] = bad
+                calls[-1]["stdout"] = json.dumps([value] if index == 2 else value)
+                self.assertNotEqual(self.execute(command, calls).returncode, 0)
+
+    def test_enforced_connectivity_rejects_stale_success_and_lookup_errors(self):
+        good = enforced_connectivity_calls()
+        for status in ("NotStarted", "Failed"):
+            with self.subTest(status=status):
+                calls = copy.deepcopy(good[:3])
+                statuses = json.loads(calls[-1]["stdout"])
+                statuses.append(dict(statuses[0], commitTime="2026-01-02T00:00:00Z",
+                                     deploymentStatus=status))
+                calls[-1]["stdout"] = json.dumps(statuses)
+                self.assertNotEqual(self.execute("assert_enforced_connectivity", calls).returncode, 0)
+        for index in range(len(good)):
+            for code, output in ((1, ""), (0, "{broken")):
+                with self.subTest(index=index, code=code):
+                    if "argv" not in good[index]:
+                        continue
+                    calls = copy.deepcopy(good[:index + 1])
+                    calls[-1].update(returncode=code, stdout=output)
+                    self.assertNotEqual(self.execute("assert_enforced_connectivity", calls).returncode, 0)
 
     def test_resource_id_comparison_accepts_only_case_differences(self):
         for actual in (LAW.lower(), LAW.swapcase(), LAW):

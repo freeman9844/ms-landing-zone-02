@@ -3,7 +3,7 @@ import json
 import unittest
 import test_network_docs
 from harness import run, account, group, call, ROOT, SUB
-from test_network_docs import blocks, DOCS, az, rg, netid, vnet, subnet_args, nic, TAGS, recase_ids, foreign_ids, preparation_calls, avnm_id, routing_group_id
+from test_network_docs import blocks, DOCS, az, rg, netid, vnet, subnet_args, nic, TAGS, recase_ids, foreign_ids, preparation_calls, avnm_id, routing_group_id, avnm_peerings, connectivity_config, connectivity_config_id, enforced_connectivity_calls
 from test_workshop_safety import FW, LAW, FW_IP, ready_calls
 
 
@@ -200,6 +200,42 @@ def route_configuration_calls():
     return calls
 
 
+def forwarding_check_calls():
+    return [entry for zone in ("hub", "spokea", "spokeb")
+            for entry in (group(zone),
+                          az(["network", "vnet", "peering", "list", "-g", rg(zone),
+                              "--vnet-name", vnet(zone), "-o", "json"],
+                             avnm_peerings(zone, forwarded=True)))]
+
+
+def enforcement_cases():
+    config = connectivity_config()
+    updated = copy.deepcopy(enforced_connectivity_calls()[1])
+    return {
+        "enforce-peering": [
+            *forwarding_check_calls(),
+            az(["network", "manager", "connect-config", "show", "-g", rg("hub"),
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--configuration-name", "cc-lzbegin-hub-spoke-demo123", "-o", "json"], config),
+            az(["network", "manager", "connect-config", "update", "-g", rg("hub"),
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--configuration-name", "cc-lzbegin-hub-spoke-demo123",
+                "--connect-capabilities",
+                '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}',
+                "-o", "json"], json.loads(updated["stdout"])),
+        ],
+        "commit-enforced-connectivity": [
+            *forwarding_check_calls(),
+            updated,
+            az(["network", "manager", "post-commit", "-g", rg("hub"),
+                "--network-manager-name", "avnm-lzbegin-demo123",
+                "--commit-type", "Connectivity", "--configuration-ids",
+                connectivity_config_id(), "--target-locations", "koreacentral"]),
+        ],
+        "inspect-enforced-connectivity": enforced_connectivity_calls(),
+    }
+
+
 def no_spoke_nat_calls():
     calls = []
     for zone in ("spokea", "spokeb"):
@@ -358,6 +394,8 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=test_network_docs.STATE):
         steps = blocks(DOCS[module])
+        if (module, name) in ((4, "routing-config-create"), (5, "vm-route-gate")):
+            calls = [*enforced_connectivity_calls(), *calls]
         if module == 4 and (name.startswith(("forward-", "routing-collection-", "routing-rule-"))):
             prefix += steps["prepare-04-functions"] + "\n"
         if module == 5 and name in ("support-preview", "support-deploy"):
@@ -464,7 +502,8 @@ class StepwiseDocsTests(unittest.TestCase):
         return ((4, {k: v for k, v in firewall_cases().items() if k != "inspect-firewall-rules"}
                  | {k: v for k, v in routing_cases().items() if k.startswith("forward-")
                     or k.startswith("routing-collection-") or k.startswith("routing-rule-")
-                    or k.startswith("routing-deploy-status")}),
+                    or k.startswith("routing-deploy-status")}
+                 | enforcement_cases()),
                 (5, {k: v for k, v in support_cases().items() if k not in ("watcher-enable",)}
                  | security_cases()),
                 (6, {k: v for k, v in routing_cases().items() if k.startswith("firewall-")}))
@@ -476,6 +515,34 @@ class StepwiseDocsTests(unittest.TestCase):
                     result = self.execute(module, name, calls, files=self.keyfile,
                                           input_text="CREATE\n" if name == "support-deploy" else "FIREWALL\n")
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_all_four_forwarding_updates_precede_enforcement_and_redeployment(self):
+        steps = blocks(DOCS[4])
+        names = [f"forward-{local}-to-{remote}" for local, remote in (
+            ("hub", "spokea"), ("spokea", "hub"), ("hub", "spokeb"), ("spokeb", "hub"))]
+        names += ["enforce-peering", "commit-enforced-connectivity", "inspect-enforced-connectivity"]
+        script = 'export STATE_FILE=state.json\n' + steps["prepare-04"] + '\n'
+        script += steps["prepare-04-functions"] + "\n"
+        script += "\n".join(f'{steps[name]}\n[[ $? == 0 ]] || exit 1' for name in names)
+        calls = preparation_calls(4)
+        for name in names:
+            calls.extend(routing_cases().get(name, enforcement_cases().get(name, [])))
+        result = run(script, calls)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enforcement_cannot_update_or_commit_until_all_four_peerings_forward(self):
+        for name in ("enforce-peering", "commit-enforced-connectivity"):
+            for index in (1, 3, 5):
+                with self.subTest(action=name, peering_index=index):
+                    calls = copy.deepcopy(enforcement_cases()[name][:index + 1])
+                    peerings = json.loads(calls[-1]["stdout"])
+                    peerings[-1]["allowForwardedTraffic"] = False
+                    calls[-1]["stdout"] = json.dumps(peerings)
+                    self.assertNotEqual(self.execute(4, name, calls).returncode, 0)
+        for name in ("enforce-peering", "commit-enforced-connectivity"):
+            calls = copy.deepcopy(enforcement_cases()[name])
+            calls[-2]["stdout"] = json.dumps(dict(connectivity_config(), id="wrong-config"))
+            self.assertNotEqual(self.execute(4, name, calls[:-1]).returncode, 0)
 
     def test_routing_configuration_rejects_wrong_member_and_full_group_ids(self):
         calls = route_configuration_calls()

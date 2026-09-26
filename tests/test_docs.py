@@ -79,6 +79,23 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("peeringEnforcement", text)
         self.assertNotIn("peering-enforcement", text)
 
+    def test_peering_enforcement_is_staged_after_forwarding_in_module_04(self):
+        module03 = (ROOT / "docs/03-avnm-connectivity.md").read_text()
+        module04 = (ROOT / "docs/04-connectivity-nsg.md").read_text()
+        self.assertNotIn("peeringEnforcement=Enforced", module03)
+        positions = [module04.index(f"<!-- exec:forward-{local}-to-{remote} -->")
+                     for local, remote in (("hub", "spokea"), ("spokea", "hub"),
+                                           ("hub", "spokeb"), ("spokeb", "hub"))]
+        enforcement = module04.index("<!-- exec:enforce-peering -->")
+        commit = module04.index("<!-- exec:commit-enforced-connectivity -->")
+        inspect = module04.index("<!-- exec:inspect-enforced-connectivity -->")
+        routing = module04.index("<!-- exec:routing-config-create -->")
+        self.assertEqual(positions, sorted(positions))
+        self.assertLess(max(positions), enforcement)
+        self.assertLess(enforcement, commit)
+        self.assertLess(commit, inspect)
+        self.assertLess(inspect, routing)
+
     def test_prerequisites_clone_the_standalone_workshop_repository(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         self.assertIn(

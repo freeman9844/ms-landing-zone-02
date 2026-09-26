@@ -9,6 +9,7 @@ from test_network_docs import (
     az,
     avnm_peerings,
     connectivity_config_id,
+    enforced_connectivity_calls,
     effective_configuration,
     netid,
     network_group_id,
@@ -77,12 +78,28 @@ class HttpProofTests(unittest.TestCase):
 
 
 class CoreGateTests(unittest.TestCase):
+    def run_core(self, script, calls, **kwargs):
+        calls = list(calls)
+        if calls and calls[0]["argv"] == account()["argv"]:
+            calls[1:1] = enforced_connectivity_calls()
+        return run(script, calls, **kwargs)
+
+    def test_unenforced_connectivity_stops_before_vm_and_http_evidence(self):
+        calls = enforced_connectivity_calls()[:2]
+        config = json.loads(calls[-1]["stdout"])
+        config["connectivityCapabilities"]["peeringEnforcement"] = "Unenforced"
+        calls[-1]["stdout"] = json.dumps(config)
+        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline',
+                     [account(), *calls])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unenforced Connectivity", result.stderr)
+
     def test_live_hub_outside_spoke_group_and_effective_without_target_reach_route_checks(self):
         spokea = copy.deepcopy(effective_configuration("spokea"))
         spokeb = copy.deepcopy(effective_configuration("spokeb"))
         del spokea["value"][0]["targetVirtualNetwork"]
         del spokeb["value"][0]["targetVirtualNetwork"]
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", {"value": []}),
@@ -105,7 +122,7 @@ class CoreGateTests(unittest.TestCase):
             "--resource-group", rg(zone),
             "--virtual-network-name", vnet(zone),
             "-o", "json",
-        ], effective_configuration(zone) if payload is None else payload)
+        ], effective_configuration(zone, enforcement="Enforced") if payload is None else payload)
 
     def peering_list_call(self, zone, peerings=None):
         return az([
@@ -147,13 +164,13 @@ class CoreGateTests(unittest.TestCase):
         prefix = self.network_calls()[:-len(redesign.route_calls())]
         for stage in ("baseline", "admin-denied", "restored"):
             with self.subTest(stage=stage, issue="route"):
-                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                result = self.run_core(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
                              prefix + routes)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Subnet routes", result.stderr)
             with self.subTest(stage=stage, issue="nat"):
                 nat = redesign.SpokeNatAbsenceTests().calls(nat={"name": "unexpected"})
-                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                result = self.run_core(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
                              self.network_calls() + nat)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Unexpected Spoke NAT", result.stderr)
@@ -173,7 +190,7 @@ class CoreGateTests(unittest.TestCase):
             bad["priority"] = 999
             security[-1]["stdout"] = json.dumps(bad)
             with self.subTest(stage=stage):
-                result = run(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
+                result = self.run_core(f'bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json {stage}',
                              self.network_calls() + redesign.SpokeNatAbsenceTests().calls() + security)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Security Admin rule", result.stderr)
@@ -224,7 +241,7 @@ case "$*" in
   *) exit 99 ;;
 esac
 """
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json admin-denied',
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json admin-denied',
                      calls, files={"bin/curl": curl})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS: core admin-denied evidence complete", result.stdout)
@@ -271,7 +288,7 @@ esac
                 self.assertEqual(result.returncode == 0, valid, result.stderr)
 
     def test_missing_effective_configuration_stops_before_http(self):
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", {"value": []}),
@@ -285,7 +302,7 @@ esac
     def test_foreign_effective_configuration_id_stops_before_http(self):
         payload = copy.deepcopy(effective_configuration("hub"))
         payload["value"][0]["id"] = connectivity_config_id() + "-foreign"
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", payload),
@@ -296,7 +313,7 @@ esac
     def test_mesh_effective_configuration_stops_before_http(self):
         payload = copy.deepcopy(effective_configuration("hub"))
         payload["value"][0]["connectivityTopology"] = "Mesh"
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", payload),
@@ -307,7 +324,7 @@ esac
     def test_effective_configuration_requires_current_zone_target_vnet_id(self):
         payload = copy.deepcopy(effective_configuration("hub"))
         payload["value"][0]["targetVirtualNetwork"]["id"] = netid("spokea", "virtualNetworks", vnet("spokea"))
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", payload),
@@ -329,7 +346,7 @@ esac
                 for key in path[:-1]:
                     cursor = cursor[key]
                 cursor[path[-1]] = value
-                result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+                result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
                     account(),
                     group("hub"),
                     self.effective_call("hub", payload),
@@ -346,7 +363,7 @@ esac
         payload["value"][0]["appliesToGroups"][0]["useHubGateway"] = False
         peerings = copy.deepcopy(avnm_peerings("hub"))
         peerings[0]["peeringState"] = "Initiated"
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub", payload),
@@ -364,14 +381,14 @@ esac
         })
         calls = self.gate_calls()[:7]
         calls[-1] = self.peering_list_call("spokea", peerings)
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', calls)
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', calls)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("peerings", result.stderr)
 
     def test_missing_hub_spoke_direction_stops_before_http(self):
         calls = self.gate_calls()[:7]
         calls[-1] = self.peering_list_call("spokea", [])
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', calls)
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', calls)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("peerings", result.stderr)
 
@@ -385,7 +402,7 @@ esac
             {"name": "avnm-hub-b", "peeringState": "Connected",
              "remoteVirtualNetwork": {"id": netid("spokeb", "virtualNetworks", vnet("spokeb"))}},
         ]
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub"),
@@ -397,7 +414,7 @@ esac
     def test_initiated_peering_stops_before_http(self):
         peerings = copy.deepcopy(avnm_peerings("hub"))
         peerings[1]["peeringState"] = "Initiated"
-        result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
+        result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [
             account(),
             group("hub"),
             self.effective_call("hub"),

@@ -148,6 +148,7 @@ def connectivity_config(state=STATE):
         "deleteExistingPeering": "False",
         "isGlobal": "False",
         "provisioningState": "Succeeded",
+        "connectivityCapabilities": {"peeringEnforcement": "Unenforced"},
         "hubs": [{
             "resourceId": netid("hub", "virtualNetworks", vnet("hub", state), state),
             "resourceType": "Microsoft.Network/virtualNetworks",
@@ -161,13 +162,13 @@ def connectivity_config(state=STATE):
     }
 
 
-def effective_configuration(zone, state=STATE):
+def effective_configuration(zone, state=STATE, enforcement="Unenforced"):
     return {"value": [dict(connectivity_config(state), targetVirtualNetwork={
         "id": netid(zone, "virtualNetworks", vnet(zone, state), state),
-    })]}
+    }, connectivityCapabilities={"peeringEnforcement": enforcement})]}
 
 
-def avnm_peerings(zone, state=STATE):
+def avnm_peerings(zone, state=STATE, forwarded=False):
     peerings = {
         "hub": [
             {"name": "avnm-hub-a", "peeringState": "Connected",
@@ -184,7 +185,47 @@ def avnm_peerings(zone, state=STATE):
              "remoteVirtualNetwork": {"id": netid("hub", "virtualNetworks", vnet("hub", state), state)}},
         ],
     }
+    if forwarded:
+        for peering in peerings[zone]:
+            peering["allowForwardedTraffic"] = True
+            peering["allowVirtualNetworkAccess"] = True
     return peerings[zone]
+
+
+def enforced_connectivity_calls():
+    config = connectivity_config()
+    config["connectivityCapabilities"] = {
+        "peeringEnforcement": "Enforced",
+        "connectedGroupAddressOverlap": "Allowed",
+        "connectedGroupPrivateEndpointsScale": "Standard",
+    }
+    return [
+        group("hub"),
+        az(["network", "manager", "connect-config", "show", "-g", rg("hub"),
+            "--network-manager-name", avnm_name(), "--configuration-name",
+            connectivity_config_name(), "-o", "json"], config),
+        az(["network", "manager", "list-deploy-status", "-g", rg("hub"),
+            "--network-manager-name", avnm_name(), "--deployment-types",
+            "Connectivity", "--regions", "koreacentral", "-o", "json"],
+           [{"deploymentType": "Connectivity", "region": "koreacentral",
+             "commitTime": "2026-01-01T00:00:00Z", "deploymentStatus": "Deployed",
+             "configurationIds": [connectivity_config_id()]}]),
+        group("spokea"),
+        az(["network", "manager", "list-effective-connectivity-config",
+            "--resource-group", rg("spokea"), "--virtual-network-name",
+            vnet("spokea"), "-o", "json"],
+           effective_configuration("spokea", enforcement="Enforced")),
+        group("spokeb"),
+        az(["network", "manager", "list-effective-connectivity-config",
+            "--resource-group", rg("spokeb"), "--virtual-network-name",
+            vnet("spokeb"), "-o", "json"],
+           effective_configuration("spokeb", enforcement="Enforced")),
+        *(entry for zone in ("hub", "spokea", "spokeb")
+          for entry in (group(zone),
+                        az(["network", "vnet", "peering", "list", "-g", rg(zone),
+                            "--vnet-name", vnet(zone), "-o", "json"],
+                           avnm_peerings(zone, forwarded=True)))),
+    ]
 
 
 def owned_group_call(zone, state=STATE):
@@ -700,10 +741,15 @@ printf 'SHELL_ALIVE\\n'
                             (4, "prepare-04-functions"): ["assert_resource_id"],
                             (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
                             (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
-                            (4, "routing-before-commit"): ["assert_no_spoke_nat"],
+                            (4, "enforce-peering"): ["assert_forwarded_peerings"],
+                            (4, "commit-enforced-connectivity"): ["assert_forwarded_peerings"],
+                            (4, "inspect-enforced-connectivity"): ["assert_enforced_connectivity"],
+                            (4, "routing-config-create"): ["assert_enforced_connectivity"],
+                            (4, "routing-before-commit"): ["assert_enforced_connectivity", "assert_no_spoke_nat"],
                             (4, "inspect-avnm-routing-subnets"): ["assert_avnm_routes_ready",
                                                                    "assert_no_spoke_nat"],
-                            (5, "vm-route-gate"): ["assert_avnm_routes_ready", "assert_no_spoke_nat"],
+                            (5, "vm-route-gate"): ["assert_enforced_connectivity",
+                                                    "assert_avnm_routes_ready", "assert_no_spoke_nat"],
                             (5, "inspect-no-spoke-nat"): ["assert_no_spoke_nat"],
                             (5, "read-vm-ips"): ["assert_ipv4_in_subnet"] * 3,
                             (5, "inspect-security-rules"): ["assert_admin_rules_ready"],

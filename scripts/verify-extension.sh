@@ -8,6 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
   { fail "Usage: verify-extension.sh STATE_FILE allowed|denied|restored"; exit 1; }
 load_run "$1"
 assert_subscription
+assert_enforced_connectivity
 for rg in "$RG_HUB" "$RG_SPOKEA" "$RG_SPOKEB"; do assert_owned_rg "$rg"; done
 # 배포 완료, 실습 SKU, 단일 IP 구성과 사설 IP를 확인한 뒤 그 IP를 경로의 비교 기준으로 사용합니다.
 fw=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" -o json)

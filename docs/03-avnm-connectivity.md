@@ -621,7 +621,10 @@ create_connectivity_config_if_empty
 👁️ **설명**
 
 Configuration을 만든 것만으로 실제 연결이 적용되지는 않습니다. 이 블록이 Korea Central에
-Connectivity 배포를 요청합니다. 재실행은 같은 configuration을 다시 commit하는 동작입니다.
+Connectivity 배포를 요청합니다. 여기서는 아직 피어링 강제를 적용하지 않아
+모듈 04에서 네 방향의 전달 허용을 설정할 수 있습니다. 모듈 04에서 네 방향을
+확인한 다음 `Enforced`로 변경·재배포합니다. 재실행은 같은 configuration을
+다시 commit하는 동작입니다.
 
 🟢 **실행**
 

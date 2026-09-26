@@ -69,6 +69,7 @@ vCPU 여유(총 6개)를 확인합니다. 기존 VM이 있으면 실행 상태�
 <!-- exec:vm-route-gate -->
 ```bash
 check_vm_network() {
+  assert_enforced_connectivity || return 1
   firewall_ip=$(firewall_ready_ip) || return 1
   assert_avnm_routes_ready "$firewall_ip" || return 1
   assert_no_spoke_nat
@@ -78,6 +79,7 @@ check_vm_network
 
 📋 **확인**
 
+AVNM 피어링 강제 구성이 두 Spoke에 적용되고 네 방향 전달 허용이 유지됩니다.
 Firewall 사설 IP가 `AzureFirewallSubnet` 범위이고, **두 Spoke 워크로드 Subnet 모두**
 해당 IP를 next hop으로 하는 상대 Spoke `/16`과 `/0` AVNM 경로가 적용됐습니다.
 Spoke Subnet에 NAT가 없고 Spoke NAT/Public IP도 없습니다.
