@@ -88,6 +88,8 @@ http_proof() {
 command -v curl >/dev/null
 if body=$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
   -H 'Connection: close' "http://$destination:8080/"); then
+  [[ "$expected" != blocked ]] ||
+    { printf 'ERROR: HTTP succeeded when network block was expected\n' >&2; exit 1; }
   [[ "$body" == "$expected" ]] || { printf 'ERROR: unexpected successful response: %s\n' "$body" >&2; exit 1; }
   printf 'PASS: HTTP %s\n' "$body"
 else

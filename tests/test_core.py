@@ -75,6 +75,7 @@ class HttpProofTests(unittest.TestCase):
 
     def test_unexpected_success_is_not_deny(self):
         self.assertNotEqual(self.probe(0, "spokeb", "blocked").returncode, 0)
+        self.assertNotEqual(self.probe(0, "blocked", "blocked").returncode, 0)
 
 
 class CoreGateTests(unittest.TestCase):

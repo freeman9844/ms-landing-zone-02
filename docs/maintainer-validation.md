@@ -78,8 +78,8 @@ Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개와 더 높은 우선순�
 구독·소유권 확인, 유료 배포/삭제 안내와 상태별 독립 검증은 교재에서도 생략하지 않습니다.
 명령을 펼친 뒤에는 CLI mock으로 대상과 인수·호출 순서를 확인하고 문서 Bash 구문을 검사합니다.
 아래 2026-09-21~24 Azure 리허설은 **이 개편 이전 아키텍처의 역사적 기록**입니다.
-이번 Firewall·Routing 선행 / Hub NAT만 / Security Admin 과정을 Azure에서
-재실행한 증거가 아닙니다. 현재 변경의 증거는 별도의 로컬/mock 검사로 제한합니다.
+현재 과정의 실환경 실행 증거는 아래 2026-09-27 기록을 참고하세요.
+로컬/mock 검사만으로 Azure 배포 성공을 주장하지 않습니다.
 
 ## 단일 과정 구성
 
@@ -212,9 +212,9 @@ full-ID 비교, 독립 저장소 경로 `$HOME/ms-landing-zone-02` 복구 동작
 복구 회귀 검사는 이미 준비된 셸에서 잘못된 상태를 읽은 뒤 대상 변수가 남지 않는지 직접 확인합니다.
 교재의 실제 복구 블록을 실행하여 디렉터리 이동 실패·입력 EOF·JSON 오류 시 구독 변경이 없는지,
 상태 디렉터리 밖에 업로드한 JSON으로도 복구할 수 있는지 검사합니다.
-이번 개편의 확인은 **로컬/mock만**으로 한정합니다. 아래 2026-09-24 Azure
-리허설은 **VM 우선·수동 UDR·Spoke NAT 2개가 있던 이전 아키텍처**의 기록이며,
-Firewall/AVNM Routing 선행·Hub NAT만·Security Admin 구성의 실행 증거가 아닙니다.
+아래 2026-09-24 Azure 리허설은 **VM 우선·수동 UDR·Spoke NAT 2개가 있던 이전
+아키텍처**의 기록입니다. 현재 과정의 실환경 검증 범위와 한계는
+2026-09-27 기록에서 별도로 확인합니다.
 
 도구가 없으면 먼저 누락 오류를 확인한 뒤 조직이 승인한 방법으로 설치하세요.
 예를 들어 별도 환경에서 `uv tool install checkov`를 사용하고 해당 executable을 PATH에 둡니다.
@@ -244,6 +244,38 @@ Cloud Shell에서 실제 같은 명령을 재현해야 하며, CLI 도움말 확
 Trusted Launch·Secure Boot·vTPM, 비특권 응답 서비스는 적용합니다.
 관리형 디스크 SSE는 host cache/temporary disk 암호화와 같지 않습니다.
 실습에는 고객 데이터·자격 증명·업무 워크로드를 올리지 않습니다.
+
+## 현재 과정의 실제 Azure 리허설 (2026-09-27)
+
+Korea Central에서 독립 실행 `edb7827a799c`로 현재 게시본의 모듈 02–07을
+인증된 로컬 Azure CLI를 사용해 순서대로 실행했습니다. 기존 다른 실행의
+리소스 그룹은 변경하지 않았습니다.
+
+- 모듈 02–03: Hub/Spoke 자원, AVNM 세 범위와 그룹, Hub-and-Spoke Connectivity,
+  양방향 피어링을 배포하고 비동기 적용을 확인했습니다.
+- 모듈 04: VM보다 먼저 Firewall·Policy·진단과 AVNM Routing을 적용하고,
+  네 피어링의 forwarding 설정 뒤 피어링 강제를 배포해 Spoke의 effective
+  `Enforced`와 실제 경로를 확인했습니다.
+- 모듈 05: Hub NAT와 사설 VM 3대를 배포하고 Security Admin의 세
+  `AlwaysAllow`에 따른 실제 HTTP 성공을 확인했습니다. 임시 Deny의 차단을
+  확인한 뒤 SecurityAdmin을 배포 해제하고 Deny 규칙을 삭제·재배포해
+  effective 규칙과 실제 HTTP 복구를 확인했습니다. 이 환경에서 Network
+  Watcher IP Flow Verify는 실제 허용 흐름에도 NSG Deny를 반환했으므로
+  단독 증거로 사용하지 않습니다.
+- 모듈 06: AVNM 경로·NIC 유효 경로와 Firewall 정책
+  Allow → Deny → Allow의 새 HTTP 요청, 해당 흐름의 새 Firewall 로그,
+  두 Spoke의 Firewall egress를 확인했습니다.
+- 모듈 07: 세 AVNM 구성의 배포를 해제한 뒤 **이번 실행의 세 RG만**
+  삭제하고 세 그룹의 부재를 재확인했습니다. 공유 Network Watcher나
+  다른 실행 자원은 삭제하지 않았습니다.
+
+CLI 실제 응답에 맞게 배포 상태의 빈 `skipToken`, Routing 상태 REST 조회,
+effective 피어링 강제 REST 조회, Security Admin 출발지 포트
+`0-65535`와 배포 해제 후 Deny 삭제 순서를 교재·검증기에 반영했습니다.
+최종 로컬 검증은 184 tests 통과, Bicep 검사 7 passed / 0 failed /
+3 skipped입니다. 이 실행은 **브라우저 Cloud Shell 재접속이나 다른
+구독·리전의 재현성**을 검증하지 않았고, Log Analytics 전파나 리소스
+삭제에 걸리는 시간이 목표 시간을 초과할 수 있습니다.
 
 ## 이전 아키텍처의 실제 Azure 리허설 기록 (현재 개편의 검증 아님)
 
@@ -439,7 +471,8 @@ Azure CLI `2.90.0`, Bicep `0.45.15`, AVNM extension `3.0.2`, Firewall extension
 Firewall IP 연결 대기 안내만 이관하고, Spoke NAT 없는 Firewall 선행 흐름은
 이관하지 않았습니다. **이 설명은 당시 작업 이력**입니다. 이후 현재 과정은
 Spoke NAT를 제거하고 Firewall·AVNM Routing을 VM보다 먼저 배치하도록 다시
-설계했습니다. 이 새 순서로 Azure 리허설을 수행했다는 뜻이 아닙니다.
+설계했습니다. **이 단락은 2026-09-24 당시의 기록**이며, 이후 새 순서의
+실환경 리허설은 위 2026-09-27 기록에 별도로 정리했습니다.
 
 증거는 `evidence/`에 보관하되 access token, 개인 키, 비밀번호, 로그의 민감 데이터는
 넣지 않습니다. 이 폴더는 Git에서 제외됩니다. 사용자 구독 ID가 포함된 캡처를 공개하기

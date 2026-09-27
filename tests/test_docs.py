@@ -12,6 +12,16 @@ MODULES = [
 
 
 class DocsTests(unittest.TestCase):
+    def test_published_rehearsal_status_distinguishes_current_and_historical_workshop(self):
+        readme = (ROOT / "README.md").read_text()
+        maintainer = (ROOT / "docs/maintainer-validation.md").read_text()
+        self.assertIn("2026-09-27 현재 과정의 실환경 리허설을 완료했습니다", readme)
+        self.assertIn("2026-09-27", maintainer)
+        self.assertIn("edb7827a799c", maintainer)
+        self.assertIn("이전 아키텍처의 실제 Azure 리허설 기록", maintainer)
+        self.assertNotIn("아직 리허설하지 않았습니다", readme)
+        self.assertNotIn("이번 개편의 확인은 **로컬/mock만**", maintainer)
+
     def test_module_navigation_reaches_firewall_routing_and_cleanup_in_order(self):
         readme = (ROOT / "README.md").read_text()
         entries = re.findall(r"^\| (\d{2}) \| \[[^\]]+\]\(docs/([^)]+)\)", readme, re.M)

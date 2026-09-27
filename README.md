@@ -160,9 +160,11 @@ Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01
 - Firewall 규칙의 `AzureCloud:443`은 자사 tenant 전용 허용이 아닙니다.
 - 기본 VM은 관리형 디스크의 플랫폼 암호화를 사용합니다. host encryption·guest ADE와
   VM extension 금지 권고에는 [명시적인 교육용 예외](docs/maintainer-validation.md#보안-검사-예외)가 있습니다.
-- **2026-09-24 재리허설은 이전 NSG·수동 UDR·Spoke NAT 구성에 대한 기록입니다.**
-  이 AVNM Routing·Security Admin 재설계는 유료 자원을 사용하는 Azure 실환경에서
-  아직 리허설하지 않았습니다. 개최 전 별도 실환경 검증이 필요합니다.
+- **2026-09-27 현재 과정의 실환경 리허설을 완료했습니다.** Korea Central의 새 실행에서
+  모듈 02–06의 AVNM 연결·피어링 강제·Routing·Security Admin·Firewall
+  허용/차단/복구를 실제 통신·로그로 확인하고 모듈 07에서 이번 실행의 세 RG를
+  모두 삭제했습니다. 브라우저 Cloud Shell이나 다른 구독·리전까지 검증한 것은
+  아니므로 참가자 환경의 권한·지역 용량·정책은 별도로 확인하세요.
 
 ## 태깅 범례와 트러블슈팅
 
