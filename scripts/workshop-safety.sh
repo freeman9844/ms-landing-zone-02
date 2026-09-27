@@ -59,7 +59,7 @@ assert_forwarded_peerings() {
 
 # 새 Connectivity 목표 상태와 Spoke의 실제 적용 상태를 별도로 확인합니다.
 assert_enforced_connectivity() {
-  local config status effective zone rg vnet hub_id
+  local config status effective zone rg vnet hub_id vnet_id
   assert_owned_rg "$RG_HUB" || return 1
   hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
   config=$(az network manager connect-config show -g "$RG_HUB" \
@@ -85,7 +85,7 @@ assert_enforced_connectivity() {
     --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg id "$CONNECTIVITY_CONFIG_ID" --arg loc "$LOCATION" '
     if type == "array" then .
-    elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+    elif type == "object" and (.skipToken == null or .skipToken == "") and (.value | type == "array") then .value
     else error("Invalid deployment status") end |
     [.[] | select(.deploymentType == "Connectivity" and .region == $loc)] |
     if length == 0 then error("Missing Connectivity deployment") else sort_by(.commitTime) | last end |
@@ -97,20 +97,39 @@ assert_enforced_connectivity() {
     if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
     assert_owned_rg "$rg" || return 1
     vnet="vnet-lzbegin-$zone-$RUN_ID"
-    effective=$(az network manager list-effective-connectivity-config \
-      --resource-group "$rg" --virtual-network-name "$vnet" -o json \
-      --subscription "$SUBSCRIPTION_ID") || return 1
+    vnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/$vnet"
+    effective=$(az rest --method post \
+      --url "$vnet_id/listNetworkManagerEffectiveConnectivityConfigurations?api-version=2025-05-01" \
+      --body '{}' -o json --subscription "$SUBSCRIPTION_ID") || return 1
     jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
       (.skipToken == null or .skipToken == "") and
       (.value | type == "array" and length == 1) and
       (.value[0].id | ascii_downcase) == ($id | ascii_downcase) and
-      .value[0].provisioningState == "Succeeded" and
-      .value[0].connectivityCapabilities.peeringEnforcement == "Enforced"
+      .value[0].properties.provisioningState == "Succeeded" and
+      .value[0].properties.connectivityCapabilities.peeringEnforcement == "Enforced"
     ' <<< "$effective" >/dev/null ||
       { fail "Enforced Connectivity is not effective on $zone."; return 1; }
   done
   assert_forwarded_peerings || return 1
   printf 'PASS: Enforced Connectivity is effective on both spokes; four forwarded peerings are connected.\n'
+}
+
+assert_security_admin_undeployed() {
+  local status
+  status=$(az rest --method post \
+    --url "$AVNM_ID/listDeploymentStatus?api-version=2025-05-01" \
+    --body "$(jq -cn --arg loc "$LOCATION" '{deploymentTypes:["SecurityAdmin"],regions:[$loc]}')" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg loc "$LOCATION" '
+    if type == "array" then .
+    elif type == "object" and (.skipToken == null or .skipToken == "") and (.value | type == "array")
+      then .value
+    else error("Incomplete Security Admin deployment status") end |
+    [.[] | select(.deploymentType == "SecurityAdmin" and .region == $loc)] |
+    if length == 0 then error("Missing Security Admin deployment") else sort_by(.commitTime) | last end |
+    .deploymentStatus == "Deployed" and .configurationIds == []
+  ' <<< "$status" >/dev/null ||
+    { fail "Security Admin undeployment is not complete; do not delete deployed rules."; return 1; }
 }
 
 # 임의의 사설 IP가 아니라 지정한 Subnet 안의 IPv4 호스트 주소인지 확인합니다.
@@ -337,7 +356,7 @@ _assert_admin_rule() {
     .kind == "Custom" and
     .access == $access and .priority == $priority and
     .direction == "Inbound" and .protocol == "Tcp" and
-    (.sourcePortRanges == null or .sourcePortRanges == ["*"]) and
+    .sourcePortRanges == ["0-65535"] and
     .destinationPortRanges == ["8080"] and
     (.sources | type == "array" and length == 1) and
     .sources[0].addressPrefixType == "IPPrefix" and

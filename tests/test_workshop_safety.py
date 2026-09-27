@@ -74,11 +74,33 @@ def admin_calls(stage="baseline", hub="10.0.1.4", a="10.10.1.4", b="10.20.1.4"):
                              "provisioningState": "Succeeded", "kind": "Custom",
                              "access": access, "priority": priority,
                              "direction": "Inbound", "protocol": "Tcp",
-                             "sourcePortRanges": ["*"], "destinationPortRanges": ["8080"],
+                             "sourcePortRanges": ["0-65535"], "destinationPortRanges": ["8080"],
                              "sources": [{"addressPrefixType": "IPPrefix", "addressPrefix": source + "/32"}],
                              "destinations": [{"addressPrefixType": "IPPrefix",
                                                "addressPrefix": destination + "/32"}]}))
     return calls
+
+
+def effective_admin_rule(zone, name, source, destination, access):
+    return {
+        "id": CONFIG + f"/ruleCollections/{zone}/rules/{name}",
+        "access": access,
+        "direction": "Inbound",
+        "protocol": "Tcp",
+        "sourcePortRanges": ["0-65535"],
+        "destinationPortRanges": ["8080"],
+        "sources": [{"addressPrefixType": "IPPrefix", "addressPrefix": source + "/32"}],
+        "destinations": [{"addressPrefixType": "IPPrefix", "addressPrefix": destination + "/32"}],
+        "priority": 0,
+    }
+
+
+def effective_admin_call(zone, name, source, destination, access, payload=None):
+    if payload is None:
+        payload = {"value": [effective_admin_rule(zone, name, source, destination, access)],
+                   "skipToken": ""}
+    return az(["network", "manager", "list-effective-security-admin-rule",
+               "-g", rg(zone), "--virtual-network-name", vnet(zone), "-o", "json"], payload)
 
 
 class SafetyTests(unittest.TestCase):
@@ -123,9 +145,9 @@ class SafetyTests(unittest.TestCase):
             (2, ("configurationIds", 0), "wrong-configuration"),
             (4, ("value",), []),
             (4, ("value",), [effective, effective]),
-            (4, ("value", 0, "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
+            (4, ("value", 0, "properties", "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
             (6, ("value", 0, "id"), "wrong-effective-configuration"),
-            (6, ("value", 0, "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
+            (6, ("value", 0, "properties", "connectivityCapabilities", "peeringEnforcement"), "Unenforced"),
             (8, (0, "allowForwardedTraffic"), False),
             (8, (1, "allowForwardedTraffic"), False),
             (8, (1, "allowVirtualNetworkAccess"), False),
@@ -164,6 +186,23 @@ class SafetyTests(unittest.TestCase):
                     calls = copy.deepcopy(good[:index + 1])
                     calls[-1].update(returncode=code, stdout=output)
                     self.assertNotEqual(self.execute("assert_enforced_connectivity", calls).returncode, 0)
+
+    def test_enforced_connectivity_accepts_terminal_cli_page(self):
+        calls = enforced_connectivity_calls()
+        calls[2]["stdout"] = json.dumps({
+            "skipToken": "",
+            "value": json.loads(calls[2]["stdout"]),
+        })
+        self.assertEqual(self.execute("assert_enforced_connectivity", calls).returncode, 0)
+
+    def test_enforced_connectivity_requires_rest_effective_capability(self):
+        calls = enforced_connectivity_calls()
+        self.assertEqual(self.execute("assert_enforced_connectivity", calls).returncode, 0)
+        stale = copy.deepcopy(calls[:5])
+        payload = json.loads(stale[-1]["stdout"])
+        payload["value"][0]["properties"]["connectivityCapabilities"] = None
+        stale[-1]["stdout"] = json.dumps(payload)
+        self.assertNotEqual(self.execute("assert_enforced_connectivity", stale).returncode, 0)
 
     def test_resource_id_comparison_accepts_only_case_differences(self):
         for actual in (LAW.lower(), LAW.swapcase(), LAW):

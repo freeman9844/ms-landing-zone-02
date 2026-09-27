@@ -278,9 +278,10 @@ Spoke A에는 `10.20.0.0/16`, Spoke B에는 `10.10.0.0/16`, 양쪽에는
 👁️ **설명**
 
 [IP Flow Verify](https://learn.microsoft.com/azure/network-watcher/ip-flow-verify-overview)는
-VM NIC에 적용된 NSG와 AVNM Security Admin 규칙을 판정하며 리전 Watcher가 필요합니다.
-VNet 생성 시 자동 활성화됐을 수 있습니다. 기존 Watcher와 공유 `NetworkWatcherRG`의
-태그를 변경하거나 실습 종료 시 삭제하지 않습니다.
+NSG 진단에 유용하지만 이 환경에서 AVNM `AlwaysAllow`의 실제 판정과 달리 NSG
+`Deny`를 반환할 수 있습니다. 따라서 이 모듈의 허용·차단 증거로 단독 사용하지
+않습니다. 리전 Network Watcher는 VNet 생성 시 자동 활성화됐을 수 있습니다.
+기존 Watcher와 공유 `NetworkWatcherRG`의 태그를 변경하거나 실습 종료 시 삭제하지 않습니다.
 
 🟢 **실행**
 
@@ -392,7 +393,7 @@ VM NIC를 재생성해 IP가 바뀌었다면 이전 규칙을 그대로 배포�
 이번 실행의 Spoke A/B Network Group(모듈 03의 Routing용 두 Group)에만 각각의
 규칙 컬렉션을 적용합니다. A 컬렉션에는 Hub→A, B 컬렉션에는 Hub→B와 A→B를 둡니다.
 Hub→A, Hub→B, A→B 각각 **실제 NIC IP의 `/32`·TCP 8080·Inbound**만 지정합니다.
-출발지 포트는 임시 포트 `*`입니다. [Security Admin 동작](https://learn.microsoft.com/azure/virtual-network-manager/concept-security-admins)에
+출발지 포트는 임시 포트를 포함하는 `0-65535`입니다. [Security Admin 동작](https://learn.microsoft.com/azure/virtual-network-manager/concept-security-admins)에
 따라 `AlwaysAllow`는 Spoke NSG의 `deny-other-vnet-inbound`(4000)보다 먼저
 평가되고 **NSG 평가 자체를 건너뜁니다**. `Allow`는 NSG까지 계속 평가되므로 이 실습에 맞지 않습니다.
 Firewall을 통과하는 A→B에는 별도로 모듈 04의 Firewall Policy 허용 규칙이 필요합니다.
@@ -459,7 +460,7 @@ az network manager security-admin-config rule-collection rule create -g "$RG_HUB
   --rule-collection-name spokea --rule-name hub-to-a \
   --priority 200 --direction Inbound --access AlwaysAllow --protocol Tcp \
   --sources address-prefix="$hub_ip/32" address-prefix-type=IPPrefix \
-  --source-port-ranges '*' --destinations address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
+  --source-port-ranges 0-65535 --destinations address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
   --dest-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
@@ -478,7 +479,7 @@ az network manager security-admin-config rule-collection rule create -g "$RG_HUB
   --rule-collection-name spokeb --rule-name hub-to-b \
   --priority 210 --direction Inbound --access AlwaysAllow --protocol Tcp \
   --sources address-prefix="$hub_ip/32" address-prefix-type=IPPrefix \
-  --source-port-ranges '*' --destinations address-prefix="$b_ip/32" address-prefix-type=IPPrefix \
+  --source-port-ranges 0-65535 --destinations address-prefix="$b_ip/32" address-prefix-type=IPPrefix \
   --dest-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
@@ -497,7 +498,7 @@ az network manager security-admin-config rule-collection rule create -g "$RG_HUB
   --rule-collection-name spokeb --rule-name a-to-b \
   --priority 220 --direction Inbound --access AlwaysAllow --protocol Tcp \
   --sources address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
-  --source-port-ranges '*' --destinations address-prefix="$b_ip/32" address-prefix-type=IPPrefix \
+  --source-port-ranges 0-65535 --destinations address-prefix="$b_ip/32" address-prefix-type=IPPrefix \
   --dest-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
@@ -532,53 +533,39 @@ az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
 📋 **확인**
 
 이번 구성 ID와 리전의 SecurityAdmin 배포가 접수됩니다. 완료 응답과 실제 VM 적용은
-다릅니다. 아래 IP Flow Verify 판정이 전파될 때까지 기다립니다.
+다릅니다. 아래 effective Security Admin 규칙과 실제 HTTP로 적용 여부를 확인합니다.
 
-### 5-7. 실제 판정과 새 HTTP 연결
+### 5-7. 적용된 규칙과 새 HTTP 연결
 
 👁️ **설명**
 
-Network Watcher의 출발지 `50000`은 판정용 클라이언트 포트이며 실제 curl 포트가 아닙니다.
-새 연결마다 포트가 달라도 규칙의 출발지 포트가 `*`라 결과가 같아야 합니다.
-전파 중에는 일시적으로 이전 규칙이 보일 수 있습니다. 최대 약 3분 기다려
-**Access와 규칙 이름 둘 다** 확인합니다. 성공·실패 원인을 HTTP만으로 추측하지 않습니다.
+대상 Spoke의 **effective Security Admin 규칙**에서 이번 AVNM의 전체 규칙 ID·동작·
+주소·포트가 적용됐는지 확인합니다. 새 연결마다 출발지 포트가 달라도 규칙의
+출발지 포트 범위 `0-65535`가 적용됩니다. 전파 중에는 이전 규칙이 보일 수 있어
+최대 약 3분 기다립니다. 실제 HTTP 연결은 별도로 확인합니다.
+이 리허설에서는 Network Watcher IP Flow Verify가 effective `AlwaysAllow`와 실제
+HTTP 성공에도 NSG의 `Deny`를 반환했으므로, 단독으로 AVNM 허용 여부의 근거로
+사용하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:admin-flow-check -->
 ```bash
 check_admin_flow() {
-  local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" rg vm result attempt
-  if [[ "$zone" == spokea ]]; then
-    rg="$RG_SPOKEA"
-  elif [[ "$zone" == spokeb ]]; then
-    rg="$RG_SPOKEB"
-  else
-    fail "Only a spoke VM can be the target"; return 1
-  fi
-  vm="vm-lzbegin-$zone-$RUN_ID"
+  local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" attempt
   for attempt in {1..12}; do
-    result=$(az network watcher test-ip-flow -g "$rg" --vm "$vm" --direction Inbound \
-      --protocol TCP --local "$destination:8080" --remote "$source:50000" \
-      -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    if jq -e --arg expected "$expected" --arg rule "$rule" '
-      .access == $expected and (.ruleName | type == "string") and
-      (.ruleName | split("/") | last) == $rule
-    ' <<<"$result" >/dev/null; then
-      printf 'PASS: %s -> %s %s (%s)\n' "$source" "$destination" "$expected" "$rule"
-      return 0
-    fi
+    if admin_proof "$zone" "$destination" "$source" "$expected" "$rule"; then return 0; fi
     if (( attempt < 12 )); then sleep 15; fi
   done
-  fail "Admin rule not effective on $zone: $result"
+  fail "Admin rule not effective on $zone: $rule/$expected"
   return 1
 }
 ```
 
 📋 **확인**
 
-검사 함수만 정의했습니다. 아래 각 블록이 **현재 IP Flow Verify 판정**을 개별 검증합니다.
-조회 오류는 재시도하지 않으며 권한과 Watcher 상태를 점검합니다.
+검사 함수만 정의했습니다. 아래 각 블록이 **현재 effective 규칙**을 개별 검증합니다.
+조회 오류가 계속되면 권한과 AVNM 배포 상태를 점검합니다.
 
 🟢 **실행**
 
@@ -589,7 +576,7 @@ check_admin_flow spokea "$a_ip" "$hub_ip" Allow hub-to-a
 
 📋 **확인**
 
-Hub→A에서 `Allow`와 이번 AVNM 규칙 이름이 함께 나옵니다. NSG의 4000 Deny는 그대로입니다.
+Hub→A의 `AlwaysAllow`와 이번 AVNM 전체 규칙 ID가 일치합니다. NSG의 4000 Deny는 그대로입니다.
 
 🟢 **실행**
 
@@ -600,7 +587,7 @@ check_admin_flow spokeb "$b_ip" "$hub_ip" Allow hub-to-b
 
 📋 **확인**
 
-Hub→B에서도 중앙 규칙의 `Allow` 판정입니다.
+Hub→B에도 중앙 `AlwaysAllow` 규칙이 적용됐습니다.
 
 🟢 **실행**
 
@@ -611,8 +598,8 @@ check_admin_flow spokeb "$b_ip" "$a_ip" Allow a-to-b
 
 📋 **확인**
 
-A→B도 중앙 규칙이 허용합니다. IP Flow Verify는 **보안 규칙 판정**이므로
-이것만으로 왕복 경로나 Firewall 허용을 증명하지는 않습니다.
+A→B도 중앙 규칙이 허용합니다. effective 규칙만으로 실제 왕복 경로나 Firewall
+허용을 증명하지는 않으므로 아래 HTTP 요청도 실행합니다.
 
 🟢 **실행**
 
@@ -652,7 +639,7 @@ az network manager security-admin-config rule-collection rule create -g "$RG_HUB
   --rule-collection-name spokea --rule-name deny-hub-to-a \
   --priority 100 --direction Inbound --access Deny --protocol Tcp \
   --sources address-prefix="$hub_ip/32" address-prefix-type=IPPrefix \
-  --source-port-ranges '*' --destinations address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
+  --source-port-ranges 0-65535 --destinations address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
   --dest-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
@@ -694,7 +681,8 @@ check_admin_flow spokea "$a_ip" "$hub_ip" Deny deny-hub-to-a
 
 📋 **확인**
 
-IP Flow Verify가 `Deny`와 **이번 임시 규칙**을 반환합니다. 우연한 NSG Deny가 아닙니다.
+Spoke A의 effective 규칙에 `Deny`와 **이번 임시 규칙의 전체 ID**가 표시됩니다.
+우연한 NSG Deny가 아님은 다음 HTTP 차단과 구성 상태를 함께 대조합니다.
 
 🟢 **실행**
 
@@ -717,16 +705,42 @@ HTTP 실패 단독으로 보안 규칙의 원인을 판단하지 않습니다.
 
 ⚠️ **주의**
 
-차단 증거 수집이 실패했더라도 **복구를 진행합니다**. 세 AlwaysAllow·NSG·Firewall은 그대로 둡니다.
+차단 증거 수집이 실패했더라도 **복구를 진행합니다**. AVNM은 배포 중인
+Security Admin 구성의 규칙 삭제를 거부하므로 먼저 이 구성만 리전에서 배포 해제하고,
+상태 확인 후 임시 Deny를 삭제·재배포합니다. 해제 중에는 세 `AlwaysAllow`도
+잠시 적용되지 않아 통신이 끊길 수 있습니다. NSG·Firewall 구성은 변경하지 않습니다.
+
+🟢 **실행**
+
+<!-- exec:security-undeploy-for-restore -->
+```bash
+undeploy_security_for_restore() {
+  az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
+    --commit-type SecurityAdmin --configuration-ids '[]' \
+    --target-locations "$LOCATION" -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  assert_security_admin_undeployed
+}
+undeploy_security_for_restore
+```
+
+📋 **확인**
+
+최신 `SecurityAdmin` 배포가 구성 ID 없는 `Deployed` 상태여야 합니다.
+아직 적용 중이라면 잠시 기다렸다가 **아래 삭제 블록은 실행하지 말고**
+배포 상태를 다시 확인하세요.
 
 🟢 **실행**
 
 <!-- exec:restore-hub -->
 ```bash
-az network manager security-admin-config rule-collection rule delete -g "$RG_HUB" \
-  --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
-  --rule-collection-name spokea --rule-name deny-hub-to-a \
-  --yes --subscription "$SUBSCRIPTION_ID"
+restore_hub_admin_rule() {
+  assert_security_admin_undeployed || return 1
+  az network manager security-admin-config rule-collection rule delete -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
+    --rule-collection-name spokea --rule-name deny-hub-to-a \
+    --yes --subscription "$SUBSCRIPTION_ID"
+}
+restore_hub_admin_rule
 ```
 
 📋 **확인**
@@ -814,16 +828,15 @@ VirtualAppliance IP를 확인하세요.
 | 증상 | 먼저 확인할 것 |
 |---|---|
 | VM Run Command 실패 | Spoke NIC의 `/0` → Firewall, Firewall 관리 HTTPS 규칙, VM Agent 상태 |
-| IP Flow Verify 권한/리전 오류 | 공유 Watcher 활성화·구독 진단 권한 |
-| IP Flow Verify가 NSG Deny 반환 | 구성의 리전 배포·전파 대기·Spoke Group과 실제 NIC `/32` |
-| IP Flow Verify는 Allow, HTTP는 실패 | 서비스, 양방향 `/16` 경로, Firewall TCP 8080 정책 |
+| IP Flow Verify가 NSG Deny 반환 | 단독 판정하지 않고 effective Admin 규칙·실제 HTTP를 대조 |
+| effective Admin 규칙은 허용, HTTP는 실패 | 서비스, 양방향 `/16` 경로, Firewall TCP 8080 정책 |
 | 복구 후 Hub→A가 계속 Deny | 임시 규칙 삭제 읽기와 SecurityAdmin **재배포**·전파 확인 |
 
 ## 완료 체크
 
 - VM보다 먼저 Firewall·AVNM 경로를 확인했고 Spoke NAT/Public IP를 만들지 않았습니다.
 - Hub NAT만 연결하고 양쪽 Spoke NIC의 실제 `/16`·`/0` 경로를 확인했습니다.
-- 좁은 세 AlwaysAllow의 IP Flow Verify·HTTP 증거와 한 Deny의 차단·복구 증거를 확인했습니다.
+- 좁은 세 AlwaysAllow의 effective 규칙·HTTP 증거와 한 Deny의 차단·복구 증거를 확인했습니다.
 - 임시 Deny를 제거하고 같은 리전에 복구 구성을 재배포했습니다.
 
 ## 다음 단계

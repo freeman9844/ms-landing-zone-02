@@ -211,15 +211,27 @@ def enforced_connectivity_calls():
              "commitTime": "2026-01-01T00:00:00Z", "deploymentStatus": "Deployed",
              "configurationIds": [connectivity_config_id()]}]),
         group("spokea"),
-        az(["network", "manager", "list-effective-connectivity-config",
-            "--resource-group", rg("spokea"), "--virtual-network-name",
-            vnet("spokea"), "-o", "json"],
-           effective_configuration("spokea", enforcement="Enforced")),
+        az(["rest", "--method", "post", "--url",
+            f"{netid('spokea', 'virtualNetworks', vnet('spokea'))}"
+            "/listNetworkManagerEffectiveConnectivityConfigurations?api-version=2025-05-01",
+            "--body", "{}", "-o", "json"],
+           {"skipToken": "", "value": [{
+               "id": connectivity_config_id(),
+               "properties": {key: value for key, value in
+                              effective_configuration("spokea", enforcement="Enforced")["value"][0].items()
+                              if key != "id"},
+           }]}),
         group("spokeb"),
-        az(["network", "manager", "list-effective-connectivity-config",
-            "--resource-group", rg("spokeb"), "--virtual-network-name",
-            vnet("spokeb"), "-o", "json"],
-           effective_configuration("spokeb", enforcement="Enforced")),
+        az(["rest", "--method", "post", "--url",
+            f"{netid('spokeb', 'virtualNetworks', vnet('spokeb'))}"
+            "/listNetworkManagerEffectiveConnectivityConfigurations?api-version=2025-05-01",
+            "--body", "{}", "-o", "json"],
+           {"skipToken": "", "value": [{
+               "id": connectivity_config_id(),
+               "properties": {key: value for key, value in
+                              effective_configuration("spokeb", enforcement="Enforced")["value"][0].items()
+                              if key != "id"},
+           }]}),
         *(entry for zone in ("hub", "spokea", "spokeb")
           for entry in (group(zone),
                         az(["network", "vnet", "peering", "list", "-g", rg(zone),
@@ -754,6 +766,8 @@ printf 'SHELL_ALIVE\\n'
                             (5, "read-vm-ips"): ["assert_ipv4_in_subnet"] * 3,
                             (5, "inspect-security-rules"): ["assert_admin_rules_ready"],
                             (5, "inspect-admin-deny"): ["assert_admin_rules_ready"],
+                            (5, "security-undeploy-for-restore"): ["assert_security_admin_undeployed"],
+                            (5, "restore-hub"): ["assert_security_admin_undeployed"],
                             (5, "inspect-admin-restored"): ["assert_admin_rules_ready"],
                             (6, "validate-avnm-subnets"): ["assert_avnm_routes_ready", "assert_no_spoke_nat"],
                             (6, "validate-effective-nic-routes"): ["assert_avnm_routes_ready"],

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from harness import ROOT, run, call, account, group, STATE
+from harness import ROOT, run, call, account, group
 from test_network_docs import (
     az,
     avnm_peerings,
@@ -17,7 +17,7 @@ from test_network_docs import (
     vnet,
 )
 import test_avnm_redesign as redesign
-from test_workshop_safety import ready_calls, admin_calls, CONFIG
+from test_workshop_safety import ready_calls, admin_calls, effective_admin_call, CONFIG
 from tests.test_run_vm import invoke
 
 
@@ -203,11 +203,8 @@ class CoreGateTests(unittest.TestCase):
                                     "nextHopType": hop, "nextHopIpAddress": [next_ip] if next_ip else []}]})
 
         def flow(zone, local, remote, access, rule):
-            return call(["network", "watcher", "test-ip-flow", "-g", rg(zone),
-                         "--vm", f"vm-lzbegin-{zone}-demo123", "--direction", "Inbound",
-                         "--protocol", "TCP", "--local", f"{local}:8080",
-                         "--remote", f"{remote}:50000", "-o", "json"],
-                        {"access": access, "ruleName": admin_rule_id(zone, rule)})
+            return effective_admin_call(zone, rule, remote, local,
+                                        "AlwaysAllow" if access == "Allow" else "Deny")
 
         def guest(zone):
             response = call(["vm", "run-command", "invoke", "--resource-group", rg(zone),
@@ -246,46 +243,68 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS: core admin-denied evidence complete", result.stdout)
 
-    def test_unrelated_nsg_deny_is_not_the_admin_rule(self):
+    def test_effective_admin_rule_succeeds_without_consulting_network_watcher(self):
         result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
                      'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a', [
-            call(["network", "watcher", "test-ip-flow", "-g", STATE["resourceGroups"]["spokea"],
-                  "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound", "--protocol", "TCP",
-                  "--local", "10.10.1.4:8080", "--remote", "10.0.1.4:50000", "-o", "json"],
-                 {"access": "Deny", "ruleName": "defaultSecurityRules/DenyAllInBound"}),
+            effective_admin_call("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny"),
         ])
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_matching_nsg_rule_name_is_not_avnm_admin_evidence(self):
-        args = ["network", "watcher", "test-ip-flow", "-g", rg("spokea"),
-                "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound",
-                "--protocol", "TCP", "--local", "10.10.1.4:8080",
-                "--remote", "10.0.1.4:50000", "-o", "json"]
-        result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
-                     'admin_proof spokea 10.10.1.4 10.0.1.4 Allow hub-to-a',
-                     [call(args, {"access": "Allow", "ruleName": "defaultSecurityRules/hub-to-a"})])
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Admin rule evidence", result.stderr)
+        from test_workshop_safety import effective_admin_rule
 
-    def test_admin_proof_requires_matching_action_and_rule(self):
-        args = ["network", "watcher", "test-ip-flow", "-g", rg("spokea"),
-                "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound",
-                "--protocol", "TCP", "--local", "10.10.1.4:8080",
-                "--remote", "10.0.1.4:50000", "-o", "json"]
-        for access, rule, valid in (
-            ("Deny", "deny-hub-to-a", True),
-            ("Deny", f"{admin_rule_id('spokea', 'deny-hub-to-a')}", True),
-            ("Allow", "deny-hub-to-a", False),
-            ("Deny", "hub-to-b", False),
-            ("Deny", "defaultSecurityRules/deny-hub-to-a", False),
-            ("Deny", "securityAdminRules/deny-hub-to-a", False),
-            ("Deny", admin_rule_id("spokeb", "deny-hub-to-a"), False),
-        ):
-            with self.subTest(access=access, rule=rule):
+        for name, access, expected in (("hub-to-a", "AlwaysAllow", "Allow"),
+                                       ("deny-hub-to-a", "Deny", "Deny")):
+            with self.subTest(access=access):
+                rule = effective_admin_rule("spokea", name, "10.0.1.4", "10.10.1.4", access)
+                rule["id"] = "defaultSecurityRules/" + name
                 result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
-                             'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a',
-                             [call(args, {"access": access, "ruleName": rule})])
-                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                             f'admin_proof spokea 10.10.1.4 10.0.1.4 {expected} {name}',
+                             [effective_admin_call("spokea", name, "10.0.1.4",
+                                                   "10.10.1.4", access,
+                                                   {"skipToken": "", "value": [rule]})])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Effective AVNM rule", result.stderr)
+
+    def test_admin_proof_requires_unique_exact_effective_rule_and_terminal_page(self):
+        from test_workshop_safety import effective_admin_rule
+
+        rule = effective_admin_rule("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny")
+        command = ('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                   'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a')
+        for label, change in (
+            ("correct", {}),
+            ("case-only-id", {"id": rule["id"].swapcase()}),
+            ("nsg-id", {"id": "defaultSecurityRules/deny-hub-to-a"}),
+            ("wrong-zone", {"id": admin_rule_id("spokeb", "deny-hub-to-a")}),
+            ("child-id", {"id": rule["id"] + "/child"}),
+            ("wrong-access", {"access": "AlwaysAllow"}),
+            ("wrong-direction", {"direction": "Outbound"}),
+            ("wrong-protocol", {"protocol": "Udp"}),
+            ("wrong-source-ports", {"sourcePortRanges": ["50000"]}),
+            ("wrong-destination-ports", {"destinationPortRanges": ["80"]}),
+            ("wrong-source", {"sources": [{"addressPrefixType": "IPPrefix",
+                                            "addressPrefix": "10.0.1.5/32"}]}),
+            ("wrong-destination", {"destinations": [{"addressPrefixType": "IPPrefix",
+                                                      "addressPrefix": "10.20.1.4/32"}]}),
+        ):
+            with self.subTest(label=label):
+                payload = {"value": [dict(rule, **change)], "skipToken": ""}
+                result = run(command, [effective_admin_call(
+                    "spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", payload)])
+                self.assertEqual(result.returncode == 0, label in ("correct", "case-only-id"), result.stderr)
+
+        for label, payload in (
+            ("absent", {"value": [], "skipToken": ""}),
+            ("duplicate", {"value": [rule, rule], "skipToken": ""}),
+            ("another-page", {"value": [rule], "skipToken": "next"}),
+            ("wrong-shape", [rule]),
+            ("null-token", {"value": [rule], "skipToken": None}),
+        ):
+            with self.subTest(label=label):
+                result = run(command, [effective_admin_call(
+                    "spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", payload)])
+                self.assertEqual(result.returncode == 0, label == "null-token", result.stderr)
 
     def test_missing_effective_configuration_stops_before_http(self):
         result = self.run_core('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline', [

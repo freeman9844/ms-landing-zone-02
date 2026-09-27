@@ -1039,7 +1039,7 @@ Routing commit 요청이 성공해야 합니다. timeout/오류는 배포 취소
 
 👁️ **설명**
 
-`list-deploy-status`의 **이번 구성 ID·Routing·koreacentral**의 가장 최근
+Routing을 지원하는 REST `listDeploymentStatus`의 **이번 구성 ID·Routing·koreacentral**의 가장 최근
 commit이 `Deployed`여야 합니다. 전체 배포 성공은 개별 Subnet의 경로가
 준비됐다는 뜻이 아니므로 5절을 이어서 검사합니다.
 
@@ -1049,13 +1049,14 @@ commit이 `Deployed`여야 합니다. 전체 배포 성공은 개별 Subnet의 �
 ```bash
 inspect_routing_deployment() {
   local result
-  result=$(az network manager list-deploy-status --network-manager-name "$AVNM" \
-    --resource-group "$RG_HUB" --deployment-types Routing --regions "$LOCATION" \
+  result=$(az rest --method post \
+    --url "$AVNM_ID/listDeploymentStatus?api-version=2025-05-01" \
+    --body "$(jq -cn --arg loc "$LOCATION" '{deploymentTypes:["Routing"],regions:[$loc]}')" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg id "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" \
     --arg region "$LOCATION" '
     if type == "array" then .
-    elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+    elif type == "object" and (.skipToken == null or .skipToken == "") and (.value | type == "array") then .value
     else error("Invalid or incomplete deployment status page") end
     | [.[] | select(.deploymentType == "Routing" and .region == $region)] |
       if length == 0 then error("No Routing deployment in the target region")

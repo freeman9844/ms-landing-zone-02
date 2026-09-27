@@ -4,7 +4,7 @@ import unittest
 from harness import run, call, account, group, SUB
 import test_avnm_redesign as redesign
 from test_network_docs import enforced_connectivity_calls, netid, rid, rg
-from test_workshop_safety import admin_calls
+from test_workshop_safety import admin_calls, effective_admin_call
 
 FW = f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-hub-demo123/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-demo123"
 LAW = rid("hub", "Microsoft.OperationalInsights/workspaces", "log-lzbegin-demo123")
@@ -123,23 +123,18 @@ class ExtensionGateTests(unittest.TestCase):
         self.assertIn("Unexpected effective next hop", result.stderr)
 
     def test_hub_to_a_requires_its_admin_rule_not_a_spoke_or_nsg_rule(self):
-        flow = call(["network", "watcher", "test-ip-flow", "-g", rg("spokea"),
-                     "--vm", "vm-lzbegin-spokea-demo123", "--direction", "Inbound",
-                     "--protocol", "TCP", "--local", "10.10.1.4:8080",
-                     "--remote", "10.0.1.4:50000", "-o", "json"],
-                    {"access": "Allow", "ruleName": "defaultSecurityRules/AllowVnetInBound"})
+        flow = effective_admin_call("spokea", "hub-to-a", "10.0.1.4", "10.10.1.4",
+                                    "AlwaysAllow", {"value": [{
+                                        "id": "defaultSecurityRules/AllowVnetInBound",
+                                        "access": "AlwaysAllow"}], "skipToken": ""})
         result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json allowed',
                      self.proof_prefix() + self.route_calls() + [flow])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Admin rule evidence does not show hub-to-a/Allow", result.stderr)
+        self.assertIn("Effective AVNM rule does not show hub-to-a/AlwaysAllow", result.stderr)
 
     def test_hub_to_a_http_probe_rejects_wrong_guest_response(self):
         flows = [
-            call(["network", "watcher", "test-ip-flow", "-g", rg(zone),
-                  "--vm", f"vm-lzbegin-{zone}-demo123", "--direction", "Inbound",
-                  "--protocol", "TCP", "--local", local + ":8080",
-                  "--remote", remote + ":50000", "-o", "json"],
-                 {"access": "Allow", "ruleName": rule})
+            effective_admin_call(zone, rule, remote, local, "AlwaysAllow")
             for zone, local, remote, rule in (
                 ("spokea", "10.10.1.4", "10.0.1.4", "hub-to-a"),
                 ("spokeb", "10.20.1.4", "10.10.1.4", "a-to-b"))

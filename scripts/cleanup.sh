@@ -74,8 +74,10 @@ if [[ " ${present[*]} " == *" $RG_HUB "* ]]; then
         SecurityAdmin) resource=securityAdminConfigurations/sc-lzbegin-http-"$RUN_ID"; command=security-admin-config ;;
         Connectivity) resource=connectivityConfigurations/cc-lzbegin-hub-spoke-"$RUN_ID"; command=connect-config ;;
       esac
+      manager_arg=--manager-name
+      [[ "$kind" == Connectivity ]] && manager_arg=--network-manager-name
       configurations=$(az network manager "$command" list -g "$RG_HUB" \
-        --manager-name "$AVNM" -o json --subscription "$SUBSCRIPTION_ID")
+        "$manager_arg" "$AVNM" -o json --subscription "$SUBSCRIPTION_ID")
       jq -e --arg id "$AVNM_ID/$resource" '
         type == "array" and length <= 1 and
         all(.[]; (.id | ascii_downcase) == ($id | ascii_downcase))
@@ -88,12 +90,19 @@ if [[ " ${present[*]} " == *" $RG_HUB "* ]]; then
         -o none --subscription "$SUBSCRIPTION_ID"
       deployed=false
       for ((attempt=0; attempt<40; attempt++)); do
-        status=$(az network manager list-deploy-status -g "$RG_HUB" -n "$AVNM" \
-          --deployment-types "$kind" --regions "$LOCATION" -o json \
-          --subscription "$SUBSCRIPTION_ID")
+        if [[ "$kind" == Routing ]]; then
+          status=$(az rest --method post \
+            --url "$AVNM_ID/listDeploymentStatus?api-version=2025-05-01" \
+            --body "$(jq -cn --arg loc "$LOCATION" '{deploymentTypes:["Routing"],regions:[$loc]}')" \
+            -o json --subscription "$SUBSCRIPTION_ID")
+        else
+          status=$(az network manager list-deploy-status -g "$RG_HUB" -n "$AVNM" \
+            --deployment-types "$kind" --regions "$LOCATION" -o json \
+            --subscription "$SUBSCRIPTION_ID")
+        fi
         result=$(jq -cer --arg kind "$kind" --arg region "$LOCATION" '
           if type == "array" then .
-          elif type == "object" and (.skipToken == null) and (.value | type == "array") then .value
+          elif type == "object" and (.skipToken == null or .skipToken == "") and (.value | type == "array") then .value
           else error("Invalid deployment status response") end
           | [.[] | select(.deploymentType == $kind and .region == $region)] |
             if length == 0 then "Pending"

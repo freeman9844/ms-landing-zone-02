@@ -4,7 +4,7 @@ import unittest
 import test_network_docs
 from harness import run, account, group, call, ROOT, SUB
 from test_network_docs import blocks, DOCS, az, rg, netid, vnet, subnet_args, nic, TAGS, recase_ids, foreign_ids, preparation_calls, avnm_id, routing_group_id, avnm_peerings, connectivity_config, connectivity_config_id, enforced_connectivity_calls
-from test_workshop_safety import FW, LAW, FW_IP, ready_calls
+from test_workshop_safety import FW, LAW, FW_IP, ready_calls, effective_admin_call, effective_admin_rule
 
 
 def support_args(verb):
@@ -121,8 +121,9 @@ def routing_cases():
                                "networkManagerScopeAccesses": ["Connectivity", "SecurityAdmin", "Routing"]}),
         ],
         "routing-deploy-status": [az([
-            "network", "manager", "list-deploy-status", "--network-manager-name", "avnm-lzbegin-demo123",
-            "--resource-group", rg("hub"), "--deployment-types", "Routing", "--regions", "koreacentral",
+            "rest", "--method", "post", "--url", avnm_id() +
+            "/listDeploymentStatus?api-version=2025-05-01",
+            "--body", '{"deploymentTypes":["Routing"],"regions":["koreacentral"]}',
             "-o", "json"], [{"deploymentType": "Routing", "region": "koreacentral",
                            "commitTime": "2026-01-01T00:00:00Z", "deploymentStatus": "Deployed",
                            "configurationIds": [config]}])],
@@ -302,7 +303,7 @@ def security_rule(zone, name, source, destination, access, priority):
     return {
         "id": avnm_id() + f"/securityAdminConfigurations/sc-lzbegin-http-demo123/ruleCollections/{zone}/rules/{name}",
         "provisioningState": "Succeeded", "kind": "Custom", "access": access, "priority": priority,
-        "direction": "Inbound", "protocol": "Tcp", "sourcePortRanges": ["*"],
+        "direction": "Inbound", "protocol": "Tcp", "sourcePortRanges": ["0-65535"],
         "destinationPortRanges": ["8080"],
         "sources": [{"addressPrefixType": "IPPrefix", "addressPrefix": source + "/32"}],
         "destinations": [{"addressPrefixType": "IPPrefix", "addressPrefix": destination + "/32"}],
@@ -336,6 +337,23 @@ def admin_rule_checks(stage="baseline"):
     return calls
 
 
+def undeployed_security_status(deployments=None):
+    if deployments is None:
+        deployments = [{
+            "deploymentType": "SecurityAdmin",
+            "region": "koreacentral",
+            "commitTime": "2026-09-27T04:00:00Z",
+            "deploymentStatus": "Deployed",
+            "configurationIds": [],
+        }]
+    return az([
+        "rest", "--method", "post",
+        "--url", avnm_id() + "/listDeploymentStatus?api-version=2025-05-01",
+        "--body", '{"deploymentTypes":["SecurityAdmin"],"regions":["koreacentral"]}',
+        "-o", "json",
+    ], deployments)
+
+
 def security_cases():
     base = ["network", "manager", "security-admin-config"]
     options = ["-g", rg("hub"), "--network-manager-name", "avnm-lzbegin-demo123",
@@ -361,7 +379,7 @@ def security_cases():
                            "--priority", str(priority), "--direction", "Inbound",
                            "--access", access, "--protocol", "Tcp",
                            "--sources", f"address-prefix={source}/32", "address-prefix-type=IPPrefix",
-                           "--source-port-ranges", "*", "--destinations",
+                           "--source-port-ranges", "0-65535", "--destinations",
                            f"address-prefix={dest}/32", "address-prefix-type=IPPrefix",
                            "--dest-port-ranges", "8080", "-o", "json"])]
     for step in ("security-deploy", "security-deploy-deny", "security-deploy-restore"):
@@ -369,7 +387,15 @@ def security_cases():
                            "--network-manager-name", "avnm-lzbegin-demo123", "--commit-type",
                            "SecurityAdmin", "--configuration-ids", config,
                            "--target-locations", "koreacentral", "-o", "json"])]
-    cases["restore-hub"] = [az([*base, "rule-collection", "rule", "delete", *options,
+    cases["security-undeploy-for-restore"] = [
+        az(["network", "manager", "post-commit", "-g", rg("hub"),
+            "--network-manager-name", "avnm-lzbegin-demo123", "--commit-type",
+            "SecurityAdmin", "--configuration-ids", "[]",
+            "--target-locations", "koreacentral", "-o", "json"]),
+        undeployed_security_status(),
+    ]
+    cases["restore-hub"] = [undeployed_security_status(),
+                            az([*base, "rule-collection", "rule", "delete", *options,
                                 "--rule-collection-name", "spokea", "--rule-name",
                                 "deny-hub-to-a", "--yes"])]
     for step, stage in (("inspect-security-rules", "baseline"),
@@ -418,6 +444,51 @@ class StepwiseDocsTests(unittest.TestCase):
         for name, script in blocks(DOCS[5]).items():
             with self.subTest(step=name):
                 self.assertNotIn("&&", script)
+
+    def test_security_undeploy_is_confirmed_before_deleting_deployed_deny_rule(self):
+        steps = blocks(DOCS[5])
+        names = ("security-undeploy-for-restore", "restore-hub", "security-deploy-restore")
+        self.assertTrue(names[0] in steps,
+                        "A deployed Security Admin configuration must be undeployed before rule deletion")
+        self.assertLess(list(steps).index(names[0]), list(steps).index(names[1]))
+        script = 'export STATE_FILE=state.json\n' + steps["prepare-05"] + "\n"
+        script += "\n".join(f'{steps[name]}\n[[ $? == 0 ]] || exit 1' for name in names)
+        calls = [*preparation_calls(5)]
+        for name in names:
+            calls.extend(security_cases()[name])
+        result = run(script, calls)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        latest_deployed = {"deploymentType": "SecurityAdmin", "region": "koreacentral",
+                           "commitTime": "2026-09-27T04:00:00Z", "deploymentStatus": "Deployed",
+                           "configurationIds": []}
+        previous_deployed = dict(latest_deployed, commitTime="2026-09-27T03:00:00Z",
+                                 configurationIds=[avnm_id() +
+                                                   "/securityAdminConfigurations/sc-lzbegin-http-demo123"])
+        for label, deployments in (
+            ("still-deployed", [previous_deployed]),
+            ("latest-failed", [previous_deployed, dict(latest_deployed, deploymentStatus="Failed")]),
+            ("latest-pending", [previous_deployed, dict(latest_deployed, deploymentStatus="Deploying")]),
+            ("stale-empty", [dict(latest_deployed, commitTime="2026-09-27T02:00:00Z"),
+                             previous_deployed]),
+            ("wrong-region", [dict(latest_deployed, region="eastus")]),
+            ("missing", []),
+        ):
+            with self.subTest(label=label):
+                invalid = security_cases()["security-undeploy-for-restore"][:1]
+                invalid.append(undeployed_security_status(deployments))
+                self.assertNotEqual(self.execute(5, "security-undeploy-for-restore", invalid).returncode, 0)
+                self.assertNotEqual(self.execute(5, "restore-hub",
+                                                [undeployed_security_status(deployments)]).returncode, 0)
+
+        newest = [latest_deployed, previous_deployed]
+        self.assertEqual(self.execute(5, "security-undeploy-for-restore", [
+            security_cases()["security-undeploy-for-restore"][0],
+            undeployed_security_status(newest),
+        ]).returncode, 0)
+        self.assertEqual(self.execute(5, "restore-hub", [
+            undeployed_security_status(newest), security_cases()["restore-hub"][-1],
+        ]).returncode, 0)
 
     def test_ordinary_actions_check_ownership_once_for_a_prepared_session(self):
         cases = dict(self.cases())
@@ -594,6 +665,12 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_routing_deployment_requires_latest_successful_exact_configuration(self):
         valid = routing_cases()["routing-deploy-status"]
         self.assertEqual(self.execute(4, "routing-deploy-status", valid).returncode, 0)
+        terminal_page = copy.deepcopy(valid)
+        terminal_page[-1]["stdout"] = json.dumps({
+            "skipToken": "",
+            "value": json.loads(valid[-1]["stdout"]),
+        })
+        self.assertEqual(self.execute(4, "routing-deploy-status", terminal_page).returncode, 0)
         for status in (
             {"deploymentType": "Routing", "region": "koreacentral",
              "commitTime": "2026-01-02T00:00:00Z", "deploymentStatus": "Failed",
@@ -616,7 +693,7 @@ class StepwiseDocsTests(unittest.TestCase):
             result = run(script, preparation_calls(5), files=self.keyfile, input_text="CREATE\n")
             self.assertNotEqual(result.returncode, 0, result.stderr)
 
-    def test_ip_flow_verify_requires_admin_decision_and_expected_rule(self):
+    def test_effective_admin_checks_require_exact_avnm_rule_and_action(self):
         for step, zone, local, remote, action, rule in (
             ("verify-admin-allow-a", "spokea", "10.10.1.4", "10.0.1.4", "Allow", "hub-to-a"),
             ("verify-admin-allow-b", "spokeb", "10.20.1.4", "10.0.1.4", "Allow", "hub-to-b"),
@@ -624,17 +701,20 @@ class StepwiseDocsTests(unittest.TestCase):
             ("verify-admin-deny", "spokea", "10.10.1.4", "10.0.1.4", "Deny", "deny-hub-to-a"),
             ("verify-admin-restored", "spokea", "10.10.1.4", "10.0.1.4", "Allow", "hub-to-a"),
         ):
-            request = ["network", "watcher", "test-ip-flow", "-g", rg(zone),
-                       "--vm", "vm-lzbegin-" + zone + "-demo123", "--direction", "Inbound",
-                       "--protocol", "TCP", "--local", local + ":8080",
-                       "--remote", remote + ":50000", "-o", "json"]
+            access = "AlwaysAllow" if action == "Allow" else "Deny"
             with self.subTest(step=step):
-                self.assertEqual(self.execute(5, step, [az(request, {
-                    "access": action, "ruleName": "securityAdmin/" + rule})]).returncode, 0)
-                for wrong in ({"access": "Deny" if action == "Allow" else "Allow",
-                               "ruleName": "securityAdmin/" + rule},
-                              {"access": action, "ruleName": "securityAdmin/unrelated"}):
-                    attempts = [az(request, wrong) for _ in range(12)]
+                self.assertEqual(self.execute(5, step, [
+                    effective_admin_call(zone, rule, remote, local, access)
+                ]).returncode, 0)
+                for change in ({"access": "Deny" if action == "Allow" else "AlwaysAllow"},
+                               {"id": "defaultSecurityRules/" + rule},
+                               {"id": effective_admin_rule(zone, rule, remote, local, access)["id"] + "/child"},
+                               {"sources": [{"addressPrefixType": "IPPrefix",
+                                             "addressPrefix": "10.0.1.5/32"}]},
+                               {"destinationPortRanges": ["80"]}):
+                    malformed = dict(effective_admin_rule(zone, rule, remote, local, access), **change)
+                    attempts = [effective_admin_call(zone, rule, remote, local, access,
+                                {"value": [malformed], "skipToken": ""}) for _ in range(12)]
                     self.assertNotEqual(self.execute(5, step, attempts).returncode, 0)
 
     def test_security_admin_rules_reject_wrong_action_priority_ip_target_and_full_ids(self):

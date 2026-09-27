@@ -149,7 +149,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | `preflight.sh` | 모듈 04 `--firewall`의 Provider·CLI 점검과 모듈 05 옵션 없는 VM SKU/quota 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
-| `verify-common.sh`, `assert-route.py` | IP·Security Admin IP Flow Verify·HTTP 증거와 최장 접두사 NIC 유효 경로 판정 |
+| `verify-common.sh`, `assert-route.py` | IP·effective Security Admin 규칙·HTTP 증거와 최장 접두사 NIC 유효 경로 판정 |
 | `verify-core.sh`, `verify-extension.sh` | 모듈 05 Admin baseline/admin-denied/restored와 모듈 06 Firewall allowed/denied/restored의 독립 증거 |
 | `firewall-logs.sh` | 이번 흐름의 로그 필터, 수집 지연 대기와 조회 오류 구분 |
 | `cleanup.sh` | 정확한 삭제 범위, 사용자 확인, 삭제 요청 후 실제 부재 확인 |

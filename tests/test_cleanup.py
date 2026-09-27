@@ -23,19 +23,27 @@ def avnm_cleanup(manager=False):
     if manager:
         for command in ("routing-config", "security-admin-config", "connect-config"):
             calls.append(call(["network", "manager", command, "list", "-g", STATE["resourceGroups"]["hub"],
-                               "--manager-name", "avnm-lzbegin-demo123", "-o", "json",
+                               "--network-manager-name" if command == "connect-config" else "--manager-name",
+                               "avnm-lzbegin-demo123", "-o", "json",
                                "--subscription", SUB], []))
         for kind in ("Routing", "SecurityAdmin", "Connectivity"):
             calls.append(call(["network", "manager", "post-commit", "-g", STATE["resourceGroups"]["hub"],
                                "-n", "avnm-lzbegin-demo123", "--commit-type", kind,
                                "--configuration-ids", "[]", "--target-locations", "koreacentral",
                                "-o", "none", "--subscription", SUB]))
-            calls.append(call(["network", "manager", "list-deploy-status", "-g", STATE["resourceGroups"]["hub"],
-                               "-n", "avnm-lzbegin-demo123", "--deployment-types", kind,
-                               "--regions", "koreacentral", "-o", "json", "--subscription", SUB],
-                              [{"deploymentType": kind, "region": "koreacentral",
-                                "commitTime": "2026-09-26T10:00:00Z",
-                                "deploymentStatus": "Deployed", "configurationIds": []}]))
+            status_args = (["rest", "--method", "post", "--url",
+                            f"/subscriptions/{SUB}/resourceGroups/{STATE['resourceGroups']['hub']}"
+                            "/providers/Microsoft.Network/networkManagers/avnm-lzbegin-demo123"
+                            "/listDeploymentStatus?api-version=2025-05-01",
+                            "--body", '{"deploymentTypes":["Routing"],"regions":["koreacentral"]}',
+                            "-o", "json", "--subscription", SUB]
+                           if kind == "Routing" else
+                           ["network", "manager", "list-deploy-status", "-g", STATE["resourceGroups"]["hub"],
+                            "-n", "avnm-lzbegin-demo123", "--deployment-types", kind,
+                            "--regions", "koreacentral", "-o", "json", "--subscription", SUB])
+            calls.append(call(status_args, [{"deploymentType": kind, "region": "koreacentral",
+                                             "commitTime": "2026-09-26T10:00:00Z",
+                                             "deploymentStatus": "Deployed", "configurationIds": []}]))
     for zone in ("spokea", "spokeb"):
         calls.append(call(["network", "vnet", "list", "-g", STATE["resourceGroups"][zone],
                            "-o", "json", "--subscription", SUB], []))
@@ -62,6 +70,9 @@ class CleanupTests(unittest.TestCase):
     def test_valid_confirmation_checks_actual_deletion(self):
         calls = inventory() + [account()] + [group(zone) for zone in STATE["resourceGroups"]]
         calls += avnm_cleanup(manager=True)
+        for item in calls:
+            if item["argv"][:3] == ["network", "manager", "list-deploy-status"]:
+                item["stdout"] = json.dumps({"skipToken": "", "value": json.loads(item["stdout"])})
         for name in STATE["resourceGroups"].values():
             calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
         for name in STATE["resourceGroups"].values():
@@ -110,7 +121,7 @@ class CleanupTests(unittest.TestCase):
         calls = inventory() + [account()] + [group(zone) for zone in STATE["resourceGroups"]]
         calls += avnm_cleanup(manager=True)
         index = next(i for i, item in enumerate(calls)
-                     if item["argv"][:3] == ["network", "manager", "list-deploy-status"])
+                     if item["argv"][:3] == ["rest", "--method", "post"])
         pending = dict(calls[index])
         pending["stdout"] = json.dumps([{
             "deploymentType": "Routing", "region": "koreacentral",

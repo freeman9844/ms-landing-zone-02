@@ -24,27 +24,32 @@ print(address)
 PY
 }
 
-# Network Watcher의 IP flow 판정은 Admin Rule 증거입니다. 실제 HTTP 연결 성공이나 경로 존재를 보장하지 않습니다.
-# local은 대상 VM의 8080, remote는 출발지 IP와 판정용 클라이언트 포트입니다.
-# 50000은 NSG 판정용 예시 출발지 포트입니다. 실제 curl이 그 포트를 사용했다는 뜻은 아닙니다.
+# 배포된 AVNM 규칙은 대상 Spoke의 effective 상태로 확인합니다. 실제 HTTP 연결은 별도로 검증합니다.
 admin_proof() {
-  local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" result
+  local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" result access id
   zone_context "$zone" || return 1
-  result=$(az network watcher test-ip-flow -g "$RG" --vm "$VM" --direction Inbound \
-    --protocol TCP --local "$destination:8080" --remote "$source:50000" -o json) || return 1
-  jq -e --arg expected "$expected" --arg rule "$rule" '
-    .access == $expected and
-    (.ruleName | type == "string") and
-    (.ruleName == $rule or
-      ((.ruleName | ascii_downcase) ==
-        ("/subscriptions/" + ($sub | ascii_downcase) + "/resourcegroups/" + ($rg | ascii_downcase) +
-         "/providers/microsoft.network/networkmanagers/" + ($manager | ascii_downcase) +
-         "/securityadminconfigurations/" + ($config | ascii_downcase) +
-         "/rulecollections/" + ($zone | ascii_downcase) + "/rules/" + ($rule | ascii_downcase))))
-  ' --arg sub "$SUBSCRIPTION_ID" --arg rg "$RG_HUB" --arg manager "$AVNM" \
-    --arg config "sc-lzbegin-http-$RUN_ID" --arg zone "$zone" \
-    <<< "$result" >/dev/null || { fail "Admin rule evidence does not show $rule/$expected: $result"; return 1; }
-  printf 'Admin rule: %s\n' "$result"
+  case "$expected" in
+    Allow) access=AlwaysAllow ;;
+    Deny) access=Deny ;;
+    *) fail "Invalid admin access: $expected"; return 1 ;;
+  esac
+  id="$AVNM_ID/securityAdminConfigurations/sc-lzbegin-http-$RUN_ID/ruleCollections/$zone/rules/$rule"
+  result=$(az network manager list-effective-security-admin-rule -g "$RG" \
+    --virtual-network-name "$VNET" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$id" --arg access "$access" --arg source "$source/32" \
+    --arg destination "$destination/32" '
+    (.skipToken == null or .skipToken == "") and (.value | type == "array") and
+    ([.value[] | select((.id | type == "string") and
+      ((.id | ascii_downcase) == ($id | ascii_downcase)))] |
+      length == 1 and .[0].access == $access and
+      .[0].direction == "Inbound" and .[0].protocol == "Tcp" and
+      .[0].sourcePortRanges == ["0-65535"] and
+      .[0].destinationPortRanges == ["8080"] and
+      .[0].sources == [{addressPrefixType:"IPPrefix",addressPrefix:$source}] and
+      .[0].destinations == [{addressPrefixType:"IPPrefix",addressPrefix:$destination}])
+  ' <<< "$result" >/dev/null ||
+    { fail "Effective AVNM rule does not show $rule/$access on $zone."; return 1; }
+  printf 'PASS: effective AVNM rule %s/%s (%s)\n' "$zone" "$rule" "$access"
 }
 
 # 설정한 route table이 아니라 NIC의 유효 경로를 검사합니다. Firewall 경유 시 사설 next-hop IP도 비교합니다.
