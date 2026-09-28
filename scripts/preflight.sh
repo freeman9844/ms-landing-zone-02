@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Cloud Shell/로컬 CLI의 읽기 전용 사전 점검입니다. Provider 등록이나 자원 배포를 대신하지 않습니다.
-# STATE_FILE [--firewall]: Firewall 단계에서는 Provider만, VM 단계에서는 용량을 확인합니다.
+# Cloud Shell/로컬 CLI의 VM 용량 사전 점검입니다. Provider 등록이나 자원 배포를 대신하지 않습니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/workshop-common.sh"
-[[ $# -ge 1 && $# -le 2 ]] || { fail "Usage: preflight.sh STATE_FILE [--firewall]"; exit 1; }
-[[ $# == 1 || "$2" == --firewall ]] || { fail "Unknown option: $2"; exit 1; }
+[[ $# == 1 ]] || { fail "Usage: preflight.sh STATE_FILE"; exit 1; }
 # 저장된 리전·구독과 현재 로그인 대상을 먼저 대조해 잘못된 환경의 quota를 검사하지 않습니다.
 load_run "$1"
 assert_subscription
@@ -15,18 +13,11 @@ avnm_extension=$(az extension show --name virtual-network-manager --query versio
   { fail "virtual-network-manager Azure CLI extension is not installed."; exit 1; }
 [[ -n "$avnm_extension" ]] ||
   { fail "virtual-network-manager Azure CLI extension version is empty."; exit 1; }
-# Firewall 단계에서는 VM을 아직 만들지 않으며 로그 저장소용 Provider도 필요합니다.
-providers=(Microsoft.Network Microsoft.Compute)
-[[ "${2:-}" != --firewall ]] || providers+=(Microsoft.OperationalInsights)
-for provider in "${providers[@]}"; do
+for provider in Microsoft.Network Microsoft.Compute; do
   status=$(az provider show --namespace "$provider" --query registrationState -o tsv)
   [[ "$status" == Registered ]] ||
     { fail "$provider is $status. Register it explicitly, wait, then repeat preflight."; exit 1; }
 done
-if [[ "${2:-}" == --firewall ]]; then
-  printf 'PASS: Firewall provider preflight. VM capacity is checked before module 05.\n'
-  exit 0
-fi
 # 이미 실행 중인 실습 VM의 용량은 다시 요구하지 않습니다. 없는 VM 한 대당 2 vCPU만 합산합니다.
 needed_vcpus=0
 # 이 내부 반복은 세 VM의 상태를 빠짐없이 검사하기 위한 것입니다. 참가자 대신 자원을 생성하지 않습니다.

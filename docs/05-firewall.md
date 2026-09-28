@@ -59,8 +59,8 @@ bash scripts/preflight.sh "$STATE_FILE"
 
 📋 **확인**
 
-`PASS: read-only preflight`. 이미 배포한 Firewall 단계와 달리 여기서는 `--extension`이나
-`--firewall`을 사용하지 않습니다. 새 VM 3대의 `Standard_B2als_v2` 계열 및 지역 전체
+`PASS: read-only preflight`. 옵션 없이 실행해 새 VM 3대의
+`Standard_B2als_v2` 계열 및 지역 전체
 vCPU 여유(총 6개)를 확인합니다. 기존 VM이 있으면 실행 상태와 크기를 확인합니다.
 
 ### 1-2. 현재 Firewall·AVNM 경로 재검사

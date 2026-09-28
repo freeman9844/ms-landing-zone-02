@@ -48,7 +48,7 @@ prepare_routing_session
 오류 없이 종료됩니다. `ROUTE_GROUP_A_ID`/`ROUTE_GROUP_B_ID`는 상태에서 파생한
 **서로 다른 전체 Group ID**입니다. 이후 블록은 같은 셸에서 실행합니다.
 
-## 1. CLI와 배포 전 점검
+## 1. CLI 기능 준비
 
 👁️ **설명**
 
@@ -68,7 +68,7 @@ az provider register --namespace Microsoft.OperationalInsights --wait --subscrip
 
 📋 **확인**
 
-등록에 실패하면 1-5의 사전 점검을 통과할 수 없습니다.
+등록에 실패하면 workspace를 생성하지 말고 원인을 해결하세요.
 
 ### 1-2. Firewall CLI 확장
 
@@ -114,33 +114,7 @@ az extension add --name virtual-network-manager --version 3.0.2 --upgrade --yes
 
 📋 **확인**
 
-확장 설치에 실패하면 Routing 명령을 시도하지 마세요. 다음 사전 점검에서
-설치된 버전을 다시 확인합니다.
-
-### 1-5. VM 없이 Firewall 사전 점검
-
-👁️ **설명**
-
-`--firewall`은 VM 존재·VM 용량을 요구하지 않고 리전·Provider를 확인합니다.
-다음 모듈에서 VM 용량을 별도로 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:firewall-preflight -->
-```bash
-check_firewall_preflight() {
-  [[ "$LOCATION" == koreacentral ]] || { fail "This workshop deploys to koreacentral only."; return 1; }
-  [[ "$(az extension show --name virtual-network-manager --query version -o tsv)" == 3.0.2 ]] ||
-    { fail "Install the virtual-network-manager CLI extension 3.0.2 before routing."; return 1; }
-  bash scripts/preflight.sh "$STATE_FILE" --firewall
-}
-check_firewall_preflight
-```
-
-📋 **확인**
-
-`PASS: Firewall provider preflight`입니다. 사전 점검 실패는 리소스 부재의 증거가
-아닙니다. 원인을 해결한 후에만 진행하세요.
+확장 설치에 실패하면 Routing 명령을 시도하지 마세요.
 
 ## 2. VM보다 먼저 Firewall·Policy·로그 설치
 

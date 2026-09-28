@@ -676,6 +676,7 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_module04_mutations_show_direct_az_commands(self):
         steps = blocks(DOCS[4])
         self.assertNotIn("prepare-04-functions", steps)
+        self.assertNotIn("firewall-preflight", steps)
         self.assertNotIn("routing-before-commit", steps)
         self.assertNotIn("inspect_routing_before_commit", DOCS[4].read_text())
         for name in ("forward-hub-to-spokea", "forward-spokea-to-hub",

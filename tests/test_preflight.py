@@ -3,7 +3,7 @@ import unittest
 from harness import run, call, account, group, STATE, SUB
 
 
-def ready_calls(existing=(), extension=False, current=0, limit=10, power="VM running"):
+def ready_calls(existing=(), current=0, limit=10, power="VM running"):
     calls = [
         account(),
         call(["account", "list-locations", "--query", "[].name", "-o", "json"], ["koreacentral"]),
@@ -11,9 +11,6 @@ def ready_calls(existing=(), extension=False, current=0, limit=10, power="VM run
         call(["provider", "show", "--namespace", "Microsoft.Network", "--query", "registrationState", "-o", "tsv"], "Registered"),
         call(["provider", "show", "--namespace", "Microsoft.Compute", "--query", "registrationState", "-o", "tsv"], "Registered"),
     ]
-    if extension:
-        calls.append(call(["provider", "show", "--namespace", "Microsoft.OperationalInsights",
-                           "--query", "registrationState", "-o", "tsv"], "Registered"))
     for zone in ("hub", "spokea", "spokeb"):
         rg = STATE["resourceGroups"][zone]
         calls.append(call(["group", "exists", "--name", rg, "-o", "tsv"],
@@ -61,11 +58,10 @@ class PreflightTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("quota", result.stderr)
 
-    def test_firewall_preflight_skips_vm_checks_and_requires_log_provider(self):
-        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --firewall',
-                     ready_calls(extension=True)[:6])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("PASS", result.stdout)
+    def test_removed_firewall_mode_is_rejected_before_any_azure_request(self):
+        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --firewall')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Usage: preflight.sh STATE_FILE", result.stderr)
 
     def test_missing_avnm_extension_fails_before_resource_checks(self):
         calls = ready_calls()[:3]
@@ -83,13 +79,6 @@ class PreflightTests(unittest.TestCase):
         result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json',
                      ready_calls(existing=("hub", "spokea"), current=4, limit=6))
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_firewall_rejects_unregistered_log_provider(self):
-        calls = ready_calls(extension=True)[:6]
-        calls[-1]["stdout"] = "NotRegistered"
-        result = run('bash "$WORKSHOP_ROOT/scripts/preflight.sh" state.json --firewall', calls)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Microsoft.OperationalInsights", result.stderr)
 
     def test_existing_unready_vm_is_not_counted_as_allocated_capacity(self):
         for power in ("VM deallocated", "VM stopped"):
