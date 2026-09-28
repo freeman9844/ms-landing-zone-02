@@ -19,12 +19,11 @@ Bash에서 준비 블록을 다시 실행하세요. 경로를 입력해야 한�
 `.workshop-state/<실행 ID>.json`의 앞 점도 포함합니다. 각 **🟢 실행 → 📋 확인**
 후 다음 블록으로 이동하세요. 오류나 다른 ID/상태가 나오면 **다음 단계로 진행하지
 마세요**. 함수는 실패를 반환하지만 Cloud Shell 전체를 종료하지 않습니다.
-공통 준비 직후 아래 **읽기 전용 함수 준비**도 실행합니다. 재접속하면 두 블록을
-다시 실행해야 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
+공통 준비에서 안전 검사 함수도 함께 불러옵니다. 재접속하면 준비 블록만 다시
+실행한 뒤 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
 2-13, 4-9, 5절에서 이전 **읽기 전용 검사 함수**를 호출할 때 재접속으로 함수가
 없어졌다면 각각 2-11, 4-8, 4-10의 검사 블록을 다시 실행하세요. 이 블록들은
-자원을 변경하지 않습니다. 2-8/4-2/4-4 등 **생성 블록을 재실행해서 함수를
-복구하지 마세요**.
+자원을 변경하지 않습니다. 생성 블록을 재실행해서 함수를 복구하지 마세요.
 
 🟢 **실행**
 
@@ -47,77 +46,6 @@ prepare_routing_session
 
 오류 없이 종료됩니다. `ROUTE_GROUP_A_ID`/`ROUTE_GROUP_B_ID`는 상태에서 파생한
 **서로 다른 전체 Group ID**입니다. 이후 블록은 같은 셸에서 실행합니다.
-
-### 공통 함수 준비 (Azure 변경 없음)
-
-👁️ **설명**
-
-다음 단계에서 재사용하는 Peering·collection·rule 생성 함수의 **정의만**
-준비합니다. 실행만으로 Azure 요청을 보내지 않습니다. 기능은 앞 공통 준비에서
-불러온 `workshop-common.sh`·`workshop-safety.sh`의 검사를 사용합니다.
-
-🟢 **실행**
-
-<!-- exec:prepare-04-functions -->
-```bash
-forward_peering() {
-  local local_rg="$1" local_vnet="$2" remote_rg="$3" remote_vnet="$4" remote_id name before after
-  remote_id=$(az network vnet show -g "$remote_rg" -n "$remote_vnet" \
-    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  assert_resource_id "$remote_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/$remote_vnet" || return 1
-  name=$(peering_name_for_remote "$local_rg" "$local_vnet" "$remote_id") || return 1
-  before=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
-    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$remote_id" '.peeringState == "Connected" and
-    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)' <<< "$before" >/dev/null ||
-    { fail "Peering is not connected to the expected remote VNet."; return 1; }
-  az network vnet peering update -g "$local_rg" --vnet-name "$local_vnet" \
-    -n "$name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" || return 1
-  after=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
-    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$remote_id" '.peeringState == "Connected" and .allowForwardedTraffic == true and
-    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)' <<< "$after" >/dev/null ||
-    { fail "Peering forwarding did not become active."; return 1; }
-  printf 'PASS: %s/%s -> %s\n' "$local_rg" "$local_vnet" "$remote_vnet"
-}
-create_routing_collection() {
-  local zone="$1" group="$2" applies result id
-  applies=$(jq -cn --arg id "$group" '[{networkGroupId:$id}]') || return 1
-  result=$(az network manager routing-config rule-collection create \
-    -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-    -n "$zone" --applies-to "$applies" --disable-bgp-route true \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$zone"
-  jq -e --arg id "$id" --arg group "$group" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    (.appliesTo | type == "array" and length == 1) and
-    (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
-  ' <<< "$result" >/dev/null || { fail "Unexpected routing collection or target: $zone"; return 1; }
-  printf '%s\n' "$result"
-}
-create_routing_rule() {
-  local zone="$1" name="$2" prefix="$3" fw_ip destination next_hop result id
-  fw_ip=$(firewall_ready_ip) || return 1
-  destination=$(jq -cn --arg prefix "$prefix" '{type:"AddressPrefix",destinationAddress:$prefix}') || return 1
-  next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') || return 1
-  result=$(az network manager routing-config rule-collection rule create \
-    -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-    --collection-name "$zone" -n "$name" \
-    --destination "$destination" --next-hop "$next_hop" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$zone/rules/$name"
-  jq -e --arg id "$id" --arg prefix "$prefix" --arg ip "$fw_ip" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .destination.type == "AddressPrefix" and .destination.destinationAddress == $prefix and
-    .nextHop.nextHopType == "VirtualAppliance" and .nextHop.nextHopAddress == $ip
-  ' <<< "$result" >/dev/null || { fail "Unexpected routing rule: $zone/$name"; return 1; }
-  printf '%s\n' "$result"
-}
-```
-
-📋 **확인**
-
-출력 없이 프롬프트가 돌아옵니다. 재접속 시 이 정의 블록은 안전하게 다시 실행할 수 있습니다.
 
 ## 1. CLI와 배포 전 점검
 
@@ -506,25 +434,23 @@ workspace로 전송합니다. `Dedicated`는 `AzureDiagnostics` 대신 전용
 
 <!-- exec:firewall-diagnostics -->
 ```bash
-create_firewall_diagnostics() {
-  local fw_id law_id categories
-  fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
-    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
-    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  assert_resource_id "$fw_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-$RUN_ID" || return 1
-  assert_resource_id "$law_id" "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" || return 1
-  categories=$(az monitor diagnostic-settings categories list --resource "$fw_id" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e '(.value | type == "array") and
-    ([.value[].name] | index("AZFWNetworkRule") != null and index("AZFWApplicationRule") != null)' \
-    <<< "$categories" >/dev/null || { fail "Required Firewall log categories are missing."; return 1; }
-  az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
-    --workspace "$law_id" --export-to-resource-specific true \
-    --logs '[{"category":"AZFWNetworkRule","enabled":true},{"category":"AZFWApplicationRule","enabled":true}]' \
-    -o json --subscription "$SUBSCRIPTION_ID"
-}
-create_firewall_diagnostics
+fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
+  --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
+assert_resource_id "$fw_id" \
+  "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-$RUN_ID" &&
+assert_resource_id "$law_id" \
+  "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" &&
+categories=$(az monitor diagnostic-settings categories list --resource "$fw_id" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+jq -e '(.value | type == "array") and
+  ([.value[].name] | index("AZFWNetworkRule") != null and index("AZFWApplicationRule") != null)' \
+  <<< "$categories" >/dev/null &&
+az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
+  --workspace "$law_id" --export-to-resource-specific true \
+  --logs '[{"category":"AZFWNetworkRule","enabled":true},{"category":"AZFWApplicationRule","enabled":true}]' \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -592,8 +518,12 @@ AVNM은 Connectivity Peering을 만들지만 Firewall로 들어온 패킷을
 
 <!-- exec:forward-hub-to-spokea -->
 ```bash
-forward_peering "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
-  "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID"
+peering_name=$(peering_for_forwarding "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID") &&
+az network vnet peering update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" &&
+assert_peering_forwarded "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" "$peering_name"
 ```
 
 📋 **확인**
@@ -606,8 +536,12 @@ Hub에서 A를 향한 Connected Peering 하나만 수정하고 PASS가 나옵니
 
 <!-- exec:forward-spokea-to-hub -->
 ```bash
-forward_peering "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" \
-  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID"
+peering_name=$(peering_for_forwarding "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID") &&
+az network vnet peering update -g "$RG_SPOKEA" --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" &&
+assert_peering_forwarded "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" "$peering_name"
 ```
 
 📋 **확인**
@@ -620,8 +554,12 @@ A에서 Hub 방향도 `allowForwardedTraffic=true`입니다.
 
 <!-- exec:forward-hub-to-spokeb -->
 ```bash
-forward_peering "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
-  "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID"
+peering_name=$(peering_for_forwarding "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID") &&
+az network vnet peering update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" &&
+assert_peering_forwarded "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
+  "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" "$peering_name"
 ```
 
 📋 **확인**
@@ -634,8 +572,12 @@ Hub에서 B 방향도 true입니다.
 
 <!-- exec:forward-spokeb-to-hub -->
 ```bash
-forward_peering "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
-  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID"
+peering_name=$(peering_for_forwarding "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID") &&
+az network vnet peering update -g "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
+  -n "$peering_name" --set allowForwardedTraffic=true -o json --subscription "$SUBSCRIPTION_ID" &&
+assert_peering_forwarded "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
+  "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" "$peering_name"
 ```
 
 📋 **확인**
@@ -655,29 +597,26 @@ forward_peering "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
 
 <!-- exec:enforce-peering -->
 ```bash
-enforce_peering() {
-  local current updated
-  assert_forwarded_peerings || return 1
-  current=$(az network manager connect-config show -g "$RG_HUB" \
-    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke"
-  ' <<< "$current" >/dev/null || { fail "Unexpected Connectivity Configuration."; return 1; }
-  updated=$(az network manager connect-config update -g "$RG_HUB" \
+assert_forwarded_peerings &&
+current=$(az network manager connect-config show -g "$RG_HUB" \
+  --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+  (.id | ascii_downcase) == ($id | ascii_downcase) and
+  .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke"
+' <<< "$current" >/dev/null &&
+updated=$(az network manager connect-config update -g "$RG_HUB" \
     --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
     --connect-capabilities '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}' \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and
-    .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
-    .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard" and
-    .connectivityCapabilities.peeringEnforcement == "Enforced"
-  ' <<< "$updated" >/dev/null || { fail "Peering enforcement update did not succeed."; return 1; }
-}
-enforce_peering
+    -o json --subscription "$SUBSCRIPTION_ID") &&
+jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+  (.id | ascii_downcase) == ($id | ascii_downcase) and
+  .provisioningState == "Succeeded" and
+  .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
+  .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard" and
+  .connectivityCapabilities.peeringEnforcement == "Enforced"
+' <<< "$updated" >/dev/null &&
+printf 'PASS: peeringEnforcement=Enforced saved; redeploy Connectivity next\n'
 ```
 
 📋 **확인**
@@ -691,22 +630,18 @@ enforce_peering
 
 <!-- exec:commit-enforced-connectivity -->
 ```bash
-commit_enforced_connectivity() {
-  local current
-  assert_forwarded_peerings || return 1
-  current=$(az network manager connect-config show -g "$RG_HUB" \
-    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and
-    .connectivityCapabilities.peeringEnforcement == "Enforced"
-  ' <<< "$current" >/dev/null || { fail "Enforced configuration is not ready."; return 1; }
-  az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
-    --commit-type Connectivity --configuration-ids "$CONNECTIVITY_CONFIG_ID" \
-    --target-locations "$LOCATION" --subscription "$SUBSCRIPTION_ID"
-}
-commit_enforced_connectivity
+assert_forwarded_peerings &&
+current=$(az network manager connect-config show -g "$RG_HUB" \
+  --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
+  (.id | ascii_downcase) == ($id | ascii_downcase) and
+  .provisioningState == "Succeeded" and
+  .connectivityCapabilities.peeringEnforcement == "Enforced"
+' <<< "$current" >/dev/null &&
+az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
+  --commit-type Connectivity --configuration-ids "$CONNECTIVITY_CONFIG_ID" \
+  --target-locations "$LOCATION" --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -759,52 +694,18 @@ table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 
 
 <!-- exec:routing-config-create -->
 ```bash
-create_routing_config() {
-  local manager groups members zone group expected existing result id
-  assert_enforced_connectivity || return 1
-  manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$AVNM_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and
-    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
-  ' <<< "$manager" >/dev/null || { fail "AVNM Routing scope is not ready."; return 1; }
-  [[ "${ROUTE_GROUP_A_ID,,}" != "${ROUTE_GROUP_B_ID,,}" ]] ||
-    { fail "Routing target groups must differ."; return 1; }
-  for zone in spokea spokeb; do
-    if [[ "$zone" == spokea ]]; then group="$ROUTE_GROUP_A_ID"; expected="$RG_SPOKEA"
-    else group="$ROUTE_GROUP_B_ID"; expected="$RG_SPOKEB"; fi
-    groups=$(az network manager group show --ids "$group" \
-      -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "$group" '(.id | ascii_downcase) == ($id | ascii_downcase) and
-      .provisioningState == "Succeeded"' <<< "$groups" >/dev/null ||
-      { fail "Routing group not ready: $zone"; return 1; }
-    members=$(az network manager group static-member list \
-      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
-      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$expected/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
-      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
-      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
-    ' <<< "$members" >/dev/null || { fail "Unexpected routing group member: $zone"; return 1; }
-  done
-  existing=$(az network manager routing-config list -g "$RG_HUB" --manager-name "$AVNM" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length == 0' <<< "$existing" >/dev/null ||
-    { fail "Routing configuration already exists; inspect before changing it."; return 1; }
-  result=$(az network manager routing-config create -g "$RG_HUB" --manager-name "$AVNM" \
-    -n "rc-lzbegin-spokes-$RUN_ID" --description "Spoke routes via Hub Firewall" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
-  jq -e --arg id "$id" '(.id | ascii_downcase) == ($id | ascii_downcase)' \
-    <<< "$result" >/dev/null || { fail "Unexpected routing configuration ID."; return 1; }
-  printf '%s\n' "$result"
-}
-create_routing_config
+assert_routing_creation_ready &&
+created=$(az network manager routing-config create -g "$RG_HUB" --manager-name "$AVNM" \
+  -n "rc-lzbegin-spokes-$RUN_ID" --description "Spoke routes via Hub Firewall" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_creation_result "$created" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
 
-전체 ID가 `.../routingConfigurations/rc-lzbegin-spokes-<실행 ID>`입니다.
+출력된 전체 ID가 `.../routingConfigurations/rc-lzbegin-spokes-<실행 ID>`인지 확인합니다.
+생성 응답은 최초 요청의 결과이며, 4-8에서 실제 저장된 ID·규칙을 다시 검증합니다.
 `Updating`이면 다음 생성 대신 조회·대기하세요.
 
 ### 4-2. A 전용 rule collection
@@ -818,7 +719,13 @@ create_routing_config
 
 <!-- exec:routing-collection-spokea -->
 ```bash
-create_routing_collection spokea "$ROUTE_GROUP_A_ID"
+applies_to=$(jq -cn --arg id "$ROUTE_GROUP_A_ID" '[{networkGroupId:$id}]') &&
+created=$(az network manager routing-config rule-collection create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  -n spokea --applies-to "$applies_to" --disable-bgp-route true \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_collection_result "$created" spokea "$ROUTE_GROUP_A_ID" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -831,7 +738,13 @@ A collection의 유일한 대상은 A Group입니다. 연결용 A+B Group을 사
 
 <!-- exec:routing-collection-spokeb -->
 ```bash
-create_routing_collection spokeb "$ROUTE_GROUP_B_ID"
+applies_to=$(jq -cn --arg id "$ROUTE_GROUP_B_ID" '[{networkGroupId:$id}]') &&
+created=$(az network manager routing-config rule-collection create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  -n spokeb --applies-to "$applies_to" --disable-bgp-route true \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_collection_result "$created" spokeb "$ROUTE_GROUP_B_ID" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -843,13 +756,23 @@ B collection은 B Group만 대상으로 합니다.
 👁️ **설명**
 
 각 규칙을 만들 때마다 `firewall_ready_ip`가 **현재** Firewall 상태·Policy·진단을
-확인합니다. 빈 IP/오류 결과로 규칙을 생성하지 않습니다.
+확인합니다. 안전 검사가 실패하면 뒤의 `az ... create`를 실행하지 않습니다.
+네 규칙의 전체 ID·목적지·next hop과 collection 대상을 4-8에서
+**배포 전에 다시 검사**합니다.
 
 🟢 **실행**
 
 <!-- exec:routing-rule-spokea-other -->
 ```bash
-create_routing_rule spokea to-other-spoke 10.20.0.0/16
+fw_ip=$(firewall_ready_ip) &&
+next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+created=$(az network manager routing-config rule-collection rule create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  --collection-name spokea -n to-other-spoke \
+  --destination '{"type":"AddressPrefix","destinationAddress":"10.20.0.0/16"}' \
+  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_rule_result "$created" spokea to-other-spoke 10.20.0.0/16 "$fw_ip" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -862,7 +785,15 @@ A의 `10.20.0.0/16 → VirtualAppliance (Firewall 사설 IP)`입니다.
 
 <!-- exec:routing-rule-spokea-internet -->
 ```bash
-create_routing_rule spokea to-internet 0.0.0.0/0
+fw_ip=$(firewall_ready_ip) &&
+next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+created=$(az network manager routing-config rule-collection rule create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  --collection-name spokea -n to-internet \
+  --destination '{"type":"AddressPrefix","destinationAddress":"0.0.0.0/0"}' \
+  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_rule_result "$created" spokea to-internet 0.0.0.0/0 "$fw_ip" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -875,7 +806,15 @@ A의 default route는 같은 Firewall 사설 IP입니다.
 
 <!-- exec:routing-rule-spokeb-other -->
 ```bash
-create_routing_rule spokeb to-other-spoke 10.10.0.0/16
+fw_ip=$(firewall_ready_ip) &&
+next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+created=$(az network manager routing-config rule-collection rule create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  --collection-name spokeb -n to-other-spoke \
+  --destination '{"type":"AddressPrefix","destinationAddress":"10.10.0.0/16"}' \
+  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_rule_result "$created" spokeb to-other-spoke 10.10.0.0/16 "$fw_ip" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -888,7 +827,15 @@ B의 `10.10.0.0/16 → VirtualAppliance`는 A→B의 **응답 경로**입니다.
 
 <!-- exec:routing-rule-spokeb-internet -->
 ```bash
-create_routing_rule spokeb to-internet 0.0.0.0/0
+fw_ip=$(firewall_ready_ip) &&
+next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+created=$(az network manager routing-config rule-collection rule create \
+  -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
+  --collection-name spokeb -n to-internet \
+  --destination '{"type":"AddressPrefix","destinationAddress":"0.0.0.0/0"}' \
+  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+assert_routing_rule_result "$created" spokeb to-internet 0.0.0.0/0 "$fw_ip" &&
+printf '%s\n' "$created"
 ```
 
 📋 **확인**
@@ -1017,16 +964,12 @@ Routing Configuration만 배포할 수 있으므로 A/B collection 둘을 **한 
 
 <!-- exec:routing-commit -->
 ```bash
-commit_routing() {
-  local config_id
-  inspect_routing_before_commit || return 1
-  config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
-  az network manager post-commit --network-manager-name "$AVNM" \
-    --commit-type Routing --configuration-ids "$config_id" \
-    --target-locations "$LOCATION" --resource-group "$RG_HUB" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-}
-commit_routing
+inspect_routing_before_commit &&
+az network manager post-commit --network-manager-name "$AVNM" \
+  --commit-type Routing \
+  --configuration-ids "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" \
+  --target-locations "$LOCATION" --resource-group "$RG_HUB" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**

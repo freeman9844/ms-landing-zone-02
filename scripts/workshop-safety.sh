@@ -30,6 +30,91 @@ peering_name_for_remote() {
   }
 }
 
+peering_for_forwarding() {
+  local local_rg="$1" local_vnet="$2" remote_rg="$3" remote_vnet="$4" remote_id name current
+  remote_id=$(az network vnet show -g "$remote_rg" -n "$remote_vnet" \
+    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
+  assert_resource_id "$remote_id" \
+    "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/$remote_vnet" || return 1
+  name=$(peering_name_for_remote "$local_rg" "$local_vnet" "$remote_id") || return 1
+  current=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
+    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$remote_id" '.peeringState == "Connected" and
+    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)' <<< "$current" >/dev/null ||
+    { fail "Peering is not connected to the expected remote VNet."; return 1; }
+  printf '%s\n' "$name"
+}
+
+assert_peering_forwarded() {
+  local local_rg="$1" local_vnet="$2" remote_rg="$3" remote_vnet="$4" name="$5" current
+  current=$(az network vnet peering show -g "$local_rg" --vnet-name "$local_vnet" \
+    -n "$name" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$remote_rg/providers/Microsoft.Network/virtualNetworks/$remote_vnet" '
+    .peeringState == "Connected" and .allowForwardedTraffic == true and
+    (.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase)
+  ' <<< "$current" >/dev/null ||
+    { fail "Peering forwarding did not become active."; return 1; }
+  printf 'PASS: %s/%s -> %s\n' "$local_rg" "$local_vnet" "$remote_vnet"
+}
+
+assert_routing_creation_ready() {
+  local manager groups members zone group expected existing
+  assert_enforced_connectivity || return 1
+  manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$AVNM_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<< "$manager" >/dev/null || { fail "AVNM Routing scope is not ready."; return 1; }
+  [[ "${ROUTE_GROUP_A_ID,,}" != "${ROUTE_GROUP_B_ID,,}" ]] ||
+    { fail "Routing target groups must differ."; return 1; }
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then group="$ROUTE_GROUP_A_ID"; expected="$RG_SPOKEA"
+    else group="$ROUTE_GROUP_B_ID"; expected="$RG_SPOKEB"; fi
+    groups=$(az network manager group show --ids "$group" \
+      -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "$group" '(.id | ascii_downcase) == ($id | ascii_downcase) and
+      .provisioningState == "Succeeded"' <<< "$groups" >/dev/null ||
+      { fail "Routing group not ready: $zone"; return 1; }
+    members=$(az network manager group static-member list \
+      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
+      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$expected/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
+      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
+      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
+    ' <<< "$members" >/dev/null || { fail "Unexpected routing group member: $zone"; return 1; }
+  done
+  existing=$(az network manager routing-config list -g "$RG_HUB" --manager-name "$AVNM" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<< "$existing" >/dev/null ||
+    { fail "Routing configuration already exists; inspect before changing it."; return 1; }
+}
+
+assert_routing_creation_result() {
+  jq -e --arg id "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase)
+  ' <<< "$1" >/dev/null || { fail "Unexpected routing configuration ID."; return 1; }
+}
+
+assert_routing_collection_result() {
+  local id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$2"
+  jq -e --arg id "$id" --arg group "$3" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    (.appliesTo | type == "array" and length == 1) and
+    (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
+  ' <<< "$1" >/dev/null || { fail "Unexpected routing collection or target: $2"; return 1; }
+}
+
+assert_routing_rule_result() {
+  local id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID/ruleCollections/$2/rules/$3"
+  jq -e --arg id "$id" --arg prefix "$4" --arg ip "$5" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .destination.type == "AddressPrefix" and .destination.destinationAddress == $prefix and
+    .nextHop.nextHopType == "VirtualAppliance" and .nextHop.nextHopAddress == $ip
+  ' <<< "$1" >/dev/null || { fail "Unexpected routing rule: $2/$3"; return 1; }
+}
+
 # AVNM이 만든 네 Peering을 실제 remote ID로 확인합니다. Enforced 전후에 같은 검사를 사용합니다.
 assert_forwarded_peerings() {
   local zone rg vnet expected peerings hub_id a_id b_id

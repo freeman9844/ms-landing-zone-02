@@ -422,8 +422,6 @@ class StepwiseDocsTests(unittest.TestCase):
         steps = blocks(DOCS[module])
         if (module, name) in ((4, "routing-config-create"), (5, "vm-route-gate")):
             calls = [*enforced_connectivity_calls(), *calls]
-        if module == 4 and (name.startswith(("forward-", "routing-collection-", "routing-rule-"))):
-            prefix += steps["prepare-04-functions"] + "\n"
         if module == 5 and name in ("support-preview", "support-deploy"):
             prefix += "check_vm_network() { :; }\n"
         if module == 5 and name in ("allow-hub-spokea", "allow-hub-spokeb",
@@ -593,7 +591,6 @@ class StepwiseDocsTests(unittest.TestCase):
             ("hub", "spokea"), ("spokea", "hub"), ("hub", "spokeb"), ("spokeb", "hub"))]
         names += ["enforce-peering", "commit-enforced-connectivity", "inspect-enforced-connectivity"]
         script = 'export STATE_FILE=state.json\n' + steps["prepare-04"] + '\n'
-        script += steps["prepare-04-functions"] + "\n"
         script += "\n".join(f'{steps[name]}\n[[ $? == 0 ]] || exit 1' for name in names)
         calls = preparation_calls(4)
         for name in names:
@@ -658,9 +655,22 @@ class StepwiseDocsTests(unittest.TestCase):
         calls[-1]["stdout"] = json.dumps(payload)
         self.assertNotEqual(self.execute(4, "routing-rule-spokea-other", calls).returncode, 0)
 
-    def test_preparation_defines_routing_functions_without_cloud_changes(self):
-        result = self.execute(4, "prepare-04-functions")
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_module04_mutations_show_direct_az_commands(self):
+        steps = blocks(DOCS[4])
+        self.assertNotIn("prepare-04-functions", steps)
+        for name in ("forward-hub-to-spokea", "forward-spokea-to-hub",
+                     "forward-hub-to-spokeb", "forward-spokeb-to-hub"):
+            self.assertIn("az network vnet peering update", steps[name])
+            self.assertIn("peering_for_forwarding", steps[name])
+            self.assertIn("assert_peering_forwarded", steps[name])
+        for name in ("routing-config-create", "routing-collection-spokea",
+                     "routing-collection-spokeb", "routing-rule-spokea-other",
+                     "routing-rule-spokea-internet", "routing-rule-spokeb-other",
+                     "routing-rule-spokeb-internet"):
+            self.assertIn("az network manager routing-config", steps[name])
+            self.assertIn("assert_routing_", steps[name])
+        for name in ("enforce-peering", "commit-enforced-connectivity", "routing-commit"):
+            self.assertIn("az network manager", steps[name])
 
     def test_routing_deployment_requires_latest_successful_exact_configuration(self):
         valid = routing_cases()["routing-deploy-status"]

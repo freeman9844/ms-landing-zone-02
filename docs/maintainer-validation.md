@@ -145,7 +145,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 2/topology 검증, 구독·RG 소유 확인, AVNM 이름 파생 |
-| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
+| `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 04 `--firewall`의 Provider·CLI 점검과 모듈 05 옵션 없는 VM SKU/quota 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
