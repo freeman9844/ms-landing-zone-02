@@ -1,6 +1,7 @@
+import json
 import re
 import unittest
-from harness import ROOT, SUB, account, call, run
+from harness import ROOT, STATE, SUB, account, call, run
 
 
 def recovery_block():
@@ -10,6 +11,20 @@ def recovery_block():
 
 
 class RecoveryDocsTests(unittest.TestCase):
+    def test_recovery_lists_available_state_file_before_path_input(self):
+        script = '''
+mkdir -p home
+ln -s "$PWD" home/ms-landing-zone-02
+export HOME="$PWD/home"
+'''
+        result = run(script + recovery_block() + '\nprintf "TARGET=%s\\n" "$STATE_FILE"\n',
+                     [call(["account", "set", "--subscription", SUB]), account()],
+                     files={".workshop-state/demo123.json": json.dumps(STATE)},
+                     input_text=".workshop-state/demo123.json\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("demo123.json\n"), result.stdout)
+        self.assertIn("TARGET=.workshop-state/demo123.json", result.stdout)
+
     def test_failed_directory_change_stops_recovery_without_account_changes(self):
         script = '''
 mkdir -p empty-home .workshop-state

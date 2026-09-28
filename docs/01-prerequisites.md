@@ -227,6 +227,7 @@ az extension show --name virtual-network-manager \
 
 생성 시 보관한 `.workshop-state/<자신의 실행 ID>.json` 경로를 입력합니다.
 다운로드한 JSON을 다시 올렸다면 업로드한 실제 경로를 입력합니다. `.workshop-state/` 밖의 JSON도 사용할 수 있습니다.
+입력 전에 `.workshop-state/`가 있으면 파일명을 보여줍니다.
 
 🟢 **실행**
 
@@ -234,6 +235,7 @@ az extension show --name virtual-network-manager \
 # 처음 clone한 폴더로 돌아갑니다. 다른 위치에 받았다면 해당 경로로 이동하세요.
 cd "$HOME/ms-landing-zone-02" &&
 source scripts/workshop-common.sh &&
+show_workshop_state_files &&
 # 새 파일이 아니라 기존 실습 JSON을 선택해야 같은 자원을 이어서 관리할 수 있습니다.
 read -rp "저장된 상태 파일 경로: " STATE_FILE &&
 export STATE_FILE &&

@@ -12,7 +12,8 @@ NAT를 분리하지 않습니다. Spoke A/B NAT와 해당 Public IP는 처음부
 Hub 관리 VM의 NAT와 Firewall Public IP는 그대로 유지합니다. Azure Firewall과 VM에는
 검증 중에도 비용이 발생합니다. 한 블록씩 실행하고 📋 결과가 다르면 **다음 블록으로
 넘어가지 마세요**. 재접속 시 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를
-거쳐 같은 Cloud Shell Bash에서 준비 블록을 다시 실행합니다.
+거쳐 같은 Cloud Shell Bash에서 준비 블록을 다시 실행합니다. 경로를 묻기 전
+`ls .workshop-state/`로 기존 파일명을 보여줍니다.
 
 🟢 **실행**
 

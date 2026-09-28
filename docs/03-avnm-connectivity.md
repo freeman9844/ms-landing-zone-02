@@ -32,9 +32,6 @@
 # 이번 실행의 상태·구독·세 RG 소유권을 한 번 확인합니다.
 prepare_avnm_session() {
   source scripts/workshop-common.sh || return 1
-  if [[ -z "${STATE_FILE:-}" && -d .workshop-state ]]; then
-    ls .workshop-state/ || return 1
-  fi
   ensure_state_file || return 1
   load_run "$STATE_FILE" || return 1
   assert_subscription || return 1

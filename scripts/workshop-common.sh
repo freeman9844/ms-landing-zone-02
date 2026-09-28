@@ -71,10 +71,17 @@ clear_run() {
     { fail "Cannot clear previous workshop variables."; return 1; }
 }
 
+show_workshop_state_files() {
+  if [[ -d .workshop-state ]]; then
+    ls .workshop-state/ || { fail "Cannot list workshop state files."; return 1; }
+  fi
+}
+
 # 새 Cloud Shell 세션에서 경로가 없을 때만 기존 상태 파일을 묻습니다. 파일은 자동 선택하지 않습니다.
 ensure_state_file() {
   if [[ -z "${STATE_FILE:-}" ]]; then
     clear_run || return 1
+    show_workshop_state_files || return 1
     read -rp "기존 상태 파일 경로 (예: .workshop-state/<실행 ID>.json): " STATE_FILE ||
       { unset STATE_FILE; fail "State file path input cancelled."; return 1; }
     [[ -n "$STATE_FILE" ]] ||
