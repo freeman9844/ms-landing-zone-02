@@ -115,6 +115,22 @@ assert_routing_rule_result() {
   ' <<< "$1" >/dev/null || { fail "Unexpected routing rule: $2/$3"; return 1; }
 }
 
+assert_unattached_workload_subnets() {
+  local zone rg subnet
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; else rg="$RG_SPOKEB"; fi
+    assert_owned_rg "$rg" || return 1
+    subnet=$(az network vnet subnet show -g "$rg" \
+      --vnet-name "vnet-lzbegin-$zone-$RUN_ID" -n snet-workload \
+      -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/snet-workload" '
+      (.id | ascii_downcase) == ($id | ascii_downcase) and
+      .routeTable == null and .natGateway == null
+    ' <<< "$subnet" >/dev/null ||
+      { fail "Existing route table or NAT on workload subnet: $zone"; return 1; }
+  done
+}
+
 # AVNM이 만든 네 Peering을 실제 remote ID로 확인합니다. Enforced 전후에 같은 검사를 사용합니다.
 assert_forwarded_peerings() {
   local zone rg vnet expected peerings hub_id a_id b_id

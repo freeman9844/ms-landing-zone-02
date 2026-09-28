@@ -201,6 +201,24 @@ def route_configuration_calls():
     return calls
 
 
+def routing_commit_calls():
+    calls = []
+    for zone in ("spokea", "spokeb"):
+        calls.extend([
+            group(zone),
+            az(["network", "vnet", "subnet", "show", *subnet_args(zone), "-o", "json"],
+               {"id": netid(zone, "virtualNetworks", vnet(zone) + "/subnets/snet-workload"),
+                "routeTable": None, "natGateway": None}),
+        ])
+    calls.append(az(["network", "manager", "post-commit",
+                     "--network-manager-name", "avnm-lzbegin-demo123",
+                     "--commit-type", "Routing", "--configuration-ids",
+                     avnm_id() + "/routingConfigurations/rc-lzbegin-spokes-demo123",
+                     "--target-locations", "koreacentral", "--resource-group", rg("hub"),
+                     "-o", "json"]))
+    return calls
+
+
 def forwarding_check_calls():
     return [entry for zone in ("hub", "spokea", "spokeb")
             for entry in (group(zone),
@@ -658,6 +676,8 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_module04_mutations_show_direct_az_commands(self):
         steps = blocks(DOCS[4])
         self.assertNotIn("prepare-04-functions", steps)
+        self.assertNotIn("routing-before-commit", steps)
+        self.assertNotIn("inspect_routing_before_commit", DOCS[4].read_text())
         for name in ("forward-hub-to-spokea", "forward-spokea-to-hub",
                      "forward-hub-to-spokeb", "forward-spokeb-to-hub"):
             self.assertIn("az network vnet peering update", steps[name])
@@ -671,6 +691,23 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertIn("assert_routing_", steps[name])
         for name in ("enforce-peering", "commit-enforced-connectivity", "routing-commit"):
             self.assertIn("az network manager", steps[name])
+
+    def test_routing_commit_only_checks_subnet_ownership_and_existing_attachments(self):
+        calls = routing_commit_calls()
+        result = self.execute(4, "routing-commit", calls)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for index, change in (
+            (1, {"routeTable": {"id": "foreign"}}),
+            (1, {"natGateway": {"id": "foreign"}}),
+            (1, {"id": netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")}),
+            (3, {"routeTable": {"id": "foreign"}}),
+        ):
+            with self.subTest(index=index, change=change):
+                invalid = copy.deepcopy(calls[:index + 1])
+                data = json.loads(invalid[-1]["stdout"])
+                data.update(change)
+                invalid[-1]["stdout"] = json.dumps(data)
+                self.assertNotEqual(self.execute(4, "routing-commit", invalid).returncode, 0)
 
     def test_routing_deployment_requires_latest_successful_exact_configuration(self):
         valid = routing_cases()["routing-deploy-status"]

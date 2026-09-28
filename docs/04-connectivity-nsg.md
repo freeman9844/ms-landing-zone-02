@@ -21,9 +21,9 @@ Bash에서 준비 블록을 다시 실행하세요. 경로를 입력해야 한�
 마세요**. 함수는 실패를 반환하지만 Cloud Shell 전체를 종료하지 않습니다.
 공통 준비에서 안전 검사 함수도 함께 불러옵니다. 재접속하면 준비 블록만 다시
 실행한 뒤 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
-2-13, 4-9, 5절에서 이전 **읽기 전용 검사 함수**를 호출할 때 재접속으로 함수가
-없어졌다면 각각 2-11, 4-8, 4-10의 검사 블록을 다시 실행하세요. 이 블록들은
-자원을 변경하지 않습니다. 생성 블록을 재실행해서 함수를 복구하지 마세요.
+2-13과 5절에서 이전 **읽기 전용 검사 함수**가 재접속으로 없어졌다면
+각각 2-11과 4-9의 검사 블록을 다시 실행하세요. 생성 블록을
+재실행해서 함수를 복구하지 마세요.
 
 🟢 **실행**
 
@@ -705,7 +705,7 @@ printf '%s\n' "$created"
 📋 **확인**
 
 출력된 전체 ID가 `.../routingConfigurations/rc-lzbegin-spokes-<실행 ID>`인지 확인합니다.
-생성 응답은 최초 요청의 결과이며, 4-8에서 실제 저장된 ID·규칙을 다시 검증합니다.
+생성 응답의 전체 ID를 검증하며, 배포 후 5절에서 실제 저장된 구성·경로를 다시 확인합니다.
 `Updating`이면 다음 생성 대신 조회·대기하세요.
 
 ### 4-2. A 전용 rule collection
@@ -757,8 +757,8 @@ B collection은 B Group만 대상으로 합니다.
 
 각 규칙을 만들 때마다 `firewall_ready_ip`가 **현재** Firewall 상태·Policy·진단을
 확인합니다. 안전 검사가 실패하면 뒤의 `az ... create`를 실행하지 않습니다.
-네 규칙의 전체 ID·목적지·next hop과 collection 대상을 4-8에서
-**배포 전에 다시 검사**합니다.
+각 생성 응답의 전체 ID·목적지·next hop을 즉시 확인하고,
+배포 후 5절에서 실제 적용된 구성·대상을 다시 검사합니다.
 
 🟢 **실행**
 
@@ -842,129 +842,21 @@ printf '%s\n' "$created"
 
 B의 default route도 같은 Firewall 사설 IP입니다.
 
-### 4-8. 네 규칙·대상·Subnet 사전 확인
-
-👁️ **설명**
-
-**배포 전** A/B 그룹, collection의 전체 ID·목적지·next hop,
-Spoke의 workload Subnet을 다시 조회합니다. 신규 VM이 아직 없으므로
-Subnet에 기존/외부 route table이나 NAT가 붙어 있으면 덮어쓰지 않습니다.
-모든 검사에 통과해야 다음 단계에서 Routing을 commit합니다.
-
-🟢 **실행**
-
-<!-- exec:routing-before-commit -->
-```bash
-inspect_routing_before_commit() {
-  local fw_ip config_id config collections rules zone rg group remote collection rule prefix data subnet members peerings target local_rg local_vnet remote_id
-  assert_enforced_connectivity || return 1
-  fw_ip=$(firewall_ready_ip) || return 1
-  config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
-  config=$(az network manager routing-config show -g "$RG_HUB" --manager-name "$AVNM" \
-    -n "rc-lzbegin-spokes-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$config_id" '(.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and
-    (.routeTableUsageMode == null or .routeTableUsageMode == "ManagedOnly")' <<< "$config" >/dev/null ||
-    { fail "Routing configuration is not ready."; return 1; }
-  collections=$(az network manager routing-config rule-collection list -g "$RG_HUB" \
-    --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$config_id" '
-    type == "array" and length == 2 and
-    ([.[].name] | sort) == ["spokea","spokeb"] and
-    all(.[]; (.id | ascii_downcase) ==
-      (($id + "/ruleCollections/" + .name) | ascii_downcase))
-  ' <<< "$collections" >/dev/null ||
-    { fail "Unexpected or missing routing collection."; return 1; }
-  for zone in spokea spokeb; do
-    if [[ "$zone" == spokea ]]; then rg="$RG_SPOKEA"; group="$ROUTE_GROUP_A_ID"; remote=10.20.0.0/16
-    else rg="$RG_SPOKEB"; group="$ROUTE_GROUP_B_ID"; remote=10.10.0.0/16; fi
-    collection=$(az network manager routing-config rule-collection show -g "$RG_HUB" \
-      --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-      -n "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "$config_id/ruleCollections/$zone" --arg group "$group" '
-      (.id | ascii_downcase) == ($id | ascii_downcase) and .provisioningState == "Succeeded" and
-      (.appliesTo | type == "array" and length == 1) and
-      (.appliesTo[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)
-    ' <<< "$collection" >/dev/null || { fail "Wrong routing target: $zone"; return 1; }
-    members=$(az network manager group static-member list \
-      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
-      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
-      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
-      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
-    ' <<< "$members" >/dev/null || { fail "Routing group membership changed: $zone"; return 1; }
-    rules=$(az network manager routing-config rule-collection rule list -g "$RG_HUB" \
-      --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-      --collection-name "$zone" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "$config_id/ruleCollections/$zone" '
-      type == "array" and length == 2 and
-      ([.[].name] | sort) == ["to-internet","to-other-spoke"] and
-      all(.[]; (.id | ascii_downcase) ==
-        (($id + "/rules/" + .name) | ascii_downcase))
-    ' <<< "$rules" >/dev/null || { fail "Unexpected or missing routing rule: $zone"; return 1; }
-    for rule in to-other-spoke to-internet; do
-      if [[ "$rule" == to-other-spoke ]]; then prefix="$remote"; else prefix=0.0.0.0/0; fi
-      data=$(az network manager routing-config rule-collection rule show -g "$RG_HUB" \
-        --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
-        --collection-name "$zone" -n "$rule" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-      jq -e --arg id "$config_id/ruleCollections/$zone/rules/$rule" --arg prefix "$prefix" --arg ip "$fw_ip" '
-        (.id | ascii_downcase) == ($id | ascii_downcase) and .provisioningState == "Succeeded" and
-        .destination.type == "AddressPrefix" and .destination.destinationAddress == $prefix and
-        .nextHop.nextHopType == "VirtualAppliance" and .nextHop.nextHopAddress == $ip
-      ' <<< "$data" >/dev/null || { fail "Wrong routing rule: $zone/$rule"; return 1; }
-    done
-    subnet=$(az network vnet subnet show -g "$rg" --vnet-name "vnet-lzbegin-$zone-$RUN_ID" \
-      -n snet-workload -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/snet-workload" '
-      (.id | ascii_downcase) == ($id | ascii_downcase) and
-      .routeTable == null and .natGateway == null
-    ' <<< "$subnet" >/dev/null || { fail "Unexpected Subnet route table or NAT: $zone"; return 1; }
-    remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID"
-    for target in hub spoke; do
-      if [[ "$target" == hub ]]; then
-        local_rg="$RG_HUB"; local_vnet="vnet-lzbegin-hub-$RUN_ID"
-        peerings=$(az network vnet peering list -g "$local_rg" --vnet-name "$local_vnet" \
-          -o json --subscription "$SUBSCRIPTION_ID") || return 1
-      else
-        local_rg="$rg"; local_vnet="vnet-lzbegin-$zone-$RUN_ID"
-        remote_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-        peerings=$(az network vnet peering list -g "$local_rg" --vnet-name "$local_vnet" \
-          -o json --subscription "$SUBSCRIPTION_ID") || return 1
-      fi
-      jq -e --arg id "$remote_id" '
-        type == "array" and
-        ([.[] | select((.remoteVirtualNetwork.id | ascii_downcase) == ($id | ascii_downcase))] |
-          length == 1 and .[0].peeringState == "Connected" and
-          .[0].allowForwardedTraffic == true)
-      ' <<< "$peerings" >/dev/null ||
-        { fail "Peering forwarding is not ready: $zone/$target"; return 1; }
-    done
-  done
-  assert_no_spoke_nat || return 1
-  printf 'PASS: Two separate targets, four rules, no Spoke NAT/route-table attachment\n'
-}
-inspect_routing_before_commit
-```
-
-📋 **확인**
-
-`PASS`가 아니면 commit하지 마세요. 기존 route table을 찾았다면 소유자와
-충돌을 조사하고 임의 삭제/교체하지 않습니다.
-
-### 4-9. koreacentral에 Routing 배포
+### 4-8. koreacentral에 Routing 배포
 
 👁️ **설명**
 
 AVNM의 **Routing만** commit합니다. 이 manager/리전에는 한 번에 하나의
 Routing Configuration만 배포할 수 있으므로 A/B collection 둘을 **한 구성**
-안에서 함께 적용합니다. 배포 요청 성공만으로 Subnet 적용을 가정하지 않습니다.
+안에서 함께 적용합니다. 중복된 규칙 검사는 반복하지 않지만, 기존 route table이나
+NAT가 붙은 Subnet은 배포 직전에 거부합니다. 배포 요청 성공만으로 Subnet 적용을
+가정하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:routing-commit -->
 ```bash
-inspect_routing_before_commit &&
+assert_unattached_workload_subnets &&
 az network manager post-commit --network-manager-name "$AVNM" \
   --commit-type Routing \
   --configuration-ids "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" \
@@ -978,7 +870,7 @@ Routing commit 요청이 성공해야 합니다. timeout/오류는 배포 취소
 뜻하지 않습니다. 배포가 비동기이므로 다음 읽기 전용 조회를 1–2분 간격으로
 재실행할 수 있습니다.
 
-### 4-10. koreacentral Routing 배포 상태 확인
+### 4-9. koreacentral Routing 배포 상태 확인
 
 👁️ **설명**
 

@@ -767,7 +767,7 @@ printf 'SHELL_ALIVE\\n'
                             (4, "routing-rule-spokea-internet"): ["assert_routing_rule_result"],
                             (4, "routing-rule-spokeb-other"): ["assert_routing_rule_result"],
                             (4, "routing-rule-spokeb-internet"): ["assert_routing_rule_result"],
-                            (4, "routing-before-commit"): ["assert_enforced_connectivity", "assert_no_spoke_nat"],
+                            (4, "routing-commit"): ["assert_unattached_workload_subnets"],
                             (4, "inspect-avnm-routing-subnets"): ["assert_avnm_routes_ready",
                                                                    "assert_no_spoke_nat"],
                             (5, "vm-route-gate"): ["assert_enforced_connectivity",
