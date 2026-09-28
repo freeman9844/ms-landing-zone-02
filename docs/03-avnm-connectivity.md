@@ -9,7 +9,9 @@
 모듈 02의 세 VNet이 먼저 있어야 합니다. 모듈 01의 `STATE_FILE`을 그대로 사용합니다.
 구독과 세 RG의 소유권 확인은 공통 준비에서 한 번만 실행합니다. 재접속 후 활성 구독이
 원래 구독과 같다면 공통 준비에 기존 JSON 경로를 입력하세요. `STATE_FILE`이 비어 있을 때
-묻는 경로는 `.workshop-state/<실행 ID>.json`처럼 점까지 입력합니다.
+먼저 `.workshop-state/`의 파일명을 보여줍니다. 해당 파일의 경로를
+`.workshop-state/<실행 ID>.json`처럼 점까지 입력하세요. 상태 파일을 다른
+경로에서 복구했다면 그 경로를 입력해도 됩니다.
 활성 구독이 다르거나 다른 실습/구독으로 전환했다면
 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
 이후 블록은 같은 세션을 공유하며 필요한 AVNM 이름과 ID는 상태 파일에서 복구합니다.
@@ -30,6 +32,9 @@
 # 이번 실행의 상태·구독·세 RG 소유권을 한 번 확인합니다.
 prepare_avnm_session() {
   source scripts/workshop-common.sh || return 1
+  if [[ -z "${STATE_FILE:-}" && -d .workshop-state ]]; then
+    ls .workshop-state/ || return 1
+  fi
   ensure_state_file || return 1
   load_run "$STATE_FILE" || return 1
   assert_subscription || return 1
@@ -42,6 +47,7 @@ prepare_avnm_session
 
 📋 **확인**
 
+경로 입력이 필요하면 `.workshop-state/`의 파일명을 먼저 확인합니다.
 오류 없이 프롬프트로 돌아오면 모듈 03 작업을 실행할 준비가 된 상태입니다.
 
 ## 1. Connectivity·Security Admin·Routing AVNM 만들기

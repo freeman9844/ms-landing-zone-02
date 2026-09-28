@@ -592,6 +592,23 @@ class NetworkDocsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("TARGET=state.json:demo123", result.stdout)
 
+    def test_module03_lists_state_filenames_before_requesting_missing_path(self):
+        prepare = blocks(DOCS[3])["prepare-03"]
+        result = run(prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
+                     preparation_calls(3),
+                     files={".workshop-state/demo123.json": json.dumps(STATE)},
+                     input_text=".workshop-state/demo123.json\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(result.stdout.index("demo123.json"),
+                        result.stdout.index("TARGET=.workshop-state/demo123.json:demo123"))
+
+        uploaded = run(prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
+                       preparation_calls(3),
+                       files={"uploaded/state.json": json.dumps(STATE)},
+                       input_text="uploaded/state.json\n")
+        self.assertEqual(uploaded.returncode, 0, uploaded.stderr)
+        self.assertIn("TARGET=uploaded/state.json:demo123", uploaded.stdout)
+
     def test_preparation_rejects_wrong_path_and_cancelled_input_without_stale_targets(self):
         for module, path in DOCS.items():
             for input_text in ("./workshop-state/demo123.json\n", "\n", ""):
