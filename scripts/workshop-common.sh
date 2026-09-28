@@ -77,12 +77,24 @@ show_workshop_state_files() {
   fi
 }
 
+workshop_state_example() {
+  local state_file
+  for state_file in .workshop-state/*.json; do
+    [[ -f "$state_file" && "$state_file" =~ ^\.workshop-state/[a-z0-9]{6,12}\.json$ ]] || continue
+    printf '%s\n' "$state_file"
+    return
+  done
+  printf '%s\n' '.workshop-state/<실행 ID>.json'
+}
+
 # 새 Cloud Shell 세션에서 경로가 없을 때만 기존 상태 파일을 묻습니다. 파일은 자동 선택하지 않습니다.
 ensure_state_file() {
   if [[ -z "${STATE_FILE:-}" ]]; then
+    local example
     clear_run || return 1
     show_workshop_state_files || return 1
-    read -rp "기존 상태 파일 경로 (예: .workshop-state/<실행 ID>.json): " STATE_FILE ||
+    example=$(workshop_state_example) || return 1
+    read -rp "기존 상태 파일 경로 (예: $example): " STATE_FILE ||
       { unset STATE_FILE; fail "State file path input cancelled."; return 1; }
     [[ -n "$STATE_FILE" ]] ||
       { unset STATE_FILE; fail "State file path is empty."; return 1; }

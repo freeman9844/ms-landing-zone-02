@@ -9,8 +9,9 @@
 [모듈 04](04-connectivity-nsg.md)의 Firewall·진단·AVNM Routing 배포가 먼저 완료되어야 합니다.
 모듈 01의 `STATE_FILE`을 사용하며, 같은 Cloud Shell에서 **한 블록 실행 → 결과 확인 → 다음 블록** 순서로 진행합니다.
 재접속 후 원래 구독이 활성 상태라면 아래 준비를 다시 실행하세요. `STATE_FILE`이 비어 있으면
-`ls .workshop-state/`로 파일명을 보여준 뒤 `.workshop-state/<실행 ID>.json`
-경로를 입력받습니다. 구독을 바꿨다면 먼저
+`ls .workshop-state/`로 파일명을 보여주고 `예:`에 실제 파일 경로를 표시합니다.
+여러 파일이 있다면 현재 실습의 `.workshop-state/<실행 ID>.json` 경로를
+선택하세요. 구독을 바꿨다면 먼저
 [세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 실행하세요.
 실패한 블록 뒤의 자원 변경으로 넘어가지 마세요. 준비 함수는 검사 실패를 반환하지만 셸을 종료하지 않습니다.
 

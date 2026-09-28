@@ -14,6 +14,7 @@ Hub 관리 VM의 NAT와 Firewall Public IP는 그대로 유지합니다. Azure F
 넘어가지 마세요**. 재접속 시 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를
 거쳐 같은 Cloud Shell Bash에서 준비 블록을 다시 실행합니다. 경로를 묻기 전
 `ls .workshop-state/`로 기존 파일명을 보여줍니다.
+`예:`의 실제 경로를 참고하되 파일이 여러 개라면 현재 실습의 파일을 선택하세요.
 
 🟢 **실행**
 

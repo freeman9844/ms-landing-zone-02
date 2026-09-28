@@ -16,6 +16,7 @@ class RecoveryDocsTests(unittest.TestCase):
 mkdir -p home
 ln -s "$PWD" home/ms-landing-zone-02
 export HOME="$PWD/home"
+read() { printf 'PROMPT=%s\\n' "$2"; builtin read "$@"; }
 '''
         result = run(script + recovery_block() + '\nprintf "TARGET=%s\\n" "$STATE_FILE"\n',
                      [call(["account", "set", "--subscription", SUB]), account()],
@@ -23,6 +24,7 @@ export HOME="$PWD/home"
                      input_text=".workshop-state/demo123.json\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.startswith("demo123.json\n"), result.stdout)
+        self.assertIn("PROMPT=저장된 상태 파일 경로 (예: .workshop-state/demo123.json): ", result.stdout)
         self.assertIn("TARGET=.workshop-state/demo123.json", result.stdout)
 
     def test_failed_directory_change_stops_recovery_without_account_changes(self):
@@ -41,6 +43,7 @@ export HOME="$PWD/empty-home"
 mkdir -p home
 ln -s "$PWD" home/ms-landing-zone-02
 export HOME="$PWD/home"
+read() { printf 'PROMPT=%s\\n' "$2"; builtin read "$@"; }
 '''
         script += recovery_block()
         script += '\nstatus=$?\nprintf "RECOVERY_STATUS=%s\\nTARGET=%s:%s\\n" "$status" "$RUN_ID" "$RG_HUB"\n'
@@ -48,6 +51,7 @@ export HOME="$PWD/home"
             call(["account", "set", "--subscription", SUB]), account(),
         ], input_text="state.json\n")
         self.assertIn("RECOVERY_STATUS=0\nTARGET=demo123:rg-lzbegin-hub-demo123", result.stdout)
+        self.assertIn("PROMPT=저장된 상태 파일 경로 (예: .workshop-state/<실행 ID>.json): ", result.stdout)
         self.assertEqual(result.stderr, "")
 
     def test_cancelled_input_stops_before_loading_or_selecting_a_subscription(self):

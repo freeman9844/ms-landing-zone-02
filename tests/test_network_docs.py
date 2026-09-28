@@ -596,20 +596,35 @@ class NetworkDocsTests(unittest.TestCase):
         for module, path in DOCS.items():
             with self.subTest(module=module):
                 prepare = blocks(path)[f"prepare-{module:02}"]
-                result = run(prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
+                capture_prompt = 'read() { printf "PROMPT=%s\\n" "$2"; builtin read "$@"; }\n'
+                result = run(capture_prompt + prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
                              preparation_calls(module),
                              files={".workshop-state/demo123.json": json.dumps(STATE)},
                              input_text=".workshop-state/demo123.json\n")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(result.stdout.startswith("demo123.json\n"), result.stdout)
+                self.assertIn("PROMPT=기존 상태 파일 경로 (예: .workshop-state/demo123.json): ", result.stdout)
                 self.assertIn("TARGET=.workshop-state/demo123.json:demo123", result.stdout)
 
-                uploaded = run(prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
+                uploaded = run(capture_prompt + prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
                                preparation_calls(module),
                                files={"uploaded/state.json": json.dumps(STATE)},
                                input_text="uploaded/state.json\n")
                 self.assertEqual(uploaded.returncode, 0, uploaded.stderr)
+                self.assertIn("PROMPT=기존 상태 파일 경로 (예: .workshop-state/<실행 ID>.json): ", uploaded.stdout)
                 self.assertIn("TARGET=uploaded/state.json:demo123", uploaded.stdout)
+
+    def test_module04_example_does_not_choose_a_run_when_multiple_state_files_exist(self):
+        prepare = blocks(DOCS[4])["prepare-04"]
+        script = 'read() { printf "PROMPT=%s\\n" "$2"; builtin read "$@"; }\n'
+        result = run(script + prepare + '\nprintf "TARGET=%s:%s\\n" "$STATE_FILE" "$RUN_ID"\n',
+                     preparation_calls(4),
+                     files={".workshop-state/abc123.json": "{}",
+                            ".workshop-state/demo123.json": json.dumps(STATE)},
+                     input_text=".workshop-state/demo123.json\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PROMPT=기존 상태 파일 경로 (예: .workshop-state/abc123.json): ", result.stdout)
+        self.assertIn("TARGET=.workshop-state/demo123.json:demo123", result.stdout)
 
     def test_preparation_rejects_wrong_path_and_cancelled_input_without_stale_targets(self):
         for module, path in DOCS.items():
