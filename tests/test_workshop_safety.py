@@ -3,13 +3,14 @@ import json
 import unittest
 
 from harness import run, group
+from test_ipam_cidrs import CIDR_ENV, PREFIXES
 import test_avnm_redesign as redesign
 from test_network_docs import az, rg, netid, rid, vnet, foreign_ids, enforced_connectivity_calls
 
 FW = netid("hub", "azureFirewalls", "fw-lzbegin-demo123")
 LAW = rid("hub", "Microsoft.OperationalInsights/workspaces", "log-lzbegin-demo123")
 POLICY = netid("hub", "firewallPolicies", "fwpol-lzbegin-demo123")
-FW_IP = "10.0.2.4"
+FW_IP = "172.20.1.4"
 CONFIG = netid("hub", "networkManagers", "avnm-lzbegin-demo123") + (
     "/securityAdminConfigurations/sc-lzbegin-http-demo123")
 GROUPS = {
@@ -36,14 +37,21 @@ def ready_calls():
            {"ruleCollections": [
                {"name": "management", "priority": 100, "action": {"type": "Allow"},
                 "rules": [{"name": "azure-management", "ruleType": "NetworkRule",
-                           "ipProtocols": ["TCP"], "sourceAddresses": ["10.10.1.0/24", "10.20.1.0/24"],
+                           "ipProtocols": ["TCP"], "sourceAddresses": [PREFIXES["spokea"][1], PREFIXES["spokeb"][1]],
                            "destinationAddresses": ["AzureCloud"], "destinationPorts": ["443"]}]},
-               {"name": "lab-http", "action": {"type": "Allow"}},
-               {"name": "egress-check", "action": {"type": "Allow"}},
+               {"name": "lab-http", "priority": 200, "action": {"type": "Allow"},
+                "rules": [{"name": "spokea-to-spokeb", "ruleType": "NetworkRule",
+                           "ipProtocols": ["TCP"], "sourceAddresses": [PREFIXES["spokea"][1]],
+                           "destinationAddresses": [PREFIXES["spokeb"][1]],
+                           "destinationPorts": ["8080"]}]},
+               {"name": "egress-check", "priority": 300, "action": {"type": "Allow"},
+                "rules": [{"name": "public-ip-check", "ruleType": "ApplicationRule",
+                           "sourceAddresses": [PREFIXES["spokea"][1], PREFIXES["spokeb"][1]],
+                           "targetFqdns": ["api.ipify.org"]}]},
            ]})]
 
 
-def admin_calls(stage="baseline", hub="10.0.1.4", a="10.10.1.4", b="10.20.1.4"):
+def admin_calls(stage="baseline", hub="172.20.0.4", a="172.20.16.4", b="172.20.32.4"):
     calls = [az(["network", "manager", "security-admin-config", "show", "-g", rg("hub"),
                  "--network-manager-name", "avnm-lzbegin-demo123",
                  "--configuration-name", "sc-lzbegin-http-demo123", "-o", "json"],
@@ -106,7 +114,7 @@ def effective_admin_call(zone, name, source, destination, access, payload=None):
 class SafetyTests(unittest.TestCase):
     def execute(self, command, calls=()):
         script = ('source scripts/workshop-common.sh && source scripts/workshop-safety.sh && '
-                  'load_run state.json && ' + command +
+                  'load_run state.json && ' + CIDR_ENV + command +
                   '\nstatus=$?\nprintf "ALIVE\\n"\nexit "$status"')
         result = run(script, calls)
         self.assertIn("ALIVE", result.stdout)
@@ -212,12 +220,12 @@ class SafetyTests(unittest.TestCase):
 
     def test_ip_validation_rejects_malformed_or_wrong_subnet_addresses(self):
         for address, network, valid in (
-            ("10.0.2.4", "10.0.2.0/26", True),
-            ("10.0.2.99", "10.0.2.0/26", False),
-            ("999.1.2.3", "10.0.2.0/26", False),
-            ("null", "10.0.2.0/26", False),
-            ("10.10.1.9", "10.10.1.0/24", True),
-            ("10.20.1.9", "10.10.1.0/24", False),
+            ("172.20.1.4", "172.20.1.0/26", True),
+            ("172.20.1.99", "172.20.1.0/26", False),
+            ("999.1.2.3", "172.20.1.0/26", False),
+            ("null", "172.20.1.0/26", False),
+            ("172.20.16.9", "172.20.16.0/24", True),
+            ("172.20.32.9", "172.20.16.0/24", False),
         ):
             with self.subTest(address=address):
                 result = self.execute(f'assert_ipv4_in_subnet "{address}" "{network}"')
@@ -232,7 +240,7 @@ class SafetyTests(unittest.TestCase):
             (1, {"id": "foreign", "provisioningState": "Succeeded",
                  "ipConfigurations": [{"privateIPAddress": FW_IP}]}),
             (1, {"id": FW, "provisioningState": "Succeeded", "firewallPolicy": {"id": POLICY},
-                 "ipConfigurations": [{"privateIPAddress": "10.0.2.100"}]}),
+                 "ipConfigurations": [{"privateIPAddress": "172.20.1.100"}]}),
             (2, "foreign-workspace"),
             (3, {"workspaceId": LAW, "logAnalyticsDestinationType": "AzureDiagnostics", "logs": []}),
             (4, {"ruleCollections": []}),
@@ -242,6 +250,27 @@ class SafetyTests(unittest.TestCase):
                 calls[-1]["stdout"] = value if isinstance(value, str) else json.dumps(value)
                 self.assertNotEqual(self.execute("firewall_ready_ip", calls).returncode, 0)
 
+    def test_firewall_uses_live_ipam_firewall_and_management_ranges(self):
+        calls = copy.deepcopy(ready_calls())
+        firewall = json.loads(calls[1]["stdout"])
+        firewall["ipConfigurations"][0]["privateIPAddress"] = "172.21.1.4"
+        calls[1]["stdout"] = json.dumps(firewall)
+        collections = json.loads(calls[4]["stdout"])
+        for collection in collections["ruleCollections"]:
+            for rule in collection["rules"]:
+                rule["sourceAddresses"] = [
+                    value.replace("172.20.", "172.21.") for value in rule["sourceAddresses"]]
+                if "destinationAddresses" in rule:
+                    rule["destinationAddresses"] = [
+                        value.replace("172.20.", "172.21.") for value in rule["destinationAddresses"]]
+        calls[4]["stdout"] = json.dumps(collections)
+        command = ('source scripts/workshop-common.sh; source scripts/workshop-safety.sh; '
+                   'load_run state.json; ' + CIDR_ENV.replace("172.20.", "172.21.") +
+                   'firewall_ready_ip')
+        result = run(command, calls)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("172.21.1.4", result.stdout)
+
     def test_managed_routes_require_exact_subnet_group_prefix_and_hop(self):
         command = f'assert_avnm_routes_ready "{FW_IP}"'
         self.assertEqual(self.execute(command, redesign.route_calls()).returncode, 0)
@@ -249,7 +278,7 @@ class SafetyTests(unittest.TestCase):
             (1, "provisioningState", "Updating"),
             (3, "appliesTo", [{"networkGroupId": GROUPS["spokeb"]}]),
             (4, "destination", {"type": "AddressPrefix", "destinationAddress": "10.0.0.0/16"}),
-            (5, "nextHop", {"nextHopType": "VirtualAppliance", "nextHopAddress": "10.0.2.5"}),
+            (5, "nextHop", {"nextHopType": "VirtualAppliance", "nextHopAddress": "172.20.1.5"}),
             (6, "id", "foreign-subnet"),
             (6, "routeTable", {"id": "foreign-table"}),
             (7, "routes", []),
@@ -266,7 +295,7 @@ class SafetyTests(unittest.TestCase):
         for stage in ("baseline", "denied", "restored"):
             with self.subTest(stage=stage):
                 self.assertEqual(self.execute(
-                    f'assert_admin_rules_ready 10.0.1.4 10.10.1.4 10.20.1.4 {stage}',
+                    f'assert_admin_rules_ready 172.20.0.4 172.20.16.4 172.20.32.4 {stage}',
                     admin_calls(stage)).returncode, 0)
         for stage, index, field, bad in (
             ("baseline", 0, "provisioningState", "Updating"),
@@ -284,11 +313,11 @@ class SafetyTests(unittest.TestCase):
                 data[field] = bad
                 calls[-1]["stdout"] = json.dumps(data)
                 self.assertNotEqual(self.execute(
-                    f'assert_admin_rules_ready 10.0.1.4 10.10.1.4 10.20.1.4 {stage}',
+                    f'assert_admin_rules_ready 172.20.0.4 172.20.16.4 172.20.32.4 {stage}',
                     calls).returncode, 0)
 
     def test_admin_rule_listing_proves_deny_absent_after_recovery(self):
-        command = "assert_admin_rules_ready 10.0.1.4 10.10.1.4 10.20.1.4 "
+        command = "assert_admin_rules_ready 172.20.0.4 172.20.16.4 172.20.32.4 "
         for stage, index, extras in (
             ("baseline", 2, ["deny-hub-to-a"]),
             ("restored", 2, ["deny-hub-to-a"]),
@@ -324,7 +353,7 @@ class SafetyTests(unittest.TestCase):
         cases = [
             ("firewall_ready_ip", ready_calls()),
             (f'assert_avnm_routes_ready "{FW_IP}"', redesign.route_calls()),
-            ("assert_admin_rules_ready 10.0.1.4 10.10.1.4 10.20.1.4 denied", admin_calls("denied")),
+            ("assert_admin_rules_ready 172.20.0.4 172.20.16.4 172.20.32.4 denied", admin_calls("denied")),
             ("assert_no_spoke_nat", fixture.calls()),
         ]
         for command, good in cases:

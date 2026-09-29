@@ -229,7 +229,7 @@ timeout 2700 az network firewall ip-config create -g "$RG_HUB" \
 
 👁️ **설명**
 
-IP는 Hub의 `10.0.2.0/26` 안이어야 합니다. 상태/정책/전체 ID가 다른 경우
+IP는 Hub의 할당된 `AzureFirewallSubnet`(`/26`) 안이어야 합니다. 상태/정책/전체 ID가 다른 경우
 규칙이나 경로 배포를 시작하지 마세요.
 
 🟢 **실행**
@@ -249,7 +249,7 @@ inspect_firewall_before_rules() {
     (.ipConfigurations[0].privateIPAddress | type == "string" and length > 0)
   ' <<< "$fw" >/dev/null || { fail "Firewall ID, policy or provisioning is not ready."; return 1; }
   ip=$(jq -er '.ipConfigurations[0].privateIPAddress' <<< "$fw") || return 1
-  assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
+  assert_ipv4_in_subnet "$ip" "$FIREWALL_SUBNET_CIDR" || return 1
   printf 'PASS: Firewall Succeeded; private IP %s\n' "$ip"
 }
 inspect_firewall_before_rules
@@ -295,7 +295,7 @@ az network firewall policy rule-collection-group collection add-filter-collectio
   -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n management \
   --collection-priority 100 --action Allow --rule-name azure-management \
   --rule-type NetworkRule --ip-protocols TCP \
-  --source-addresses 10.10.1.0/24 10.20.1.0/24 \
+  --source-addresses "$SPOKEA_SUBNET_CIDR" "$SPOKEB_SUBNET_CIDR" \
   --destination-addresses AzureCloud --destination-ports 443 \
   -o json --subscription "$SUBSCRIPTION_ID"
 ```
@@ -308,8 +308,8 @@ az network firewall policy rule-collection-group collection add-filter-collectio
 
 👁️ **설명**
 
-아직 VM/NIC가 없으므로 출발지 `10.10.1.0/24`와 목적지
-`10.20.1.0/24`의 **TCP/8080만** 최초 허용합니다. 다른 포트·Spoke 전체
+아직 VM/NIC가 없으므로 출발지 `$SPOKEA_SUBNET_CIDR`와 목적지
+`$SPOKEB_SUBNET_CIDR`의 **TCP/8080만** 최초 허용합니다. 다른 포트·Spoke 전체
 주소 공간을 열지 않습니다. 모듈 05에서 VM이 생성된 뒤 실제 NIC IP로
 규칙을 좁히려면 현재 collection·규칙을 확인한 후 Policy를 갱신해야 합니다.
 기준 검증에서는 이 CIDR 규칙을 유지합니다. Firewall은 상태를 추적하지만,
@@ -323,7 +323,7 @@ az network firewall policy rule-collection-group collection add-filter-collectio
   -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n lab-http \
   --collection-priority 200 --action Allow --rule-name spokea-to-spokeb \
   --rule-type NetworkRule --ip-protocols TCP \
-  --source-addresses 10.10.1.0/24 --destination-addresses 10.20.1.0/24 \
+  --source-addresses "$SPOKEA_SUBNET_CIDR" --destination-addresses "$SPOKEB_SUBNET_CIDR" \
   --destination-ports 8080 -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
@@ -346,7 +346,7 @@ Azure Firewall의 FQDN 검사와 기록은 AVNM Routing으로 대체되지 않�
 az network firewall policy rule-collection-group collection add-filter-collection \
   -g "$RG_HUB" --policy-name "fwpol-lzbegin-$RUN_ID" --rcg-name workshop -n egress-check \
   --collection-priority 300 --action Allow --rule-name public-ip-check \
-  --rule-type ApplicationRule --source-addresses 10.10.1.0/24 10.20.1.0/24 \
+  --rule-type ApplicationRule --source-addresses "$SPOKEA_SUBNET_CIDR" "$SPOKEB_SUBNET_CIDR" \
   --protocols Https=443 --target-fqdns api.ipify.org \
   -o json --subscription "$SUBSCRIPTION_ID"
 ```
@@ -367,27 +367,35 @@ check_firewall_policy_rules() {
   group=$(az network firewall policy rule-collection-group show -g "$RG_HUB" \
     --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID/ruleCollectionGroups/workshop" '
+  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID/ruleCollectionGroups/workshop" \
+    --arg a "$SPOKEA_SUBNET_CIDR" --arg b "$SPOKEB_SUBNET_CIDR" '
     (.id | ascii_downcase) == ($id | ascii_downcase) and
     .provisioningState == "Succeeded" and .priority == 200 and
     (.ruleCollections | type == "array" and length == 3) and
     ([.ruleCollections[].name] | sort) == (["management","lab-http","egress-check"] | sort) and
     all(.ruleCollections[]; .action.type == "Allow") and
     ([.ruleCollections[] | select(.name == "management")] |
-      length == 1 and .[0].priority == 100 and .[0].rules[0].name == "azure-management") and
+      length == 1 and .[0].priority == 100 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "azure-management" and .ruleType == "NetworkRule" and
+        .ipProtocols == ["TCP"] and
+        (.sourceAddresses | type == "array" and length == 2 and sort == ([$a, $b] | sort)) and
+        .destinationAddresses == ["AzureCloud"] and .destinationPorts == ["443"])) and
     ([.ruleCollections[] | select(.name == "lab-http")] |
       length == 1 and .[0].priority == 200 and
       (.[0].rules | type == "array" and length == 1) and
       (.[0].rules[0] |
         .name == "spokea-to-spokeb" and .ruleType == "NetworkRule" and
-        .sourceAddresses == ["10.10.1.0/24"] and
-        .destinationAddresses == ["10.20.1.0/24"] and
+        .sourceAddresses == [$a] and
+        .destinationAddresses == [$b] and
         .destinationPorts == ["8080"] and .ipProtocols == ["TCP"])) and
     ([.ruleCollections[] | select(.name == "egress-check")] |
       length == 1 and .[0].priority == 300 and
       (.[0].rules | type == "array" and length == 1) and
       (.[0].rules[0] |
         .name == "public-ip-check" and .ruleType == "ApplicationRule" and
+        (.sourceAddresses | type == "array" and length == 2 and sort == ([$a, $b] | sort)) and
         .targetFqdns == ["api.ipify.org"]))
   ' <<< "$group" >/dev/null || { fail "Policy collections or HTTP/FQDN rules are incomplete."; return 1; }
   printf 'PASS: Policy workshop group and three Allow collections\n'
@@ -640,8 +648,8 @@ table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 
 
 | 대상 collection / Group | 목적지 1 | 목적지 2 | 두 next hop |
 |---|---|---|---|
-| `spokea` / A 전용 | `10.20.0.0/16` | `0.0.0.0/0` | Firewall 사설 IP |
-| `spokeb` / B 전용 | `10.10.0.0/16` | `0.0.0.0/0` | Firewall 사설 IP |
+| `spokea` / A 전용 | `$SPOKEB_VNET_CIDR` | `0.0.0.0/0` | Firewall 사설 IP |
+| `spokeb` / B 전용 | `$SPOKEA_VNET_CIDR` | `0.0.0.0/0` | Firewall 사설 IP |
 
 ### 4-1. Routing Configuration 최초 생성
 
@@ -727,18 +735,20 @@ B collection은 B Group만 대상으로 합니다.
 ```bash
 fw_ip=$(firewall_ready_ip) &&
 next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+destination=$(jq -cn --arg prefix "$SPOKEB_VNET_CIDR" \
+  '{type:"AddressPrefix",destinationAddress:$prefix}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokea -n to-other-spoke \
-  --destination '{"type":"AddressPrefix","destinationAddress":"10.20.0.0/16"}' \
+  --destination "$destination" \
   --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
-assert_routing_rule_result "$created" spokea to-other-spoke 10.20.0.0/16 "$fw_ip" &&
+assert_routing_rule_result "$created" spokea to-other-spoke "$SPOKEB_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
 ```
 
 📋 **확인**
 
-A의 `10.20.0.0/16 → VirtualAppliance (Firewall 사설 IP)`입니다.
+A의 `$SPOKEB_VNET_CIDR → VirtualAppliance (Firewall 사설 IP)`입니다.
 
 ### 4-5. A → 인터넷 `/0` rule
 
@@ -769,18 +779,20 @@ A의 default route는 같은 Firewall 사설 IP입니다.
 ```bash
 fw_ip=$(firewall_ready_ip) &&
 next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
+destination=$(jq -cn --arg prefix "$SPOKEA_VNET_CIDR" \
+  '{type:"AddressPrefix",destinationAddress:$prefix}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokeb -n to-other-spoke \
-  --destination '{"type":"AddressPrefix","destinationAddress":"10.10.0.0/16"}' \
+  --destination "$destination" \
   --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
-assert_routing_rule_result "$created" spokeb to-other-spoke 10.10.0.0/16 "$fw_ip" &&
+assert_routing_rule_result "$created" spokeb to-other-spoke "$SPOKEA_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
 ```
 
 📋 **확인**
 
-B의 `10.10.0.0/16 → VirtualAppliance`는 A→B의 **응답 경로**입니다.
+B의 `$SPOKEA_VNET_CIDR → VirtualAppliance`는 A→B의 **응답 경로**입니다.
 
 ### 4-7. B → 인터넷 `/0` rule
 

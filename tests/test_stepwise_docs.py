@@ -21,7 +21,7 @@ def support_cases():
         "support-deploy": [az([*support_args("create"), "-o", "json"])],
         "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
-        "read-vm-ips": [nic("hub", "10.0.1.4"), nic("spokea", "10.10.1.4"), nic("spokeb", "10.20.1.4")],
+        "read-vm-ips": [nic("hub", "172.20.0.4"), nic("spokea", "172.20.16.4"), nic("spokeb", "172.20.32.4")],
     }
     return cases
 
@@ -73,17 +73,17 @@ def firewall_cases():
         "firewall-management-rule": [az([*collection, "-n", "management", "--collection-priority", "100",
                                                        "--action", "Allow", "--rule-name", "azure-management",
                                                        "--rule-type", "NetworkRule", "--ip-protocols", "TCP",
-                                                       "--source-addresses", "10.10.1.0/24", "10.20.1.0/24",
+                                                       "--source-addresses", "172.20.16.0/24", "172.20.32.0/24",
                                                        "--destination-addresses", "AzureCloud", "--destination-ports", "443",
                                                        "-o", "json"])],
         "firewall-http-rule": [az([*collection, "-n", "lab-http", "--collection-priority", "200", "--action", "Allow",
                                    "--rule-name", "spokea-to-spokeb", "--rule-type", "NetworkRule",
-                                   "--ip-protocols", "TCP", "--source-addresses", "10.10.1.0/24",
-                                   "--destination-addresses", "10.20.1.0/24", "--destination-ports", "8080", "-o", "json"])],
+                                   "--ip-protocols", "TCP", "--source-addresses", "172.20.16.0/24",
+                                   "--destination-addresses", "172.20.32.0/24", "--destination-ports", "8080", "-o", "json"])],
         "firewall-egress-rule": [az([*collection, "-n", "egress-check", "--collection-priority", "300",
                                                    "--action", "Allow", "--rule-name", "public-ip-check",
                                                    "--rule-type", "ApplicationRule", "--source-addresses",
-                                                   "10.10.1.0/24", "10.20.1.0/24", "--protocols", "Https=443",
+                                                   "172.20.16.0/24", "172.20.32.0/24", "--protocols", "Https=443",
                                                    "--target-fqdns", "api.ipify.org", "-o", "json"])],
         "inspect-firewall-rules": [ready_calls()[-1]],
         "firewall-diagnostics": [
@@ -142,7 +142,7 @@ def routing_cases():
             "--manager-name", "avnm-lzbegin-demo123", "--config-name", "rc-lzbegin-spokes-demo123",
             "-n", zone, "--applies-to", applies, "--disable-bgp-route", "true", "-o", "json"],
             {"id": collection, "appliesTo": [{"networkGroupId": group}]})]
-        for kind, rule, prefix in (("other", "to-other-spoke", "10.20.0.0/16" if zone == "spokea" else "10.10.0.0/16"),
+        for kind, rule, prefix in (("other", "to-other-spoke", "172.20.32.0/20" if zone == "spokea" else "172.20.16.0/20"),
                                    ("internet", "to-internet", "0.0.0.0/0")):
             dest = json.dumps({"type": "AddressPrefix", "destinationAddress": prefix}, separators=(",", ":"))
             hop = json.dumps({"nextHopType": "VirtualAppliance", "nextHopAddress": FW_IP}, separators=(",", ":"))
@@ -156,13 +156,16 @@ def routing_cases():
                  "nextHop": {"nextHopType": "VirtualAppliance", "nextHopAddress": FW_IP}})]
     for name, action in (("firewall-deny", "Deny"), ("firewall-restore", "Allow")):
         prerequisites = [*effective_route_calls(), *no_spoke_nat_calls()] if action == "Deny" else []
+        policy = json.loads(ready_calls()[-1]["stdout"])
+        next(collection for collection in policy["ruleCollections"]
+             if collection["name"] == "lab-http")["action"]["type"] = (
+                 "Allow" if action == "Deny" else "Deny")
         cases[name] = [*prerequisites, az(["network", "firewall", "policy", "rule-collection-group", "show", "-g", rg("hub"),
                            "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop", "-o", "json"],
-                          {"ruleCollections": [{"name": "egress-check"}, {"name": "management"},
-                                               {"name": "lab-http", "action": {"type": "Allow" if action == "Deny" else "Deny"}}]}),
+                          policy),
                        az(["network", "firewall", "policy", "rule-collection-group", "update", "-g", rg("hub"),
                            "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop",
-                           "--set", f"ruleCollections[2].action.type={action}", "-o", "json"])]
+                           "--set", f"ruleCollections[1].action.type={action}", "-o", "json"])]
     return cases
 
 
@@ -264,7 +267,7 @@ def deployed_route_calls():
             "-o", "json"], {"id": config, "provisioningState": "Succeeded",
                            "routeTableUsageMode": "ManagedOnly"}),
     ]
-    for zone, remote in (("spokea", "10.20.0.0/16"), ("spokeb", "10.10.0.0/16")):
+    for zone, remote in (("spokea", "172.20.32.0/20"), ("spokeb", "172.20.16.0/20")):
         collection = config + f"/ruleCollections/{zone}"
         calls += [
             group(zone),
@@ -297,7 +300,7 @@ def deployed_route_calls():
 
 def effective_route_calls():
     calls = [*ready_calls(), *deployed_route_calls()]
-    for zone, remote in (("spokea", "10.20.0.0/16"), ("spokeb", "10.10.0.0/16")):
+    for zone, remote in (("spokea", "172.20.32.0/20"), ("spokeb", "172.20.16.0/20")):
         calls.append(az(["network", "nic", "show-effective-route-table", "-g", rg(zone),
                          "-n", "nic-lzbegin-" + zone + "-demo123", "-o", "json"],
                         {"value": [{"state": "Active", "addressPrefix": [prefix],
@@ -325,10 +328,10 @@ def admin_rule_checks(stage="baseline"):
     calls = [az([*base, "show", *options, "-o", "json"],
                 {"id": config, "provisioningState": "Succeeded"})]
     for zone, rules in (
-        ("spokea", [("hub-to-a", "10.0.1.4", "10.10.1.4", "AlwaysAllow", 200)]
-         + ([("deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", 100)] if stage == "denied" else [])),
-        ("spokeb", [("hub-to-b", "10.0.1.4", "10.20.1.4", "AlwaysAllow", 210),
-                     ("a-to-b", "10.10.1.4", "10.20.1.4", "AlwaysAllow", 220)]),
+        ("spokea", [("hub-to-a", "172.20.0.4", "172.20.16.4", "AlwaysAllow", 200)]
+         + ([("deny-hub-to-a", "172.20.0.4", "172.20.16.4", "Deny", 100)] if stage == "denied" else [])),
+        ("spokeb", [("hub-to-b", "172.20.0.4", "172.20.32.4", "AlwaysAllow", 210),
+                     ("a-to-b", "172.20.16.4", "172.20.32.4", "AlwaysAllow", 220)]),
     ):
         calls.append(az([*base, "rule-collection", "show", *options, "--rule-collection-name",
                          zone, "-o", "json"],
@@ -359,9 +362,9 @@ def security_cases():
             *base, "rule-collection", "create", *options, "--rule-collection-name", zone,
             "--applies-to-groups", "network-group-id=" + routing_group_id(zone), "-o", "json"])]
     for step, zone, rule, source, dest, access, priority in (
-        ("allow-hub-spokea", "spokea", "hub-to-a", "10.0.1.4", "10.10.1.4", "AlwaysAllow", 200),
-        ("allow-hub-spokeb", "spokeb", "hub-to-b", "10.0.1.4", "10.20.1.4", "AlwaysAllow", 210),
-        ("allow-spokea-spokeb", "spokeb", "a-to-b", "10.10.1.4", "10.20.1.4", "AlwaysAllow", 220),
+        ("allow-hub-spokea", "spokea", "hub-to-a", "172.20.0.4", "172.20.16.4", "AlwaysAllow", 200),
+        ("allow-hub-spokeb", "spokeb", "hub-to-b", "172.20.0.4", "172.20.32.4", "AlwaysAllow", 210),
+        ("allow-spokea-spokeb", "spokeb", "a-to-b", "172.20.16.4", "172.20.32.4", "AlwaysAllow", 220),
     ):
         cases[step] = [az([*base, "rule-collection", "rule", "create", *options,
                            "--rule-collection-name", zone, "--rule-name", rule,
@@ -402,11 +405,11 @@ class StepwiseDocsTests(unittest.TestCase):
         if module == 5 and name in ("allow-hub-spokea", "allow-hub-spokeb",
                                      "allow-spokea-spokeb",
                                      "inspect-security-rules"):
-            prefix += 'hub_ip=10.0.1.4; a_ip=10.10.1.4; b_ip=10.20.1.4\n'
+            prefix += 'hub_ip=172.20.0.4; a_ip=172.20.16.4; b_ip=172.20.32.4\n'
         if module == 5 and name.startswith("verify-admin-") and name not in (
             "verify-admin-http-baseline", "verify-admin-http-denied", "verify-admin-http-restored"):
             prefix += steps["admin-flow-check"] + "\n"
-            prefix += 'hub_ip=10.0.1.4; a_ip=10.10.1.4; b_ip=10.20.1.4\n'
+            prefix += 'hub_ip=172.20.0.4; a_ip=172.20.16.4; b_ip=172.20.32.4\n'
         return test_network_docs.NetworkDocsTests.execute(
             self, module, name, calls, input_text, files, prefix, state)
 
@@ -441,7 +444,7 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertEqual(self.execute(6, "firewall-deny", calls).returncode, 0)
         invalid = copy.deepcopy(calls[:len(effective_route_calls())])
         routes = json.loads(invalid[-1]["stdout"])
-        routes["value"][0]["nextHopIpAddress"] = ["10.0.2.5"]
+        routes["value"][0]["nextHopIpAddress"] = ["172.20.1.5"]
         invalid[-1]["stdout"] = json.dumps(routes)
         self.assertNotEqual(self.execute(6, "firewall-deny", invalid).returncode, 0)
 
@@ -459,8 +462,8 @@ class StepwiseDocsTests(unittest.TestCase):
         example = doc.split("<!-- exec:verify-allowed -->", 1)[1].split("## 4.", 1)[0]
         for evidence in ("Waiting for current flow logs", "VirtualAppliance",
                          "VNetPeering", "effective AVNM rule", "PASS: HTTP spokeb",
-                         '"Action": "Allow"', '"SourceIp": "10.10.1.4"',
-                         '"DestinationIp": "10.20.1.4"',
+                         '"Action": "Allow"', '"SourceIp": "<Spoke A 사설 IP>"',
+                         '"DestinationIp": "<Spoke B 사설 IP>"',
                          "PASS: matching Firewall Allow evidence found.",
                          "PASS: extension allowed"):
             with self.subTest(evidence=evidence):
@@ -616,7 +619,7 @@ class StepwiseDocsTests(unittest.TestCase):
                  [{"networkGroupId": routing_group_id("spokeb" if zone == "spokea" else "spokea")}]),
                 (f"routing-collection-{zone}", "id", routing_group_id(zone)),
                 (f"routing-rule-{zone}-other", "nextHop",
-                 {"nextHopType": "VirtualAppliance", "nextHopAddress": "10.0.2.5"}),
+                 {"nextHopType": "VirtualAppliance", "nextHopAddress": "172.20.1.5"}),
                 (f"routing-rule-{zone}-other", "id", "/subscriptions/" + SUB +
                  "/resourceGroups/" + rg("hub") + "/providers/Microsoft.Network/networkManagers/other/rules/to-other-spoke"),
             ):
@@ -628,7 +631,7 @@ class StepwiseDocsTests(unittest.TestCase):
                     self.assertNotEqual(self.execute(4, step, calls).returncode, 0)
         calls = copy.deepcopy(routing_cases()["routing-rule-spokea-other"])
         payload = json.loads(calls[-1]["stdout"])
-        payload["destination"]["destinationAddress"] = "10.10.0.0/16"
+        payload["destination"]["destinationAddress"] = "172.20.16.0/20"
         calls[-1]["stdout"] = json.dumps(payload)
         self.assertNotEqual(self.execute(4, "routing-rule-spokea-other", calls).returncode, 0)
 
@@ -708,9 +711,9 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def test_effective_admin_checks_require_exact_avnm_rule_and_action(self):
         for step, zone, local, remote, action, rule in (
-            ("verify-admin-allow-a", "spokea", "10.10.1.4", "10.0.1.4", "Allow", "hub-to-a"),
-            ("verify-admin-allow-b", "spokeb", "10.20.1.4", "10.0.1.4", "Allow", "hub-to-b"),
-            ("verify-admin-allow-ab", "spokeb", "10.20.1.4", "10.10.1.4", "Allow", "a-to-b"),
+            ("verify-admin-allow-a", "spokea", "172.20.16.4", "172.20.0.4", "Allow", "hub-to-a"),
+            ("verify-admin-allow-b", "spokeb", "172.20.32.4", "172.20.0.4", "Allow", "hub-to-b"),
+            ("verify-admin-allow-ab", "spokeb", "172.20.32.4", "172.20.16.4", "Allow", "a-to-b"),
         ):
             access = "AlwaysAllow" if action == "Allow" else "Deny"
             with self.subTest(step=step):
@@ -738,7 +741,7 @@ class StepwiseDocsTests(unittest.TestCase):
                 (3, "access", "Allow"),
                 (3, "priority", 100),
                 (3, "sources", [{"addressPrefixType": "IPPrefix", "addressPrefix": "10.0.1.5/32"}]),
-                (3, "id", security_rule("spokea", "hub-to-a", "10.0.1.4", "10.10.1.4",
+                (3, "id", security_rule("spokea", "hub-to-a", "172.20.0.4", "172.20.16.4",
                                         "AlwaysAllow", 200)["id"] + "/child"),
             ):
                 with self.subTest(step=step, field=field):
@@ -765,8 +768,8 @@ class StepwiseDocsTests(unittest.TestCase):
         for index, field, value in (
             (6, "id", avnm_id() + "/routingConfigurations/other"),
             (8, "appliesTo", [{"networkGroupId": routing_group_id("spokeb")}]),
-            (9, "destination", {"type": "AddressPrefix", "destinationAddress": "10.10.0.0/16"}),
-            (9, "nextHop", {"nextHopType": "VirtualAppliance", "nextHopAddress": "10.0.2.5"}),
+            (9, "destination", {"type": "AddressPrefix", "destinationAddress": "172.20.16.0/20"}),
+            (9, "nextHop", {"nextHopType": "VirtualAppliance", "nextHopAddress": "172.20.1.5"}),
             (11, "id", netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")),
             (12, "id", netid("spokeb", "routeTables", "avnm-managed-spokeb")),
             (12, "routes", [{"provisioningState": "Succeeded", "addressPrefix": "0.0.0.0/0",
@@ -783,7 +786,7 @@ class StepwiseDocsTests(unittest.TestCase):
         for index in (-2, -1):
             altered = copy.deepcopy(calls if index == -1 else calls[:-1])
             route = json.loads(altered[-1]["stdout"])
-            route["value"][0]["nextHopIpAddress"] = ["10.0.2.5"]
+            route["value"][0]["nextHopIpAddress"] = ["172.20.1.5"]
             altered[-1]["stdout"] = json.dumps(route)
             self.assertNotEqual(self.execute(6, "firewall-deny", altered).returncode, 0)
         for index, payload in ((1, {"natGateway": {"id": "foreign"}}),

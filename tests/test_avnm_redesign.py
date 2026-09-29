@@ -4,12 +4,13 @@ import subprocess
 import unittest
 
 from harness import ROOT, STATE, SUB, call, group, run
+from test_ipam_cidrs import CIDR_ENV
 
 
 BASE = (f"/subscriptions/{SUB}/resourceGroups/{STATE['resourceGroups']['hub']}"
         "/providers/Microsoft.Network/networkManagers/avnm-lzbegin-demo123")
 CONFIG = BASE + "/routingConfigurations/rc-lzbegin-spokes-demo123"
-FIREWALL_IP = "10.0.2.4"
+FIREWALL_IP = "172.20.1.4"
 
 
 class IpamVnetTemplateTests(unittest.TestCase):
@@ -47,7 +48,7 @@ def route_calls():
             "--manager-name", "avnm-lzbegin-demo123", "-n", "rc-lzbegin-spokes-demo123",
             "-o", "json"], {"id": CONFIG, "provisioningState": "Succeeded"}),
     ]
-    for zone, remote in (("spokea", "10.20.0.0/16"), ("spokeb", "10.10.0.0/16")):
+    for zone, remote in (("spokea", "172.20.32.0/20"), ("spokeb", "172.20.16.0/20")):
         rg = STATE["resourceGroups"][zone]
         group_id = BASE + f"/networkGroups/ng-lzbegin-route-{zone}-demo123"
         table_id = (f"/subscriptions/{SUB}/resourceGroups/NetworkManagerRG/providers/"
@@ -89,7 +90,7 @@ class AvnmRoutingSafetyTests(unittest.TestCase):
     def check(self, calls):
         script = ('source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; '
                   'source "$WORKSHOP_ROOT/scripts/workshop-safety.sh"; '
-                  'load_run state.json; assert_avnm_routes_ready 10.0.2.4')
+                  'load_run state.json; ' + CIDR_ENV + 'assert_avnm_routes_ready 172.20.1.4')
         return run(script, calls)
 
     def test_valid_separate_route_groups_and_attached_tables(self):

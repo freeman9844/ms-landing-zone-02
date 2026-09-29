@@ -223,10 +223,10 @@ check_vm_effective_routes() {
   for zone in spokea spokeb; do
     if [[ "$zone" == spokea ]]; then
       rg="$RG_SPOKEA"
-      remote=10.20.0.0/16
+      remote="$SPOKEB_VNET_CIDR"
     else
       rg="$RG_SPOKEB"
-      remote=10.10.0.0/16
+      remote="$SPOKEA_VNET_CIDR"
     fi
     routes=$(az network nic show-effective-route-table -g "$rg" \
       -n "nic-lzbegin-$zone-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
@@ -247,7 +247,7 @@ check_vm_effective_routes
 
 📋 **확인**
 
-Spoke A에는 `10.20.0.0/16`, Spoke B에는 `10.10.0.0/16`, 양쪽에는
+Spoke A에는 `$SPOKEB_VNET_CIDR`, Spoke B에는 `$SPOKEA_VNET_CIDR`, 양쪽에는
 `0.0.0.0/0`이 `Active`·`VirtualAppliance`·동일 Firewall 사설 IP입니다.
 다른 next hop이나 비활성 경로를 통과로 해석하지 않습니다.
 
@@ -293,9 +293,9 @@ read_vm_ips() {
     --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
   b_ip=$(az network nic show -g "$RG_SPOKEB" -n "nic-lzbegin-spokeb-$RUN_ID" \
     --query 'ipConfigurations[0].privateIPAddress' -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  assert_ipv4_in_subnet "$hub_ip" 10.0.1.0/24 || return 1
-  assert_ipv4_in_subnet "$a_ip" 10.10.1.0/24 || return 1
-  assert_ipv4_in_subnet "$b_ip" 10.20.1.0/24 || return 1
+  assert_ipv4_in_subnet "$hub_ip" "$HUB_SUBNET_CIDR" || return 1
+  assert_ipv4_in_subnet "$a_ip" "$SPOKEA_SUBNET_CIDR" || return 1
+  assert_ipv4_in_subnet "$b_ip" "$SPOKEB_SUBNET_CIDR" || return 1
   printf 'Hub=%s A=%s B=%s\n' "$hub_ip" "$a_ip" "$b_ip"
 }
 read_vm_ips

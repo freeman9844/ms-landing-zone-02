@@ -19,6 +19,7 @@ jq -e '.provisioningState == "Succeeded" and .sku.name == "AZFW_VNet" and .sku.t
   and (.ipConfigurations[0].privateIPAddress | type == "string" and length > 0)' \
   <<< "$fw" >/dev/null || { fail "Firewall is not ready"; exit 1; }
 fw_ip=$(jq -r '.ipConfigurations[0].privateIPAddress' <<< "$fw")
+assert_ipv4_in_subnet "$fw_ip" "$FIREWALL_SUBNET_CIDR"
 fw_id=$(jq -er .id <<< "$fw")
 law_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID"
 # 다른 workspace나 공용 로그 테이블을 조회해 잘못된 증거를 얻지 않도록 진단 설정부터 대조합니다.
@@ -33,9 +34,9 @@ public_ip=$(az network public-ip show -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" -
 hub=$(vm_ip hub)
 a=$(vm_ip spokea)
 b=$(vm_ip spokeb)
-assert_ipv4_in_subnet "$hub" 10.0.1.0/24
-assert_ipv4_in_subnet "$a" 10.10.1.0/24
-assert_ipv4_in_subnet "$b" 10.20.1.0/24
+assert_ipv4_in_subnet "$hub" "$HUB_SUBNET_CIDR"
+assert_ipv4_in_subnet "$a" "$SPOKEA_SUBNET_CIDR"
+assert_ipv4_in_subnet "$b" "$SPOKEB_SUBNET_CIDR"
 if [[ "$2" == denied ]]; then
   # Firewall Deny의 원인은 이번 흐름의 로그로 판정하고, A의 현재 NIC 경로만 재확인합니다.
   route_proof spokea "$b" VirtualAppliance "$fw_ip"

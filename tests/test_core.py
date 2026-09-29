@@ -42,22 +42,22 @@ class RouteTests(unittest.TestCase):
     def test_longer_blackhole_wins_over_default_internet(self):
         routes = [
             {"state": "Active", "addressPrefix": ["0.0.0.0/0"], "nextHopType": "Internet", "nextHopIpAddress": []},
-            {"state": "Active", "addressPrefix": ["10.0.0.0/8"], "nextHopType": "None", "nextHopIpAddress": []},
+            {"state": "Active", "addressPrefix": ["172.16.0.0/12"], "nextHopType": "None", "nextHopIpAddress": []},
         ]
-        result = self.check_route(routes, "10.20.1.4", "None")
+        result = self.check_route(routes, "172.20.32.4", "None")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotEqual(self.check_route(routes, "10.20.1.4", "Internet").returncode, 0)
+        self.assertNotEqual(self.check_route(routes, "172.20.32.4", "Internet").returncode, 0)
 
     def test_firewall_route_requires_correct_ip_and_active_state(self):
-        routes = [{"state": "Active", "addressPrefix": ["10.20.0.0/16"],
-                   "nextHopType": "VirtualAppliance", "nextHopIpAddress": ["10.0.2.4"]}]
-        self.assertEqual(self.check_route(routes, "10.20.1.4", "VirtualAppliance", "10.0.2.4").returncode, 0)
-        self.assertNotEqual(self.check_route(routes, "10.20.1.4", "VirtualAppliance", "10.0.2.5").returncode, 0)
+        routes = [{"state": "Active", "addressPrefix": ["172.20.32.0/20"],
+                   "nextHopType": "VirtualAppliance", "nextHopIpAddress": ["172.20.1.4"]}]
+        self.assertEqual(self.check_route(routes, "172.20.32.4", "VirtualAppliance", "172.20.1.4").returncode, 0)
+        self.assertNotEqual(self.check_route(routes, "172.20.32.4", "VirtualAppliance", "172.20.1.5").returncode, 0)
         routes[0]["state"] = "Invalid"
-        self.assertNotEqual(self.check_route(routes, "10.20.1.4", "VirtualAppliance", "10.0.2.4").returncode, 0)
+        self.assertNotEqual(self.check_route(routes, "172.20.32.4", "VirtualAppliance", "172.20.1.4").returncode, 0)
 
     def test_missing_routes_are_not_success(self):
-        self.assertNotEqual(self.check_route([], "10.20.1.4", "None").returncode, 0)
+        self.assertNotEqual(self.check_route([], "172.20.32.4", "None").returncode, 0)
 
 
 class HttpProofTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class HttpProofTests(unittest.TestCase):
         response = invoke("")
         response["run_guest"] = True
         return run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
-                   f'http_proof state.json spokea 10.20.1.4 {expected}',
+                   f'http_proof state.json spokea 172.20.32.4 {expected}',
                    [account(), group("spokea"), *cidr_calls(), response],
                    files={"bin/curl": f"#!/bin/sh\nprintf '%s\\n' '{body}'\nexit {code}\n"})
 
@@ -158,8 +158,8 @@ class CoreGateTests(unittest.TestCase):
             call(["network", "nic", "show", "-g", rg(zone),
                   "-n", f"nic-lzbegin-{zone}-demo123",
                   "--query", "ipConfigurations[0].privateIPAddress", "-o", "tsv"], ip)
-            for zone, ip in (("hub", "10.0.1.4"), ("spokea", "10.10.1.4"),
-                             ("spokeb", "10.20.1.4"))
+            for zone, ip in (("hub", "172.20.0.4"), ("spokea", "172.20.16.4"),
+                             ("spokeb", "172.20.32.4"))
         ] + ready_calls() + redesign.route_calls()
 
     def test_all_stages_reject_wrong_route_or_nat_before_http(self):
@@ -223,25 +223,25 @@ class CoreGateTests(unittest.TestCase):
 
         calls = self.network_calls() + redesign.SpokeNatAbsenceTests().calls() + admin_calls("denied")
         calls += [
-            route("hub", "10.10.0.0/16", "VNetPeering"),
-            route("hub", "10.20.0.0/16", "VNetPeering"),
-            route("spokea", "10.20.0.0/16", "VirtualAppliance", "10.0.2.4"),
-            route("spokeb", "10.10.0.0/16", "VirtualAppliance", "10.0.2.4"),
-            route("spokea", "0.0.0.0/0", "VirtualAppliance", "10.0.2.4"),
-            route("spokeb", "0.0.0.0/0", "VirtualAppliance", "10.0.2.4"),
+            route("hub", "172.20.16.0/20", "VNetPeering"),
+            route("hub", "172.20.32.0/20", "VNetPeering"),
+            route("spokea", "172.20.32.0/20", "VirtualAppliance", "172.20.1.4"),
+            route("spokeb", "172.20.16.0/20", "VirtualAppliance", "172.20.1.4"),
+            route("spokea", "0.0.0.0/0", "VirtualAppliance", "172.20.1.4"),
+            route("spokeb", "0.0.0.0/0", "VirtualAppliance", "172.20.1.4"),
             *guest("spokea"),
-            flow("spokea", "10.10.1.4", "10.0.1.4", "Deny", "deny-hub-to-a"),
+            flow("spokea", "172.20.16.4", "172.20.0.4", "Deny", "deny-hub-to-a"),
             *guest("hub"),
-            flow("spokeb", "10.20.1.4", "10.0.1.4", "Allow", "hub-to-b"),
+            flow("spokeb", "172.20.32.4", "172.20.0.4", "Allow", "hub-to-b"),
             *guest("hub"),
-            flow("spokeb", "10.20.1.4", "10.10.1.4", "Allow", "a-to-b"),
+            flow("spokeb", "172.20.32.4", "172.20.16.4", "Allow", "a-to-b"),
             *guest("spokea"),
         ]
         curl = """#!/bin/sh
 case "$*" in
   *127.0.0.1:8080/*) printf 'spokea\\n' ;;
-  *10.10.1.4:8080/*) exit 7 ;;
-  *10.20.1.4:8080/*) printf 'spokeb\\n' ;;
+  *172.20.16.4:8080/*) exit 7 ;;
+  *172.20.32.4:8080/*) printf 'spokeb\\n' ;;
   *) exit 99 ;;
 esac
 """
@@ -253,8 +253,8 @@ esac
     def test_effective_admin_rule_succeeds_without_consulting_network_watcher(self):
         result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
                      'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
-                     'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a', [
-            effective_admin_call("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny"),
+                     'admin_proof spokea 172.20.16.4 172.20.0.4 Deny deny-hub-to-a', [
+            effective_admin_call("spokea", "deny-hub-to-a", "172.20.0.4", "172.20.16.4", "Deny"),
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -264,13 +264,13 @@ esac
         for name, access, expected in (("hub-to-a", "AlwaysAllow", "Allow"),
                                        ("deny-hub-to-a", "Deny", "Deny")):
             with self.subTest(access=access):
-                rule = effective_admin_rule("spokea", name, "10.0.1.4", "10.10.1.4", access)
+                rule = effective_admin_rule("spokea", name, "172.20.0.4", "172.20.16.4", access)
                 rule["id"] = "defaultSecurityRules/" + name
                 result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
                              'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
-                             f'admin_proof spokea 10.10.1.4 10.0.1.4 {expected} {name}',
-                             [effective_admin_call("spokea", name, "10.0.1.4",
-                                                   "10.10.1.4", access,
+                             f'admin_proof spokea 172.20.16.4 172.20.0.4 {expected} {name}',
+                             [effective_admin_call("spokea", name, "172.20.0.4",
+                                                   "172.20.16.4", access,
                                                    {"skipToken": "", "value": [rule]})])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Effective AVNM rule", result.stderr)
@@ -278,10 +278,10 @@ esac
     def test_admin_proof_requires_unique_exact_effective_rule_and_terminal_page(self):
         from test_workshop_safety import effective_admin_rule
 
-        rule = effective_admin_rule("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny")
+        rule = effective_admin_rule("spokea", "deny-hub-to-a", "172.20.0.4", "172.20.16.4", "Deny")
         command = ('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
                    'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
-                   'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a')
+                   'admin_proof spokea 172.20.16.4 172.20.0.4 Deny deny-hub-to-a')
         for label, change in (
             ("correct", {}),
             ("case-only-id", {"id": rule["id"].swapcase()}),
@@ -296,12 +296,12 @@ esac
             ("wrong-source", {"sources": [{"addressPrefixType": "IPPrefix",
                                             "addressPrefix": "10.0.1.5/32"}]}),
             ("wrong-destination", {"destinations": [{"addressPrefixType": "IPPrefix",
-                                                      "addressPrefix": "10.20.1.4/32"}]}),
+                                                      "addressPrefix": "172.20.32.4/32"}]}),
         ):
             with self.subTest(label=label):
                 payload = {"value": [dict(rule, **change)], "skipToken": ""}
                 result = run(command, [effective_admin_call(
-                    "spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", payload)])
+                    "spokea", "deny-hub-to-a", "172.20.0.4", "172.20.16.4", "Deny", payload)])
                 self.assertEqual(result.returncode == 0, label in ("correct", "case-only-id"), result.stderr)
 
         for label, payload in (
@@ -313,7 +313,7 @@ esac
         ):
             with self.subTest(label=label):
                 result = run(command, [effective_admin_call(
-                    "spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", payload)])
+                    "spokea", "deny-hub-to-a", "172.20.0.4", "172.20.16.4", "Deny", payload)])
                 self.assertEqual(result.returncode == 0, label == "null-token", result.stderr)
 
     def test_missing_effective_configuration_stops_before_http(self):

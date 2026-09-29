@@ -497,6 +497,28 @@ def preparation_calls(module, state=STATE):
 
 
 class NetworkDocsTests(unittest.TestCase):
+    def test_firewall_rules_and_routing_use_allocated_ipam_prefixes(self):
+        actions = blocks(DOCS[4])
+        for name in ("firewall-management-rule", "firewall-egress-rule"):
+            with self.subTest(name=name):
+                self.assertIn('"$SPOKEA_SUBNET_CIDR"', actions[name])
+                self.assertIn('"$SPOKEB_SUBNET_CIDR"', actions[name])
+        http = actions["firewall-http-rule"]
+        self.assertIn('--source-addresses "$SPOKEA_SUBNET_CIDR"', http)
+        self.assertIn('--destination-addresses "$SPOKEB_SUBNET_CIDR"', http)
+        self.assertIn('--arg a "$SPOKEA_SUBNET_CIDR"', actions["inspect-firewall-rules"])
+        self.assertIn('--arg b "$SPOKEB_SUBNET_CIDR"', actions["inspect-firewall-rules"])
+        for zone, remote in (("spokea", "SPOKEB"), ("spokeb", "SPOKEA")):
+            with self.subTest(zone=zone):
+                rule = actions[f"routing-rule-{zone}-other"]
+                self.assertIn(f'--arg prefix "${remote}_VNET_CIDR"', rule)
+                self.assertIn('--destination "$destination"', rule)
+                self.assertIn(f'other-spoke "${remote}_VNET_CIDR"', rule)
+        self.assertIn('"$FIREWALL_SUBNET_CIDR"', actions["inspect-firewall"])
+        self.assertIn('"$SPOKEB_VNET_CIDR"', blocks(DOCS[5])["effective-vm-routes"])
+        self.assertIn('"$HUB_SUBNET_CIDR"', blocks(DOCS[5])["read-vm-ips"])
+        self.assertNotRegex("\n".join(actions.values()), r"10\.(?:0|10|20)\.\d+\.\d+/\d+")
+
     def test_module_03_execution_blocks_do_not_chain_with_and(self):
         for name, script in blocks(DOCS[3]).items():
             with self.subTest(step=name):

@@ -83,12 +83,12 @@ bash scripts/verify-extension.sh "$STATE_FILE" allowed
 
 ```text
 PASS: Enforced Connectivity is effective on both spokes; four forwarded peerings are connected.
-PASS: 10.20.1.4 /16 -> VirtualAppliance
-PASS: 10.10.1.4 /16 -> VirtualAppliance
+PASS: <Spoke B 사설 IP> /20 -> VirtualAppliance
+PASS: <Spoke A 사설 IP> /20 -> VirtualAppliance
 PASS: 8.8.8.8 /0 -> VirtualAppliance
 PASS: 8.8.8.8 /0 -> VirtualAppliance
-PASS: 10.10.1.4 /16 -> VNetPeering
-PASS: 10.20.1.4 /16 -> VNetPeering
+PASS: <Spoke A 사설 IP> /20 -> VNetPeering
+PASS: <Spoke B 사설 IP> /20 -> VNetPeering
 PASS: effective AVNM rule spokea/hub-to-a (AlwaysAllow)
 PASS: effective AVNM rule spokeb/a-to-b (AlwaysAllow)
 PASS: HTTP spokea
@@ -99,8 +99,8 @@ Waiting for current flow logs (1/20).
 [
   {
     "Action": "Allow",
-    "SourceIp": "10.10.1.4",
-    "DestinationIp": "10.20.1.4",
+    "SourceIp": "<Spoke A 사설 IP>",
+    "DestinationIp": "<Spoke B 사설 IP>",
     "DestinationPort": "8080",
     "TimeGenerated": "<이번 요청 이후 UTC 시각>",
     "_ResourceId": "<이번 Firewall 전체 resource ID>"

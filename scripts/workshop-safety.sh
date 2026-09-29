@@ -280,7 +280,7 @@ firewall_ready_ip() {
   ' <<< "$fw" >/dev/null || { fail "Firewall is not ready or has an unexpected policy/ID."; return 1; }
   id=$(jq -er '.id' <<< "$fw") || return 1
   ip=$(jq -er '.ipConfigurations[0].privateIPAddress' <<< "$fw") || return 1
-  assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
+  assert_ipv4_in_subnet "$ip" "$FIREWALL_SUBNET_CIDR" || return 1
   law=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
     --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
   assert_resource_id "$law" "$base/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" || return 1
@@ -297,11 +297,26 @@ firewall_ready_ip() {
     --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop -o json --subscription "$SUBSCRIPTION_ID") || return 1
   # 전환 후 Run Command에 필요한 관리 규칙은 주소·프로토콜·포트까지 확인합니다.
   # 실습 HTTP와 인터넷 출구의 실제 통신은 모듈 06에서 별도로 검증합니다.
-  jq -e '
+  jq -e --arg a "$SPOKEA_SUBNET_CIDR" --arg b "$SPOKEB_SUBNET_CIDR" '
     .ruleCollections as $rules | ($rules | type == "array") and
     all(["management", "lab-http", "egress-check"][];
       . as $name | [$rules[] | select(.name == $name)] |
       length == 1 and .[0].action.type == "Allow") and
+    ([$rules[] | select(.name == "lab-http")] |
+      length == 1 and .[0].priority == 200 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "spokea-to-spokeb" and .ruleType == "NetworkRule" and
+        .ipProtocols == ["TCP"] and .sourceAddresses == [$a] and
+        .destinationAddresses == [$b] and .destinationPorts == ["8080"])) and
+    ([$rules[] | select(.name == "egress-check")] |
+      length == 1 and .[0].priority == 300 and
+      (.[0].rules | type == "array" and length == 1) and
+      (.[0].rules[0] |
+        .name == "public-ip-check" and .ruleType == "ApplicationRule" and
+        (.sourceAddresses | type == "array" and length == 2 and
+          sort == ([$a, $b] | sort)) and
+        .targetFqdns == ["api.ipify.org"])) and
     ([$rules[] | select(.name == "management")] |
       length == 1 and .[0].priority == 100 and
       (.[0].rules | type == "array" and length == 1) and
@@ -309,7 +324,7 @@ firewall_ready_ip() {
         .name == "azure-management" and .ruleType == "NetworkRule" and
         .ipProtocols == ["TCP"] and
         (.sourceAddresses | type == "array" and length == 2 and
-          sort == ["10.10.1.0/24", "10.20.1.0/24"]) and
+          sort == ([$a, $b] | sort)) and
         .destinationAddresses == ["AzureCloud"] and .destinationPorts == ["443"]))
   ' <<< "$collections" >/dev/null || { fail "Required Firewall collections or management rule are not ready."; return 1; }
   # $(firewall_ready_ip)에서 사용할 순수 IP만 stdout으로 반환합니다. 오류 설명은 stderr로 보냅니다.
@@ -319,7 +334,7 @@ firewall_ready_ip() {
 # AVNM 구성과 적용된 Subnet 테이블을 각각 검사합니다. 관리형 테이블의 이름이나 RG는 가정하지 않습니다.
 assert_avnm_routes_ready() {
   local ip="${1:-}" config config_id zone rg group remote collection rule prefix data subnet table_id table
-  assert_ipv4_in_subnet "$ip" 10.0.2.0/26 || return 1
+  assert_ipv4_in_subnet "$ip" "$FIREWALL_SUBNET_CIDR" || return 1
   assert_owned_rg "$RG_HUB" || return 1
   config_id="$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID"
   config=$(az network manager routing-config show -g "$RG_HUB" --manager-name "$AVNM" \
@@ -331,8 +346,8 @@ assert_avnm_routes_ready() {
   ' <<< "$config" >/dev/null || { fail "Unexpected AVNM routing configuration."; return 1; }
   for zone in spokea spokeb; do
     case "$zone" in
-      spokea) rg="$RG_SPOKEA"; group="$ROUTE_GROUP_A_ID"; remote=10.20.0.0/16 ;;
-      spokeb) rg="$RG_SPOKEB"; group="$ROUTE_GROUP_B_ID"; remote=10.10.0.0/16 ;;
+      spokea) rg="$RG_SPOKEA"; group="$ROUTE_GROUP_A_ID"; remote="$SPOKEB_VNET_CIDR" ;;
+      spokeb) rg="$RG_SPOKEB"; group="$ROUTE_GROUP_B_ID"; remote="$SPOKEA_VNET_CIDR" ;;
     esac
     assert_owned_rg "$rg" || return 1
     collection=$(az network manager routing-config rule-collection show \
@@ -387,9 +402,9 @@ validate_effective_nic_routes() {
   assert_avnm_routes_ready "$fw_ip" || return 1
   for zone in spokea spokeb; do
     if [[ "$zone" == spokea ]]; then
-      rg="$RG_SPOKEA"; remote=10.20.0.0/16
+      rg="$RG_SPOKEA"; remote="$SPOKEB_VNET_CIDR"
     else
-      rg="$RG_SPOKEB"; remote=10.10.0.0/16
+      rg="$RG_SPOKEB"; remote="$SPOKEA_VNET_CIDR"
     fi
     routes=$(az network nic show-effective-route-table -g "$rg" \
       -n "nic-lzbegin-$zone-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
@@ -433,9 +448,9 @@ assert_admin_rules_ready() {
   local hub="$1" a="$2" b="$3" stage="$4" config id zone group collection rule source destination access priority data count rules expected
   [[ "$stage" == baseline || "$stage" == denied || "$stage" == restored ]] ||
     { fail "Unknown Security Admin stage: $stage"; return 1; }
-  assert_ipv4_in_subnet "$hub" 10.0.1.0/24 || return 1
-  assert_ipv4_in_subnet "$a" 10.10.1.0/24 || return 1
-  assert_ipv4_in_subnet "$b" 10.20.1.0/24 || return 1
+  assert_ipv4_in_subnet "$hub" "$HUB_SUBNET_CIDR" || return 1
+  assert_ipv4_in_subnet "$a" "$SPOKEA_SUBNET_CIDR" || return 1
+  assert_ipv4_in_subnet "$b" "$SPOKEB_SUBNET_CIDR" || return 1
   id="$AVNM_ID/securityAdminConfigurations/sc-lzbegin-http-$RUN_ID"
   config=$(az network manager security-admin-config show -g "$RG_HUB" \
     --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \

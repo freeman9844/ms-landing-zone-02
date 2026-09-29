@@ -16,7 +16,7 @@ LAW = rid("hub", "Microsoft.OperationalInsights/workspaces", "log-lzbegin-demo12
 WORKSPACE = "22222222-2222-2222-2222-222222222222"
 QUERY_ARGS = ["monitor", "log-analytics", "query", "--workspace", WORKSPACE,
               "--analytics-query", {"regex": "(?s)AZFWNetworkRule.*TimeGenerated.*2026-09-18T00:00:00Z.*"
-                                     "SourceIp.*10\\.10\\.1\\.4.*DestinationIp.*10\\.20\\.1\\.4.*"
+                                     "SourceIp.*172\\.20\\.16\\.4.*DestinationIp.*172\\.20\\.32\\.4.*"
                                      "DestinationPort.*8080.*Action.*Allow.*_ResourceId.*fw-lzbegin-demo123.*"},
               "--timespan", "PT1H", "-o", "json"]
 
@@ -31,11 +31,11 @@ def setup_calls():
 
 class FirewallLogTests(unittest.TestCase):
     command = ('bash "$WORKSHOP_ROOT/scripts/firewall-logs.sh" state.json '
-               '2026-09-18T00:00:00Z 10.10.1.4 10.20.1.4 8080 Allow')
+               '2026-09-18T00:00:00Z 172.20.16.4 172.20.32.4 8080 Allow')
 
     def test_waits_for_matching_flow_not_just_any_rows(self):
-        row = {"TimeGenerated": "2026-09-18T00:00:01Z", "SourceIp": "10.10.1.4",
-               "DestinationIp": "10.20.1.4", "DestinationPort": 8080,
+        row = {"TimeGenerated": "2026-09-18T00:00:01Z", "SourceIp": "172.20.16.4",
+               "DestinationIp": "172.20.32.4", "DestinationPort": 8080,
                "Action": "Allow", "_ResourceId": FW}
         wrong = dict(row, SourceIp="10.10.1.99")
         result = run(self.command, setup_calls() + [
@@ -54,7 +54,7 @@ class FirewallLogTests(unittest.TestCase):
 
     def test_invalid_query_inputs_never_reach_azure(self):
         result = run('bash "$WORKSHOP_ROOT/scripts/firewall-logs.sh" state.json '
-                     '"not-a-date" "1.1.1.1;bad" 10.20.1.4 8080 Allow')
+                     '"not-a-date" "1.1.1.1;bad" 172.20.32.4 8080 Allow')
         self.assertNotEqual(result.returncode, 0)
 
 
@@ -89,7 +89,7 @@ class ExtensionGateTests(unittest.TestCase):
                       "-n", "fw-lzbegin-demo123", "-o", "json"],
                      {"id": FW, "sku": {"name": "AZFW_VNet", "tier": "Standard"},
                       "provisioningState": "Succeeded",
-                      "ipConfigurations": [{"privateIPAddress": "10.0.2.4"}]}),
+                      "ipConfigurations": [{"privateIPAddress": "172.20.1.4"}]}),
                 call(["monitor", "diagnostic-settings", "show", "--name", "workshop",
                       "--resource", FW, "-o", "json"],
                      {"workspaceId": LAW, "logAnalyticsDestinationType": "Dedicated",
@@ -101,8 +101,8 @@ class ExtensionGateTests(unittest.TestCase):
                 *[call(["network", "nic", "show", "-g", rg(zone),
                         "-n", f"nic-lzbegin-{zone}-demo123",
                         "--query", "ipConfigurations[0].privateIPAddress", "-o", "tsv"], ip)
-                  for zone, ip in (("hub", "10.0.1.4"), ("spokea", "10.10.1.4"),
-                                   ("spokeb", "10.20.1.4"))]]
+                  for zone, ip in (("hub", "172.20.0.4"), ("spokea", "172.20.16.4"),
+                                   ("spokeb", "172.20.32.4"))]]
 
     def proof_prefix(self):
         return (self.prefix() + redesign.route_calls() +
@@ -110,12 +110,12 @@ class ExtensionGateTests(unittest.TestCase):
 
     def route_calls(self):
         cases = (
-            ("spokea", "10.20.0.0/16", "VirtualAppliance", ["10.0.2.4"]),
-            ("spokeb", "10.10.0.0/16", "VirtualAppliance", ["10.0.2.4"]),
-            ("spokea", "0.0.0.0/0", "VirtualAppliance", ["10.0.2.4"]),
-            ("spokeb", "0.0.0.0/0", "VirtualAppliance", ["10.0.2.4"]),
-            ("hub", "10.10.0.0/16", "VNetPeering", []),
-            ("hub", "10.20.0.0/16", "VNetPeering", []),
+            ("spokea", "172.20.32.0/20", "VirtualAppliance", ["172.20.1.4"]),
+            ("spokeb", "172.20.16.0/20", "VirtualAppliance", ["172.20.1.4"]),
+            ("spokea", "0.0.0.0/0", "VirtualAppliance", ["172.20.1.4"]),
+            ("spokeb", "0.0.0.0/0", "VirtualAppliance", ["172.20.1.4"]),
+            ("hub", "172.20.16.0/20", "VNetPeering", []),
+            ("hub", "172.20.32.0/20", "VNetPeering", []),
         )
         return [call(["network", "nic", "show-effective-route-table", "-g", rg(zone),
                       "-n", f"nic-lzbegin-{zone}-demo123", "-o", "json"],
@@ -128,7 +128,7 @@ class ExtensionGateTests(unittest.TestCase):
         routes[-1] = copy.deepcopy(routes[-1])
         payload = json.loads(routes[-1]["stdout"])
         payload["value"][0]["nextHopType"] = "VirtualAppliance"
-        payload["value"][0]["nextHopIpAddress"] = ["10.0.2.4"]
+        payload["value"][0]["nextHopIpAddress"] = ["172.20.1.4"]
         routes[-1]["stdout"] = json.dumps(payload)
         result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json allowed',
                      self.proof_prefix() + routes)
@@ -136,7 +136,7 @@ class ExtensionGateTests(unittest.TestCase):
         self.assertIn("Unexpected effective next hop", result.stderr)
 
     def test_hub_to_a_requires_its_admin_rule_not_a_spoke_or_nsg_rule(self):
-        flow = effective_admin_call("spokea", "hub-to-a", "10.0.1.4", "10.10.1.4",
+        flow = effective_admin_call("spokea", "hub-to-a", "172.20.0.4", "172.20.16.4",
                                     "AlwaysAllow", {"value": [{
                                         "id": "defaultSecurityRules/AllowVnetInBound",
                                         "access": "AlwaysAllow"}], "skipToken": ""})
@@ -149,8 +149,8 @@ class ExtensionGateTests(unittest.TestCase):
         flows = [
             effective_admin_call(zone, rule, remote, local, "AlwaysAllow")
             for zone, local, remote, rule in (
-                ("spokea", "10.10.1.4", "10.0.1.4", "hub-to-a"),
-                ("spokeb", "10.20.1.4", "10.10.1.4", "a-to-b"))
+                ("spokea", "172.20.16.4", "172.20.0.4", "hub-to-a"),
+                ("spokeb", "172.20.32.4", "172.20.16.4", "a-to-b"))
         ]
         guest = call(["vm", "run-command", "invoke", "--resource-group", rg("hub"),
                       "--name", "vm-lzbegin-hub-demo123", "--command-id", "RunShellScript",
