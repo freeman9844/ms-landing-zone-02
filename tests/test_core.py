@@ -19,6 +19,11 @@ from test_network_docs import (
 import test_avnm_redesign as redesign
 from test_workshop_safety import ready_calls, admin_calls, effective_admin_call, CONFIG
 from tests.test_run_vm import invoke
+from test_ipam_cidrs import fixtures as ipam_fixtures, reads as ipam_reads
+
+
+def cidr_calls():
+    return ipam_reads(*ipam_fixtures())
 
 
 def admin_rule_id(zone, name):
@@ -61,7 +66,7 @@ class HttpProofTests(unittest.TestCase):
         response["run_guest"] = True
         return run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
                    f'http_proof state.json spokea 10.20.1.4 {expected}',
-                   [account(), group("spokea"), response],
+                   [account(), group("spokea"), *cidr_calls(), response],
                    files={"bin/curl": f"#!/bin/sh\nprintf '%s\\n' '{body}'\nexit {code}\n"})
 
     def test_real_guest_checks_successful_body(self):
@@ -82,7 +87,7 @@ class CoreGateTests(unittest.TestCase):
     def run_core(self, script, calls, **kwargs):
         calls = list(calls)
         if calls and calls[0]["argv"] == account()["argv"]:
-            calls[1:1] = enforced_connectivity_calls()
+            calls[1:1] = [group(zone) for zone in ("hub", "spokea", "spokeb")] + cidr_calls() + enforced_connectivity_calls()
         return run(script, calls, **kwargs)
 
     def test_unenforced_connectivity_stops_before_vm_and_http_evidence(self):
@@ -91,7 +96,8 @@ class CoreGateTests(unittest.TestCase):
         config["connectivityCapabilities"]["peeringEnforcement"] = "Unenforced"
         calls[-1]["stdout"] = json.dumps(config)
         result = run('bash "$WORKSHOP_ROOT/scripts/verify-core.sh" state.json baseline',
-                     [account(), *calls])
+                     [account(), *(group(zone) for zone in ("hub", "spokea", "spokeb")),
+                      *cidr_calls(), *calls])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unenforced Connectivity", result.stderr)
 
@@ -213,7 +219,7 @@ class CoreGateTests(unittest.TestCase):
                              "--command-id", "RunShellScript",
                              "--scripts", {"regex": "@/.+/lzbegin-run\\.[A-Za-z0-9]+"}, "-o", "json"])
             response["run_guest"] = True
-            return [account(), group(zone), response]
+            return [account(), group(zone), *cidr_calls(), response]
 
         calls = self.network_calls() + redesign.SpokeNatAbsenceTests().calls() + admin_calls("denied")
         calls += [
@@ -246,6 +252,7 @@ esac
 
     def test_effective_admin_rule_succeeds_without_consulting_network_watcher(self):
         result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                     'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
                      'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a', [
             effective_admin_call("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny"),
         ])
@@ -260,6 +267,7 @@ esac
                 rule = effective_admin_rule("spokea", name, "10.0.1.4", "10.10.1.4", access)
                 rule["id"] = "defaultSecurityRules/" + name
                 result = run('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                             'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
                              f'admin_proof spokea 10.10.1.4 10.0.1.4 {expected} {name}',
                              [effective_admin_call("spokea", name, "10.0.1.4",
                                                    "10.10.1.4", access,
@@ -272,6 +280,7 @@ esac
 
         rule = effective_admin_rule("spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny")
         command = ('source "$WORKSHOP_ROOT/scripts/verify-common.sh"; load_run state.json; '
+                   'export SPOKEA_VNET_CIDR=172.20.16.0/20; '
                    'admin_proof spokea 10.10.1.4 10.0.1.4 Deny deny-hub-to-a')
         for label, change in (
             ("correct", {}),

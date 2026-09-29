@@ -5,6 +5,11 @@ from harness import run, call, account, group, SUB
 import test_avnm_redesign as redesign
 from test_network_docs import enforced_connectivity_calls, netid, rid, rg
 from test_workshop_safety import admin_calls, effective_admin_call
+from test_ipam_cidrs import fixtures as ipam_fixtures, reads as ipam_reads
+
+
+def cidr_calls():
+    return ipam_reads(*ipam_fixtures())
 
 FW = f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-hub-demo123/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-demo123"
 LAW = rid("hub", "Microsoft.OperationalInsights/workspaces", "log-lzbegin-demo123")
@@ -56,8 +61,15 @@ class FirewallLogTests(unittest.TestCase):
 class ExtensionGateTests(unittest.TestCase):
     def run_extension(self, script, calls, **kwargs):
         calls = list(calls)
-        if calls and calls[0]["argv"] == account()["argv"] and not script.endswith(" denied"):
-            calls[1:1] = enforced_connectivity_calls()
+        if calls and calls[0]["argv"] == account()["argv"]:
+            owned = [group(zone) for zone in ("hub", "spokea", "spokeb")]
+            if len(calls) >= 4 and all(calls[index]["argv"] == owned[index - 1]["argv"]
+                                       for index in (1, 2, 3)):
+                calls[4:4] = cidr_calls() + ([] if script.endswith(" denied")
+                                             else enforced_connectivity_calls())
+            else:
+                calls[1:1] = owned + cidr_calls() + ([] if script.endswith(" denied")
+                                                      else enforced_connectivity_calls())
         return run(script, calls, **kwargs)
 
     def test_unenforced_connectivity_stops_before_firewall_or_http_evidence(self):
@@ -66,7 +78,8 @@ class ExtensionGateTests(unittest.TestCase):
         config["connectivityCapabilities"]["peeringEnforcement"] = "Unenforced"
         calls[-1]["stdout"] = json.dumps(config)
         result = run('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json allowed',
-                     [account(), *calls])
+                     [account(), *(group(zone) for zone in ("hub", "spokea", "spokeb")),
+                      *cidr_calls(), *calls])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unenforced Connectivity", result.stderr)
 
@@ -145,7 +158,7 @@ class ExtensionGateTests(unittest.TestCase):
         guest["run_guest"] = True
         result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json allowed',
                      self.proof_prefix() + self.route_calls() + flows +
-                     [account(), group("hub"), guest],
+                     [account(), group("hub"), *cidr_calls(), guest],
                      files={"bin/curl": "#!/bin/sh\nprintf 'wrong-server\\n'\n"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unexpected successful response: wrong-server", result.stderr)
@@ -182,7 +195,7 @@ class ExtensionGateTests(unittest.TestCase):
         payload["value"][0]["nextHopIpAddress"] = ["10.0.2.9"]
         route["stdout"] = json.dumps(payload)
         result = run('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json denied',
-                     [*self.prefix(), route])
+                     [*self.prefix()[:4], *cidr_calls(), *self.prefix()[4:], route])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Unexpected next hop IP", result.stderr)
 

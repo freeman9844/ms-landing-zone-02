@@ -179,13 +179,19 @@ assert_owned_rg() {
 
 # zone은 가용 영역이 아니라 실습 구역(hub/spokea/spokeb)입니다. 자원을 만들지 않고 대상 변수만 바꿉니다.
 zone_context() {
-  local zone="${1:-}"
+  local zone="${1:-}" resolved rg subnet
+  unset RG SUBNET PREFIX VNET VM NSG
   case "$zone" in
-    hub) RG="$RG_HUB"; SUBNET=snet-management; PREFIX=10.0.0.0/16 ;;
-    spokea) RG="$RG_SPOKEA"; SUBNET=snet-workload; PREFIX=10.10.0.0/16 ;;
-    spokeb) RG="$RG_SPOKEB"; SUBNET=snet-workload; PREFIX=10.20.0.0/16 ;;
+    hub) resolved="${HUB_VNET_CIDR:-}"; rg="${RG_HUB:-}"; subnet=snet-management ;;
+    spokea) resolved="${SPOKEA_VNET_CIDR:-}"; rg="${RG_SPOKEA:-}"; subnet=snet-workload ;;
+    spokeb) resolved="${SPOKEB_VNET_CIDR:-}"; rg="${RG_SPOKEB:-}"; subnet=snet-workload ;;
     *) fail "Unknown zone: $zone"; return 1 ;;
   esac
+  [[ -n "$resolved" && -n "$rg" && -n "${RUN_ID:-}" ]] ||
+    { fail "Resolve live IPAM CIDRs before using zone $zone."; return 1; }
+  RG="$rg"
+  SUBNET="$subnet"
+  PREFIX="$resolved"
   VNET="vnet-lzbegin-$zone-$RUN_ID"
   VM="vm-lzbegin-$zone-$RUN_ID"
   NSG="nsg-lzbegin-$zone-$RUN_ID"

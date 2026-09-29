@@ -100,7 +100,7 @@ jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
         ):
             with self.subTest(path=path, files=files):
                 result = run(SOURCE + f'''
-load_run state.json && zone_context spokea || exit 90
+load_run state.json && export SPOKEA_VNET_CIDR=172.20.16.0/20 && zone_context spokea || exit 90
 export IPAM_POOL_ID=stale HUB_VNET_CIDR=stale SPOKEA_VNET_CIDR=stale SPOKEB_VNET_CIDR=stale
 export HUB_SUBNET_CIDR=stale SPOKEA_SUBNET_CIDR=stale SPOKEB_SUBNET_CIDR=stale FIREWALL_SUBNET_CIDR=stale
 export STATE_FILE='{path}'
@@ -111,8 +111,8 @@ for name in {variables}; do
   [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
 done
 printf 'SHELL_ALIVE\\n'
-load_run state.json && zone_context hub &&
-  printf 'RESTORED:%s:%s\\n' "$RUN_ID" "$RG"
+load_run state.json && ! zone_context hub &&
+  printf 'RESTORED:%s:%s\\n' "$RUN_ID" "$RG_HUB"
 ''', files=files)
                 self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
                 self.assertIn("LOAD_STATUS=1\nSHELL_ALIVE", result.stdout)
@@ -121,7 +121,7 @@ load_run state.json && zone_context hub &&
 
     def test_switching_state_drops_zone_targets_from_previous_run(self):
         result = run(SOURCE + f'''
-load_run state.json && zone_context spokea &&
+load_run state.json && export SPOKEA_VNET_CIDR=172.20.16.0/20 && zone_context spokea &&
   export HUB_VNET_CIDR=stale SPOKEA_VNET_CIDR=stale SPOKEB_VNET_CIDR=stale &&
   export HUB_SUBNET_CIDR=stale SPOKEA_SUBNET_CIDR=stale &&
   export SPOKEB_SUBNET_CIDR=stale FIREWALL_SUBNET_CIDR=stale &&
@@ -131,7 +131,7 @@ for name in HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR HUB_SUBNET_CIDR \
   SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR RG SUBNET PREFIX VNET VM NSG; do
   [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
 done
-zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG"
+! zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG_SPOKEB"
 ''')
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(result.stdout, "abc123 koreacentral rg-lzbegin-spokeb-abc123\n")

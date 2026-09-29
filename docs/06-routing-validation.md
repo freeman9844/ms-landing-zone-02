@@ -22,13 +22,15 @@ Hub 관리 VM의 NAT와 Firewall Public IP는 그대로 유지합니다. Azure F
 ```bash
 prepare_validation_session() {
   source scripts/workshop-common.sh || return 1
+  source scripts/workshop-ipam.sh || return 1
   source scripts/workshop-safety.sh || return 1
   ensure_state_file || return 1
   load_run "$STATE_FILE" || return 1
   assert_subscription || return 1
   assert_owned_rg "$RG_HUB" || return 1
   assert_owned_rg "$RG_SPOKEA" || return 1
-  assert_owned_rg "$RG_SPOKEB"
+  assert_owned_rg "$RG_SPOKEB" || return 1
+  load_ipam_cidrs
 }
 prepare_validation_session
 ```

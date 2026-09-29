@@ -22,7 +22,13 @@ done
 needed_vcpus=0
 # 이 내부 반복은 세 VM의 상태를 빠짐없이 검사하기 위한 것입니다. 참가자 대신 자원을 생성하지 않습니다.
 for zone in hub spokea spokeb; do
-  zone_context "$zone"
+  # Preflight also runs before any VNet exists, so it must not resolve CIDRs.
+  case "$zone" in
+    hub) RG="$RG_HUB" ;;
+    spokea) RG="$RG_SPOKEA" ;;
+    spokeb) RG="$RG_SPOKEB" ;;
+  esac
+  VM="vm-lzbegin-$zone-$RUN_ID"
   exists=$(az group exists --name "$RG" -o tsv)
   vms='[]'
   case "$exists" in

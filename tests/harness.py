@@ -22,6 +22,12 @@ STATE = {
 }
 
 
+def vnet_id(zone):
+    rg = STATE["resourceGroups"][zone]
+    return (f"/subscriptions/{SUB}/resourceGroups/{rg}/providers/"
+            f"Microsoft.Network/virtualNetworks/vnet-lzbegin-{zone}-{STATE['runId']}")
+
+
 def call(argv, value="", code=0, stderr=""):
     return {"argv": argv, "stdout": value if isinstance(value, str) else json.dumps(value),
             "returncode": code, "stderr": stderr}

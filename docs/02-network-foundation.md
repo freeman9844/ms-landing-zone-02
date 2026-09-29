@@ -562,6 +562,33 @@ VNet `/20`, Subnet `/24`, `DefaultOutbound=false`와 pool 연결을 확인하세
 세 VNet의 태그에 자신의 `runId`가 있어야 합니다. 이전처럼 마지막 `PASS` 문구 하나로
 전체 성공을 판단하지 말고, 각 단계의 응답을 직접 확인하세요.
 
+### 5-4. 세 VNet·네 Subnet의 실제 할당 주소 확인
+
+👁️ **설명**
+
+세 VNet 배포가 모두 끝난 뒤에만 실행합니다. 부분 배포 중에는 아래 검사를 요구하지
+않으며 각 자원 조회·복구를 먼저 진행하세요. 실제 Azure 응답의 ID·태그·pool
+연결·크기·포함관계·중복을 확인하고 일곱 주소를 출력합니다.
+
+🟢 **실행**
+
+<!-- exec:inspect-foundation-cidrs -->
+```bash
+source scripts/workshop-ipam.sh &&
+assert_owned_rg "$RG_HUB" &&
+assert_owned_rg "$RG_SPOKEA" &&
+assert_owned_rg "$RG_SPOKEB" &&
+load_ipam_cidrs &&
+printf 'Hub VNet %s / 관리 %s / Firewall %s\nSpoke A VNet %s / 워크로드 %s\nSpoke B VNet %s / 워크로드 %s\n' \
+  "$HUB_VNET_CIDR" "$HUB_SUBNET_CIDR" "$FIREWALL_SUBNET_CIDR" \
+  "$SPOKEA_VNET_CIDR" "$SPOKEA_SUBNET_CIDR" "$SPOKEB_VNET_CIDR"
+```
+
+📋 **확인**
+
+일곱 CIDR이 출력되고 오류가 없어야 모듈 03으로 진행합니다. 다음 세션에서는
+상태 JSON의 주소를 재사용하지 않고 Azure에서 다시 조회합니다.
+
 ## Portal 확인
 
 👁️ **설명**

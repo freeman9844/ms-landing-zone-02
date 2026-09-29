@@ -3,11 +3,18 @@
 # VM에 직접 SSH하지 않으며, 게스트 명령은 높은 관리 권한으로 실행되므로 입력 파일을 신뢰해야 합니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/workshop-common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/workshop-ipam.sh"
 [[ $# == 3 && -f "$3" && -r "$3" ]] || { fail "Usage: run-vm.sh STATE_FILE ZONE READABLE_SCRIPT_FILE"; exit 1; }
 load_run "$1"
 assert_subscription
+case "$2" in
+  hub) assert_owned_rg "$RG_HUB" ;;
+  spokea) assert_owned_rg "$RG_SPOKEA" ;;
+  spokeb) assert_owned_rg "$RG_SPOKEB" ;;
+  *) fail "Unknown zone: $2"; exit 1 ;;
+esac
+load_ipam_cidrs
 zone_context "$2"
-assert_owned_rg "$RG"
 # 여기의 세 번째 인수는 호스트의 파일 경로입니다. 파일 내용이 VM으로 전달되며 파일명 자체가 게스트 명령은 아닙니다.
 # 원본은 바꾸지 않고 전송용 임시 파일에 Bash 지정과 종료 코드 출력 trap을 덧붙입니다.
 wrapped=$(mktemp /tmp/lzbegin-run.XXXXXX)

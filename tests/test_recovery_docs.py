@@ -69,7 +69,7 @@ export HOME="$PWD/home"
     def test_failed_load_clears_old_targets_without_selecting_a_subscription(self):
         script = '''
 source scripts/workshop-common.sh
-load_run state.json && zone_context spokea || exit 90
+load_run state.json && export SPOKEA_VNET_CIDR=172.20.16.0/20 && zone_context spokea || exit 90
 mkdir -p home .workshop-state
 mkdir -p home
 ln -s "$PWD" home/ms-landing-zone-02
@@ -81,7 +81,7 @@ status=$?
 printf 'RECOVERY_STATUS=%s\\n' "$status"
 for name in RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB \
 AVNM NETWORK_GROUP CONNECTIVITY_CONFIG AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID \
-RG VNET VM NSG; do
+RG VNET VM NSG SPOKEA_VNET_CIDR; do
   [[ ! -v "$name" ]] || { printf 'STALE:%s\\n' "$name"; exit 91; }
 done
 printf 'SHELL_ALIVE\\n'

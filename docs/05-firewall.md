@@ -21,6 +21,7 @@
 ```bash
 prepare_vm_session() {
   source scripts/workshop-common.sh || return 1
+  source scripts/workshop-ipam.sh || return 1
   source scripts/workshop-safety.sh || return 1
   source scripts/verify-common.sh || return 1
   ensure_state_file || return 1
@@ -28,7 +29,8 @@ prepare_vm_session() {
   assert_subscription || return 1
   assert_owned_rg "$RG_HUB" || return 1
   assert_owned_rg "$RG_SPOKEA" || return 1
-  assert_owned_rg "$RG_SPOKEB"
+  assert_owned_rg "$RG_SPOKEB" || return 1
+  load_ipam_cidrs
 }
 prepare_vm_session
 ```

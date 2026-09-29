@@ -4,12 +4,14 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/verify-common.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/workshop-ipam.sh"
 [[ $# == 2 && "$2" =~ ^(allowed|denied|restored)$ ]] ||
   { fail "Usage: verify-extension.sh STATE_FILE allowed|denied|restored"; exit 1; }
 load_run "$1"
 assert_subscription
-if [[ "$2" != denied ]]; then assert_enforced_connectivity; fi
 for rg in "$RG_HUB" "$RG_SPOKEA" "$RG_SPOKEB"; do assert_owned_rg "$rg"; done
+load_ipam_cidrs
+if [[ "$2" != denied ]]; then assert_enforced_connectivity; fi
 # 배포 완료, 실습 SKU, 단일 IP 구성과 사설 IP를 확인한 뒤 그 IP를 경로의 비교 기준으로 사용합니다.
 fw=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" -o json)
 jq -e '.provisioningState == "Succeeded" and .sku.name == "AZFW_VNet" and .sku.tier == "Standard"

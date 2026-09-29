@@ -1,6 +1,15 @@
 import json
 import unittest
 from harness import run, call, account, group
+from test_ipam_cidrs import fixtures, reads
+
+
+def run_vm(script, calls=(), **kwargs):
+    vnets, subnets = fixtures()
+    calls = list(calls)
+    if calls:
+        calls[2:2] = reads(vnets, subnets)
+    return run(script, calls, **kwargs)
 
 
 def invoke(message, outer_code=0, stderr=""):
@@ -15,7 +24,7 @@ def invoke(message, outer_code=0, stderr=""):
 
 class RunVmTests(unittest.TestCase):
     def run_response(self, response):
-        return run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+        return run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                    [account(), group("spokea"), response], files={"guest.sh": "true"})
 
     def test_linux_combined_output_keeps_stderr_out_of_stdout(self):
@@ -68,7 +77,7 @@ class RunVmTests(unittest.TestCase):
     def test_action_handler_honors_bash_shebang_for_wrapped_guest(self):
         response = invoke("")
         response["run_guest"] = True
-        result = run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+        result = run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                      [account(), group("spokea"), response],
                      files={"guest.sh": '#!/usr/bin/env bash\nvalues=(spokea)\nprintf "%s\\n" "${values[0]}"'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -77,14 +86,14 @@ class RunVmTests(unittest.TestCase):
     def test_actual_guest_failure_is_not_hidden_by_outer_api_success(self):
         response = invoke("")
         response["run_guest"] = True
-        result = run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+        result = run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                      [account(), group("spokea"), response],
                      files={"guest.sh": "exit 7"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("__LZ_EXIT__:7", result.stderr)
 
     def test_returns_guest_output_without_control_marker(self):
-        result = run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+        result = run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                      [account(), group("spokea"), invoke("spokea\n\n__LZ_EXIT__:0\n")],
                      files={"guest.sh": "printf spokea"})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -93,14 +102,14 @@ class RunVmTests(unittest.TestCase):
     def test_outer_success_is_not_guest_success(self):
         for message in ("__LZ_EXIT__:7\n", "no exit marker", ""):
             with self.subTest(message=message):
-                result = run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+                result = run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                              [account(), group("spokea"), invoke(message)],
                              files={"guest.sh": "false"})
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("guest", result.stderr)
 
     def test_cloud_failure_propagates(self):
-        result = run('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
+        result = run_vm('bash "$WORKSHOP_ROOT/scripts/run-vm.sh" state.json spokea guest.sh',
                      [account(), group("spokea"), invoke("", outer_code=3)], files={"guest.sh": "true"})
         self.assertNotEqual(result.returncode, 0)
 

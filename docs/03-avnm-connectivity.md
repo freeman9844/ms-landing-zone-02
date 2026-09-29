@@ -34,12 +34,14 @@
 # 이번 실행의 상태·구독·세 RG 소유권을 한 번 확인합니다.
 prepare_avnm_session() {
   source scripts/workshop-common.sh || return 1
+  source scripts/workshop-ipam.sh || return 1
   ensure_state_file || return 1
   load_run "$STATE_FILE" || return 1
   assert_subscription || return 1
   assert_owned_rg "$RG_HUB" || return 1
   assert_owned_rg "$RG_SPOKEA" || return 1
-  assert_owned_rg "$RG_SPOKEB"
+  assert_owned_rg "$RG_SPOKEB" || return 1
+  load_ipam_cidrs
 }
 prepare_avnm_session
 ```
@@ -47,7 +49,8 @@ prepare_avnm_session
 📋 **확인**
 
 경로 입력이 필요하면 `.workshop-state/`의 파일명을 먼저 확인합니다.
-오류 없이 프롬프트로 돌아오면 모듈 03 작업을 실행할 준비가 된 상태입니다.
+오류 없이 프롬프트로 돌아오면 실제 VNet·Subnet의 pool 할당 주소 일곱 개를
+확인한 상태입니다. 하나라도 아직 생성되지 않았다면 모듈 02로 돌아가 완료하세요.
 
 ## 1. 실행별 Connectivity·Security Admin·Routing AVNM 확인
 

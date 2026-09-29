@@ -1,5 +1,75 @@
 #!/usr/bin/env bash
 
+# A failed read must never leave values from an earlier workshop in the caller's shell.
+clear_ipam_cidrs() {
+  unset HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
+    HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR \
+    RG SUBNET PREFIX VNET VM NSG
+}
+
+# Read all seven live resources, validate their identities and allocations, then publish atomically.
+load_ipam_cidrs() {
+  clear_ipam_cidrs || return 1
+  local zone rg vnet name target response envelope result
+  local -a values
+  local -A vnets subnets
+  [[ -n "${RUN_ID:-}" && -n "${SUBSCRIPTION_ID:-}" && -n "${IPAM_POOL_ID:-}" &&
+    -n "${RG_HUB:-}" && -n "${RG_SPOKEA:-}" && -n "${RG_SPOKEB:-}" ]] ||
+    { fail "Load a workshop state before resolving IPAM CIDRs."; return 1; }
+  for zone in hub spokea spokeb; do
+    case "$zone" in
+      hub) rg="$RG_HUB" ;;
+      spokea) rg="$RG_SPOKEA" ;;
+      spokeb) rg="$RG_SPOKEB" ;;
+    esac
+    vnet="vnet-lzbegin-$zone-$RUN_ID"
+    response=$(az network vnet show --resource-group "$rg" --name "$vnet" \
+      -o json --subscription "$SUBSCRIPTION_ID") ||
+      { fail "Cannot read VNet: $vnet"; return 1; }
+    vnets[$zone]="$response"
+  done
+  for target in hub/snet-management hub/AzureFirewallSubnet spokea/snet-workload spokeb/snet-workload; do
+    zone="${target%%/*}"
+    name="${target#*/}"
+    case "$zone" in
+      hub) rg="$RG_HUB" ;;
+      spokea) rg="$RG_SPOKEA" ;;
+      spokeb) rg="$RG_SPOKEB" ;;
+    esac
+    vnet="vnet-lzbegin-$zone-$RUN_ID"
+    response=$(az network vnet subnet show --resource-group "$rg" --vnet-name "$vnet" \
+      --name "$name" -o json --subscription "$SUBSCRIPTION_ID") ||
+      { fail "Cannot read Subnet: $vnet/$name"; return 1; }
+    subnets["$zone/$name"]="$response"
+  done
+  envelope=$(jq -cn --arg runId "$RUN_ID" --arg subscriptionId "$SUBSCRIPTION_ID" \
+    --arg poolId "$IPAM_POOL_ID" \
+    --argjson hub "${vnets[hub]}" --argjson spokea "${vnets[spokea]}" \
+    --argjson spokeb "${vnets[spokeb]}" \
+    --argjson management "${subnets[hub/snet-management]}" \
+    --argjson firewall "${subnets[hub/AzureFirewallSubnet]}" \
+    --argjson workloadA "${subnets[spokea/snet-workload]}" \
+    --argjson workloadB "${subnets[spokeb/snet-workload]}" \
+    '{runId:$runId,subscriptionId:$subscriptionId,poolId:$poolId,
+      vnets:{hub:$hub,spokea:$spokea,spokeb:$spokeb},
+      subnets:{"hub/snet-management":$management,"hub/AzureFirewallSubnet":$firewall,
+               "spokea/snet-workload":$workloadA,"spokeb/snet-workload":$workloadB}}') ||
+    { fail "Malformed Azure VNet or Subnet JSON."; return 1; }
+  result=$(python3 "$(dirname "${BASH_SOURCE[0]}")/check-ipam-cidrs.py" <<< "$envelope") ||
+    { fail "Live IPAM CIDR validation failed."; return 1; }
+  mapfile -t values <<< "$result"
+  [[ ${#values[@]} == 7 ]] || { fail "Expected seven validated IPAM CIDRs."; return 1; }
+  HUB_VNET_CIDR="${values[0]}"
+  SPOKEA_VNET_CIDR="${values[1]}"
+  SPOKEB_VNET_CIDR="${values[2]}"
+  HUB_SUBNET_CIDR="${values[3]}"
+  SPOKEA_SUBNET_CIDR="${values[4]}"
+  SPOKEB_SUBNET_CIDR="${values[5]}"
+  FIREWALL_SUBNET_CIDR="${values[6]}"
+  export HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
+    HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR
+}
+
 # 공유 pool은 운영자 자원입니다. 이 함수는 읽기 전용 검증만 수행합니다.
 assert_shared_ipam_pool() {
   local subscription="${SUBSCRIPTION_ID:-}" pool_id response

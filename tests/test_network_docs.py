@@ -3,6 +3,7 @@ import json
 import re
 import unittest
 from harness import ROOT, run, account, call, group, STATE, SUB, POOL_ID
+from test_ipam_cidrs import fixtures as ipam_fixtures, reads as ipam_reads
 
 
 def blocks(path):
@@ -490,6 +491,8 @@ def preparation_calls(module, state=STATE):
     calls = [account()]
     if module in (3, 4, 5, 6):
         calls.extend(owned_group_call(zone, state) for zone in ("hub", "spokea", "spokeb"))
+        vnets, subnets = ipam_fixtures()
+        calls.extend(ipam_reads(vnets, subnets))
     return calls
 
 
@@ -821,6 +824,8 @@ printf 'SHELL_ALIVE\\n'
                             expected.extend(["assert_owned_rg"] * 3)
                     elif module == 2 and name.endswith("-rg"):
                         expected = ["assert_owned_rg"]
+                    elif module == 2 and name == "inspect-foundation-cidrs":
+                        expected = ["assert_owned_rg"] * 3
                     else:
                         expected = {
                             (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
