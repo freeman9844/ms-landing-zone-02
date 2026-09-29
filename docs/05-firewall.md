@@ -13,6 +13,12 @@
 여러 파일이 있다면 현재 실습의 `.workshop-state/<실행 ID>.json` 경로를
 선택하세요. 구독을 바꿨다면 먼저
 [세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 실행하세요.
+VM 배포 후 재접속했다면 공통 준비 다음에 **4절의 `read-vm-ips` 블록을 다시 실행**해
+이번 실행의 `hub_ip`·`a_ip`·`b_ip`를 조회하세요. 이 값이 필요한 5-3~5-6 규칙
+생성·조회 및 5-7의 effective 규칙·HTTP 검증 전에 반드시 수행합니다. 5-7의 규칙 확인부터
+재개한다면 **`admin-flow-check` 함수 정의 블록도 다시 실행**하세요.
+이미 생성·배포한 규칙은 재생성하지 말고 현재 Azure 상태를 확인한 뒤 남은 단계만
+진행하세요.
 실패한 블록 뒤의 자원 변경으로 넘어가지 마세요. 준비 함수는 검사 실패를 반환하지만 셸을 종료하지 않습니다.
 
 🟢 **실행**
@@ -20,6 +26,8 @@
 <!-- exec:prepare-05 -->
 ```bash
 prepare_vm_session() {
+  unset hub_ip a_ip b_ip
+  unset -f check_admin_flow
   source scripts/workshop-common.sh || return 1
   source scripts/workshop-ipam.sh || return 1
   source scripts/workshop-safety.sh || return 1
@@ -39,7 +47,8 @@ prepare_vm_session
 
 구독과 세 실습 RG의 소유권을 확인했습니다. 아직 VM이나 보안 규칙을 만들지 않았습니다.
 `firewall_ready_ip`, `assert_avnm_routes_ready`, `assert_no_spoke_nat`는 현재 Azure 상태를 읽는 안전 검사입니다.
-세션을 다시 열면 준비 블록부터 재실행하세요.
+세션을 다시 열면 준비 블록부터 재실행하고, VM이 이미 있다면 위에서 안내한
+`read-vm-ips` 및 필요 시 `admin-flow-check`도 다시 실행하세요.
 
 ## 1. VM 배포 전 경로·용량 확인
 

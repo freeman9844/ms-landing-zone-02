@@ -396,6 +396,32 @@ def verifier(script, args, code=0):
 class StepwiseDocsTests(unittest.TestCase):
     keyfile = {".workshop-keys/demo123/id_ed25519.pub": "fixture-public-key"}
 
+    def test_module_05_reconnect_clears_old_ips_and_names_read_only_recovery_steps(self):
+        steps = blocks(DOCS[5])
+        intro = DOCS[5].read_text().split("## 1. VM 배포 전", 1)[0]
+        self.assertIn("read-vm-ips", intro)
+        self.assertIn("admin-flow-check", intro)
+        script = ('export STATE_FILE=state.json\n'
+                  'hub_ip=stale; a_ip=stale; b_ip=stale\n'
+                  'check_admin_flow() { :; }\n' +
+                  steps["prepare-05"] +
+                  '\n[[ ! -v hub_ip && ! -v a_ip && ! -v b_ip ]] && '
+                  '! declare -F check_admin_flow >/dev/null')
+        result = run(script, preparation_calls(5))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_module_05_reconnected_shell_can_reload_ips_and_verify_rule(self):
+        steps = blocks(DOCS[5])
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] + '\n' +
+                  steps["read-vm-ips"] + '\n' + steps["allow-hub-spokea"] + '\n' +
+                  steps["admin-flow-check"] + '\n' + steps["verify-admin-allow-a"])
+        calls = (preparation_calls(5) + support_cases()["read-vm-ips"] +
+                 security_cases()["allow-hub-spokea"] +
+                 [effective_admin_call("spokea", "hub-to-a", "172.20.0.4",
+                                       "172.20.16.4", "AlwaysAllow")])
+        result = run(script, calls)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=test_network_docs.STATE):
         steps = blocks(DOCS[module])
         if (module, name) in ((4, "routing-config-create"), (5, "vm-route-gate")):
