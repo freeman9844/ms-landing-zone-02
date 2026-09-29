@@ -853,6 +853,16 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotIn("watcher-enable", steps)
         self.assertNotIn("az network watcher", DOCS[5].read_text())
 
+    def test_live_remote_cidrs_are_printed_in_route_evidence(self):
+        result = self.execute(5, "effective-vm-routes",
+                              [*ready_calls(), *effective_route_calls()[-2:]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PASS: spokea NIC 172.20.32.0/20 and /0 -> Firewall", result.stdout)
+        self.assertIn("PASS: spokeb NIC 172.20.16.0/20 and /0 -> Firewall", result.stdout)
+        self.assertNotIn("NIC /16", result.stdout)
+        for module in (4, 5, 6):
+            self.assertNotIn("/16", DOCS[module].read_text())
+
     def test_script_actions_remain_single_purpose_and_propagate_failures(self):
         cases = [
             (5, "service-spokea", "scripts/run-vm.sh", ["spokea", "scripts/guest-server.sh"]),

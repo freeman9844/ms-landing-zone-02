@@ -640,10 +640,10 @@ assert_enforced_connectivity
 
 한 Routing Configuration 안의 **서로 다른 A/B collection**을 각각
 `ROUTE_GROUP_A_ID`/`ROUTE_GROUP_B_ID`에 적용합니다. 같은 Group에 양쪽
-`/16`이나 충돌하는 `/0`을 넣지 않습니다. AVNM이 배포 시 관리형 route
+상대가 아닌 `/20`이나 충돌하는 `/0`을 넣지 않습니다. AVNM이 배포 시 관리형 route
 table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 않습니다.
 기존 테이블을 자동 채택하지 않고 AVNM 기본 관리 방식만 사용합니다.
-`/16`은 상대 Spoke 요청/반환, `/0`은 Spoke의 인터넷 출구를 담당하며
+상대 Spoke의 실제 `/20`은 요청/반환, `/0`은 Spoke의 인터넷 출구를 담당하며
 모든 next hop은 **현재 Firewall 사설 IP**입니다.
 
 | 대상 collection / Group | 목적지 1 | 목적지 2 | 두 next hop |
@@ -720,7 +720,7 @@ printf '%s\n' "$created"
 
 B collection은 B Group만 대상으로 합니다.
 
-### 4-4. A → B `/16` rule
+### 4-4. A → B 실제 `/20` rule
 
 👁️ **설명**
 
@@ -771,7 +771,7 @@ printf '%s\n' "$created"
 
 A의 default route는 같은 Firewall 사설 IP입니다.
 
-### 4-6. B → A `/16` rule
+### 4-6. B → A 실제 `/20` rule
 
 🟢 **실행**
 
@@ -905,7 +905,8 @@ inspect_avnm_routing_subnets() {
   fw_ip=$(firewall_ready_ip) || return 1
   assert_avnm_routes_ready "$fw_ip" || return 1
   assert_no_spoke_nat || return 1
-  printf 'PASS: A /16 + /0 and B /16 + /0 use Firewall %s; no Spoke NAT\n' "$fw_ip"
+  printf 'PASS: A %s + /0 and B %s + /0 use Firewall %s; no Spoke NAT\n' \
+    "$SPOKEB_VNET_CIDR" "$SPOKEA_VNET_CIDR" "$fw_ip"
 }
 inspect_avnm_routing_subnets
 ```
@@ -942,7 +943,7 @@ access에 Spoke VM agent의 인터넷 접속을 맡기지 않습니다.
 | Peering 변경 실패/비연결 | 실제 remote VNet ID·Connected·AVNM Connectivity 배포/Peering enforcement 확인; 직접 A↔B 연결 금지 |
 | Routing 구성 또는 규칙 `Updating` | 읽기 전용 조회로 완료까지 대기; 잘못된 Group/next hop은 commit 금지 |
 | commit 성공인데 Subnet에 table 없음 | 배포/전파 대기 후 5절 재검사; A/B 그룹의 멤버·대상 리전·배포 실패 사유 확인 |
-| 한쪽 `/16` 또는 `/0`만 존재 | 해당 collection/규칙·Firewall IP와 양쪽 Subnet 연결 확인; VM 생성 금지 |
+| 한쪽 상대 Spoke `/20` 또는 `/0`만 존재 | 해당 collection/규칙·Firewall IP와 양쪽 Subnet 연결 확인; VM 생성 금지 |
 | 기존 table/NAT 발견 | 다른 작업 소유인지 확인하고 중단; 기존 자원을 강제로 덮어쓰지 않기 |
 
 ## 완료 체크

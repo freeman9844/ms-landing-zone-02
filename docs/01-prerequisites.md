@@ -68,7 +68,9 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 입니다. `$SUBSCRIPTION_ID`는 실습 구독 UUID로 대체됩니다. 구독이 다르거나
 pool에 접근할 수 없다면 새 실행을 시작하지 말고 운영자에게 문의하세요.
 참가자 명령으로 공유 RG/pool을 생성하거나 변경하지 않습니다. 공유 pool의
-사용 권한과 Network Manager 읽기 권한은 운영자와 확인하세요.
+사용 권한(**IPAM Pool User** 역할 또는 동등한 pool 사용 권한)과 Network Manager
+읽기 권한은 운영자와 확인하세요. 읽기 전용 사전 점검은 실제 주소 할당 권한을
+증명하지 못합니다. 권한이 부족하면 모듈 02의 실제 배포에서 할당 오류가 발생합니다.
 
 기존 실행을 재개한다면 현재 상태 JSON을 그대로 보관하고 운영자가 게시한
 `workshop-pre-ipam-8d4781f` 태그(`8d4781f`)의 교재·스크립트를 **별도 clone**에서
@@ -130,7 +132,7 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 | `new_run` | 새 난수 ID와 로컬 상태 JSON을 준비합니다. Azure RG 이름 충돌을 조회하지만 RG를 만들지는 않습니다. |
 | `load_run` | 이전 실습·구역 변수를 비운 뒤 JSON을 검증하고 `RUN_ID`, `LOCATION`, 세 RG 이름 등을 복구합니다. 실패하면 대상 변수는 미설정 상태입니다. |
 | `assert_subscription` | 활성 구독과 상태 파일의 구독이 같은지 확인합니다. 임의로 구독을 바꾸지 않습니다. |
-| `assert_shared_ipam_pool` | 운영자 공유 pool의 전체 ID·구독·리전·범위·준비 상태를 읽기 전용으로 검증합니다. |
+| `assert_shared_ipam_pool` | 공유 pool의 ID·리전·prefix·준비 상태와 부모 Network Manager의 ID·구독 범위·Connectivity 접근·준비 상태를 읽기 전용으로 검증합니다. 할당 권한은 증명하지 못합니다. |
 | `assert_owned_rg` | 정확한 RG 이름·구독·네 가지 소유 태그를 확인합니다. 태그는 실수 방지 장치이지 RBAC 권한 경계가 아닙니다. |
 
 `zone_context`는 내부 검증 스크립트에서 구역별 이름을 선택할 때만 사용합니다.
@@ -181,7 +183,9 @@ az account set --subscription "$SELECTED_SUBSCRIPTION" &&
 로컬 상태 파일도 덮어쓰지 않습니다. **기존 실습 재개에는 아래 상태 복구만 사용**하세요.
 공유 pool 검사에서 실패하면 새 상태 파일을 만들지 마세요. `az account show --query id -o tsv`로
 활성 구독을 확인하고 운영자에게 `rg-lzbegin-ipam`의 pool 존재 여부, Network Manager
-읽기·pool 사용 권한, Korea Central 및 `172.20.0.0/14` 구성을 문의하세요.
+읽기·pool 사용 권한, 관리자 구독 범위·Connectivity 접근·준비 상태,
+Korea Central 및 `172.20.0.0/14` 구성을 문의하세요. 조회 성공만으로 실제
+할당 권한은 증명되지 않으므로 모듈 02에서 권한 오류가 나면 운영자에게 문의하세요.
 조회가 실패하거나 다른 pool을 반환하면 임의 pool 또는 고정 CIDR로 대신하지 마세요.
 
 ⚠️ **주의**

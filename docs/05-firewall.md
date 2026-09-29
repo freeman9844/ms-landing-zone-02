@@ -47,7 +47,7 @@ prepare_vm_session
 
 Spoke의 기본 outbound는 꺼져 있으며 **Spoke NAT나 Public IP는 만들지 않습니다**.
 VM Agent의 HTTPS 관리 통신을 위해 모듈 04에서 Firewall 정책과 두 Spoke의
-상대편 `/16`·기본 `/0` AVNM 경로가 이미 배포·적용되어 있어야 합니다.
+상대편 실제 `/20`·기본 `/0` AVNM 경로가 이미 배포·적용되어 있어야 합니다.
 Subnet의 유효 경로까지 확인한 뒤에만 VM을 배포합니다. Firewall은 NAT의 주소 변환과
 달리 FQDN 규칙·로그도 제공합니다. Hub 관리 VM에만 별도 Hub NAT를 사용합니다.
 
@@ -85,7 +85,7 @@ check_vm_network
 
 AVNM 피어링 강제 구성이 두 Spoke에 적용되고 네 방향 전달 허용이 유지됩니다.
 Firewall 사설 IP가 `AzureFirewallSubnet` 범위이고, **두 Spoke 워크로드 Subnet 모두**
-해당 IP를 next hop으로 하는 상대 Spoke `/16`과 `/0` AVNM 경로가 적용됐습니다.
+해당 IP를 next hop으로 하는 상대 Spoke 실제 `/20`과 `/0` AVNM 경로가 적용됐습니다.
 Spoke Subnet에 NAT가 없고 Spoke NAT/Public IP도 없습니다.
 검사가 실패했다면 모듈 04에서 배포·전파·Subnet 유효 경로를 먼저 확인합니다.
 **VM 배포 직전**에도 같은 검사를 반복합니다. 명령 한 번의 성공을 나중 작업의 승인으로 저장하지 않습니다.
@@ -210,7 +210,7 @@ Spoke NAT/Public IP의 부재는 VM 배포 전 검사와 모듈 06의 경로 검
 👁️ **설명**
 
 Subnet 경로 검사만으로 새 VM의 경로를 증명할 수 없습니다. 다음 검사는 두 NIC의
-**Active** 유효 경로에서 상대 Spoke `/16`과 기본 `/0`이 모두 실제 Firewall IP로
+**Active** 유효 경로에서 상대 Spoke 실제 `/20`과 기본 `/0`이 모두 실제 Firewall IP로
 향하는지 확인합니다. Hub→Spoke의 직접 Peering 경로는 계속 유지됩니다.
 
 🟢 **실행**
@@ -239,7 +239,7 @@ check_vm_effective_routes() {
           .nextHopType == "VirtualAppliance" and
           (.nextHopIpAddress | index($ip)) != null))
     ' <<<"$routes" >/dev/null || return 1
-    printf 'PASS: %s NIC /16 and /0 -> Firewall %s\n' "$zone" "$firewall_ip"
+    printf 'PASS: %s NIC %s and /0 -> Firewall %s\n' "$zone" "$remote" "$firewall_ip"
   done
 }
 check_vm_effective_routes
@@ -537,7 +537,7 @@ check_baseline_http
 📋 **확인**
 
 Hub→A=`spokea`, Hub→B=`spokeb`, A→B=`spokeb`의 **새 HTTP 연결** 세 건이 성공합니다.
-A→B는 모듈 04의 AVNM `/16` 왕복 경로로 Firewall을 통과하며 Firewall Policy도
+A→B는 모듈 04의 AVNM 실제 `/20` 왕복 경로로 Firewall을 통과하며 Firewall Policy도
 허용해야 합니다. Hub→Spoke는 직접 Peering을 사용하므로 Firewall 로그가 없을 수 있습니다.
 
 ## Portal 확인·트러블슈팅
@@ -548,20 +548,20 @@ A→B는 모듈 04의 AVNM `/16` 왕복 경로로 Firewall을 통과하며 Firew
 Spoke Group 대상 컬렉션과 세 AlwaysAllow를 확인하세요.
 **VM → Networking → Effective security rules**에서 중앙 규칙과 Subnet NSG의
 `deny-other-vnet-inbound`(4000)를 함께 확인합니다. AlwaysAllow는 NSG Deny를 **우회**하지
-NSG 규칙을 삭제하지 않습니다. **NIC → Effective routes**에서 `/16`과 `/0`의
+NSG 규칙을 삭제하지 않습니다. **NIC → Effective routes**에서 상대 Spoke `/20`과 `/0`의
 VirtualAppliance IP를 확인하세요.
 
 | 증상 | 먼저 확인할 것 |
 |---|---|
 | VM Run Command 실패 | Spoke NIC의 `/0` → Firewall, Firewall 관리 HTTPS 규칙, VM Agent 상태 |
 | IP Flow Verify가 NSG Deny 반환 | 단독 판정하지 않고 effective Admin 규칙·실제 HTTP를 대조 |
-| effective Admin 규칙은 허용, HTTP는 실패 | 서비스, 양방향 `/16` 경로, Firewall TCP 8080 정책 |
+| effective Admin 규칙은 허용, HTTP는 실패 | 서비스, 양방향 상대 Spoke `/20` 경로, Firewall TCP 8080 정책 |
 | Hub→A가 실패 | Security Admin 배포·effective 규칙과 서비스 상태 확인 |
 
 ## 완료 체크
 
 - VM보다 먼저 Firewall·AVNM 경로를 확인했고 Spoke NAT/Public IP를 만들지 않았습니다.
-- Hub NAT만 연결하고 양쪽 Spoke NIC의 실제 `/16`·`/0` 경로를 확인했습니다.
+- Hub NAT만 연결하고 양쪽 Spoke NIC의 실제 상대 Spoke `/20`·`/0` 경로를 확인했습니다.
 - 좁은 세 AlwaysAllow의 effective 규칙과 Hub→A/B·A→B HTTP 성공을 확인했습니다.
 - Firewall Policy 차단·복구 실습은 모듈 06에서 한 번만 수행합니다.
 

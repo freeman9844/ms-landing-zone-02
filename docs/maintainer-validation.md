@@ -46,19 +46,24 @@ az resource show --ids "$POOL_ID" --api-version 2024-05-01 \
   --query '{id:id,location:location,prefixes:properties.addressPrefixes}' -o json
 az resource show --ids "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam" \
   --api-version 2024-05-01 \
-  --query '{location:location,scopes:properties.networkManagerScopes,accesses:properties.networkManagerScopeAccesses}' -o json
+  --query '{id:id,location:location,state:properties.provisioningState,scopes:properties.networkManagerScopes,accesses:properties.networkManagerScopeAccesses}' -o json
 ```
 
-참가자에게 대상 구독 Contributor(또는 동등한 역할)가 있는지 확인하세요. 별도
-RBAC로 제한했다면 참가자의 실제 pool 사용 권한과 Network Manager 읽기 권한도
-확인한 뒤 새 실행을 시작합니다. 공유 RG `rg-lzbegin-ipam`과 이 pool은 모든
+참가자에게 대상 구독 Contributor(또는 동등한 역할)가 있는지 확인하세요. 실제
+pool 사용 권한(**IPAM Pool User** 역할 또는 동등한 할당 권한)과 Network Manager
+읽기 권한도 운영자가 확인한 뒤 새 실행을 시작합니다. Microsoft Learn의
+[IPAM 역할 안내](https://learn.microsoft.com/azure/virtual-network-manager/concept-ip-address-management)는
+IPAM Pool User에게 pool 조회와 할당 권한을 명시합니다. 읽기 전용 사전 점검은
+할당 권한을 증명하지 못하며, 권한 부족은 모듈 02의 실제 배포에서 오류로 드러납니다.
+공유 RG `rg-lzbegin-ipam`과 이 pool은 모든
 실행에 걸쳐 유지하며 모듈 07 삭제 대상이 아닙니다. pool 삭제는 운영자 별도
 작업으로만 진행합니다.
 빈 `/14`의 `/20`은 최대 64개이므로 3-VNet 전체 실행은 최대 21개(1개 `/20`
 잔여)입니다. 이미 소비한 prefix와 예약 주소가 있으면 실제 여유는 더 적습니다.
 운영자는 연결된 VNet·온프레미스 등 pool **외부** 주소 충돌도 직접 확인합니다.
 모듈 01의 새 실행 pool 사전 점검은 읽기 전용으로 정확한 ID·구독·Korea Central
-위치·`172.20.0.0/14`·관리자 범위/접근 권한을 검사합니다. 실패를 다른 pool이나
+위치·`172.20.0.0/14`·관리자 ID/구독 범위/Connectivity 접근/준비 상태를 검사합니다.
+실패를 다른 pool이나
 고정 CIDR로 대체하지 말고 운영자 준비를 수정하세요.
 
 ## IPAM 동시 실행 리허설 (운영자 승인 후)
