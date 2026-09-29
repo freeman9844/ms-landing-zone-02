@@ -698,6 +698,7 @@ printf 'SHELL_ALIVE\\n'
                     result = self.execute(2, f"foundation-{zone}-vnet", [response])
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("ERROR:", result.stderr)
+
         config_calls = avnm_cases()["connectivity-config-create"]
         for name, calls in (
             ("inspect-static-members", [az([
@@ -712,6 +713,18 @@ printf 'SHELL_ALIVE\\n'
             with self.subTest(step=name):
                 result = self.execute(3, name, calls)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pool_deployment_rejects_case_variant_existing_vnet_without_deploying(self):
+        for zone in ("hub", "spokea", "spokeb"):
+            with self.subTest(zone=zone):
+                lookup = foundation_cases()[f"foundation-{zone}-vnet"][0]
+                response = dict(lookup, stdout=json.dumps([
+                    {"name": "unrelated-vnet"},
+                    {"name": vnet(zone).upper()},
+                ]))
+                result = self.execute(2, f"foundation-{zone}-vnet", [response])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("VNet exists or VNet lookup is malformed", result.stderr)
 
     def test_avnm_inspection_blocks_are_read_only_and_show_cli_output(self):
         for name, calls in (

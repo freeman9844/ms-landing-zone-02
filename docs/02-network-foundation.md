@@ -211,6 +211,7 @@ NSG 생성 응답은 `NewNSG` 안에 표시될 수 있습니다. 기본 규칙�
 Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 하나의 배포로 요청합니다.
 관리 Subnet만 NSG를 연결하고 기본 outbound를 끕니다. 실패·부분 성공 시
 이미 생성된 VNet을 다시 배포하지 말고 조회 블록으로 실제 상태를 확인한 뒤 진행하세요.
+Azure VNet 이름은 대소문자를 구분하지 않으므로 기존 이름도 대소문자 구분 없이 검사합니다.
 
 🟢 **실행**
 
@@ -219,7 +220,7 @@ Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 하나의 배�
 deploy_hub_vnet() {
   local existing
   existing=$(az network vnet list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg name "vnet-lzbegin-hub-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+  jq -e --arg name "vnet-lzbegin-hub-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Hub VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
   az deployment group create --resource-group "$RG_HUB" --name "ipam-vnet-hub-$RUN_ID" \
     --template-file infra/workshop-ipam-vnet.bicep \
@@ -330,7 +331,7 @@ A VNet `/20`과 워크로드 Subnet `/24`를 공유 pool에서 요청합니다.
 deploy_spokea_vnet() {
   local existing
   existing=$(az network vnet list --resource-group "$RG_SPOKEA" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg name "vnet-lzbegin-spokea-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+  jq -e --arg name "vnet-lzbegin-spokea-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Spoke A VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
   az deployment group create --resource-group "$RG_SPOKEA" --name "ipam-vnet-spokea-$RUN_ID" \
     --template-file infra/workshop-ipam-vnet.bicep \
@@ -439,7 +440,7 @@ A와 Subnet 이름은 같지만 VNet과 주소 범위가 다른 별도 자원입
 deploy_spokeb_vnet() {
   local existing
   existing=$(az network vnet list --resource-group "$RG_SPOKEB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg name "vnet-lzbegin-spokeb-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+  jq -e --arg name "vnet-lzbegin-spokeb-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Spoke B VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
   az deployment group create --resource-group "$RG_SPOKEB" --name "ipam-vnet-spokeb-$RUN_ID" \
     --template-file infra/workshop-ipam-vnet.bicep \
