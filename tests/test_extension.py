@@ -56,7 +56,7 @@ class FirewallLogTests(unittest.TestCase):
 class ExtensionGateTests(unittest.TestCase):
     def run_extension(self, script, calls, **kwargs):
         calls = list(calls)
-        if calls and calls[0]["argv"] == account()["argv"]:
+        if calls and calls[0]["argv"] == account()["argv"] and not script.endswith(" denied"):
             calls[1:1] = enforced_connectivity_calls()
         return run(script, calls, **kwargs)
 
@@ -154,7 +154,7 @@ class ExtensionGateTests(unittest.TestCase):
         calls = self.prefix()
         calls[-1]["stdout"] = "10.10.1.99"
         result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json denied',
-                     calls + redesign.route_calls() + redesign.SpokeNatAbsenceTests().calls())
+                     calls)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid workshop IP", result.stderr)
 
@@ -171,10 +171,20 @@ class ExtensionGateTests(unittest.TestCase):
 
         nat = redesign.SpokeNatAbsenceTests().calls(attachment=netid(
             "spokea", "natGateways", "nat-lzbegin-spokea-demo123"))
-        result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json denied',
+        result = self.run_extension('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json allowed',
                      self.prefix() + routes + nat)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("still has a NAT", result.stderr)
+
+    def test_denied_skips_baseline_config_rechecks_but_requires_live_spoke_route(self):
+        route = copy.deepcopy(self.route_calls()[0])
+        payload = json.loads(route["stdout"])
+        payload["value"][0]["nextHopIpAddress"] = ["10.0.2.9"]
+        route["stdout"] = json.dumps(payload)
+        result = run('bash "$WORKSHOP_ROOT/scripts/verify-extension.sh" state.json denied',
+                     [*self.prefix(), route])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unexpected next hop IP", result.stderr)
 
     def test_wrong_admin_rule_rejected_before_http(self):
         security = admin_calls("restored")

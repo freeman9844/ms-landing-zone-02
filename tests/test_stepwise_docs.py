@@ -428,6 +428,14 @@ class StepwiseDocsTests(unittest.TestCase):
         for name in ("firewall-deny", "verify-denied", "firewall-restore", "verify-restored"):
             self.assertIn(name, steps06)
 
+    def test_module_06_uses_one_comprehensive_baseline_instead_of_separate_route_checks(self):
+        steps = blocks(DOCS[6])
+        self.assertNotIn("validate-avnm-subnets", steps)
+        self.assertNotIn("validate-effective-nic-routes", steps)
+        self.assertIn("verify-allowed", steps)
+        self.assertIn("validate_effective_nic_routes", steps["firewall-deny"])
+        self.assertIn("assert_no_spoke_nat", steps["firewall-deny"])
+
     def test_firewall_deny_validates_routes_in_a_fresh_prepared_shell(self):
         calls = routing_cases()["firewall-deny"]
         self.assertEqual(self.execute(6, "firewall-deny", calls).returncode, 0)
@@ -444,7 +452,7 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotIn("inspect-nat-hub", steps)
         self.assertNotIn("inspect-no-spoke-nat", steps)
         self.assertIn("assert_no_spoke_nat", steps["vm-route-gate"])
-        self.assertIn("assert_no_spoke_nat", blocks(DOCS[6])["validate-avnm-subnets"])
+        self.assertIn("assert_no_spoke_nat", blocks(DOCS[6])["firewall-deny"])
 
     def test_module_06_allowed_result_example_covers_route_http_and_fresh_log(self):
         doc = DOCS[6].read_text()
@@ -750,8 +758,6 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_vm_and_validation_gates_require_deployed_avnm_routes_and_no_spoke_nat(self):
         for module, step, calls in (
             (5, "vm-route-gate", [*ready_calls(), *deployed_route_calls(), *no_spoke_nat_calls()]),
-            (6, "validate-avnm-subnets", [*ready_calls(), *deployed_route_calls(), *no_spoke_nat_calls()]),
-            (6, "validate-effective-nic-routes", effective_route_calls()),
         ):
             with self.subTest(step=step):
                 result = self.execute(module, step, calls)
@@ -772,21 +778,21 @@ class StepwiseDocsTests(unittest.TestCase):
                 data = json.loads(altered[-1]["stdout"])
                 data[field] = value
                 altered[-1]["stdout"] = json.dumps(data)
-                self.assertNotEqual(self.execute(6, "validate-avnm-subnets", altered).returncode, 0)
+                self.assertNotEqual(self.execute(6, "firewall-deny", altered).returncode, 0)
         calls = effective_route_calls()
         for index in (-2, -1):
             altered = copy.deepcopy(calls if index == -1 else calls[:-1])
             route = json.loads(altered[-1]["stdout"])
             route["value"][0]["nextHopIpAddress"] = ["10.0.2.5"]
             altered[-1]["stdout"] = json.dumps(route)
-            self.assertNotEqual(self.execute(6, "validate-effective-nic-routes", altered).returncode, 0)
+            self.assertNotEqual(self.execute(6, "firewall-deny", altered).returncode, 0)
         for index, payload in ((1, {"natGateway": {"id": "foreign"}}),
                                (2, [{"name": "unexpected-nat"}]), (3, [{"name": "unexpected-pip"}])):
             calls = no_spoke_nat_calls()
             altered = copy.deepcopy(calls[:2] if index == 1 else calls[:4])
             altered[index]["stdout"] = json.dumps(payload)
-            self.assertNotEqual(self.execute(6, "validate-avnm-subnets",
-                                            [*ready_calls(), *deployed_route_calls(), *altered]).returncode, 0)
+            self.assertNotEqual(self.execute(6, "firewall-deny",
+                                            [*effective_route_calls(), *altered]).returncode, 0)
 
     def test_each_action_stops_after_any_failed_dependency_lookup(self):
         for module, cases in self.cases():

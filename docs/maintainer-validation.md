@@ -68,9 +68,11 @@ Subnet의 적용을 확인하되 관리형 route table 이름·RG·태그는 가
 모듈 05의 VM 생성 후 양쪽 NIC의 Active `/16`·`/0`을 재확인합니다.
 Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개를 한 구성의 지역 배포로
 검증하며, effective 규칙과 실제 HTTP 성공을 함께 확인합니다.
-모듈 06은 Firewall `lab-http` Allow→Deny→Allow에서 새 HTTP 요청과 **매번
-새 UTC 시각 이후의 `AZFWNetworkRule` 로그**, 두 Spoke의 Firewall egress를
-검증합니다. 로그 지연이나 AVNM 비동기 적용에는 읽기 전용 재조회로 대응합니다.
+모듈 06은 `allowed` 기준·`restored` 최종 단계에서 AVNM 구성·Subnet/NIC 경로·
+NAT 부재를 종합 확인합니다. Policy 변경 직전에는 경로·NAT를 다시 확인하고,
+`denied` 증거 단계에서는 반복적인 구성 조회 대신 현재 A→B NIC 경로,
+Hub 통신·egress·차단된 HTTP와 **새 UTC 시각 이후의 `AZFWNetworkRule` Deny 로그**를
+확인합니다. 모든 단계에서 새 로그를 요구하며, 지연 시 새 요청으로 재검증합니다.
 `workshop-safety.sh`의 `assert_avnm_routes_ready "$firewall_ip"`와
 `assert_no_spoke_nat`는 읽기 전용이며 성공 티켓·숨겨진 변경 래퍼가 아닙니다.
 
@@ -490,5 +492,6 @@ Subnet에 연결합니다. Spoke NAT를 분리하거나 삭제하는 실습은 �
 Firewall 차단 실습은 관리용 collection을 건드리지 않고 `lab-http`를 명시적 Deny로 전환합니다.
 이는 단순 네트워크 장애와 정책 차단을 구분하는 로그를 확보하기 위한 것입니다.
 
-검사기는 세션의 성공 결과를 상태 JSON에 저장하지 않습니다. 다음 단계마다 실제 Azure
-상태와 해당 시점의 증거를 다시 확인합니다.
+검사기는 세션의 성공 결과를 상태 JSON에 저장하지 않습니다. 읽기 전용 경로·NAT
+검사는 변경 직전과 최종 복구 때 다시 확인하고, 차단 증거 단계에서는 이번 흐름의
+실제 NIC 경로·통신·Firewall 로그를 새로 확인합니다.

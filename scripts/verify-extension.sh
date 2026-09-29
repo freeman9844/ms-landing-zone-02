@@ -8,7 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/workshop-safety.sh"
   { fail "Usage: verify-extension.sh STATE_FILE allowed|denied|restored"; exit 1; }
 load_run "$1"
 assert_subscription
-assert_enforced_connectivity
+if [[ "$2" != denied ]]; then assert_enforced_connectivity; fi
 for rg in "$RG_HUB" "$RG_SPOKEA" "$RG_SPOKEB"; do assert_owned_rg "$rg"; done
 # 배포 완료, 실습 SKU, 단일 IP 구성과 사설 IP를 확인한 뒤 그 IP를 경로의 비교 기준으로 사용합니다.
 fw=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" -o json)
@@ -31,18 +31,25 @@ public_ip=$(az network public-ip show -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" -
 hub=$(vm_ip hub)
 a=$(vm_ip spokea)
 b=$(vm_ip spokeb)
-assert_avnm_routes_ready "$fw_ip"
-assert_no_spoke_nat
-assert_admin_rules_ready "$hub" "$a" "$b" restored
-# 요청 A→B와 응답 B→A가 같은 Firewall을 지나야 합니다. Hub→B의 직접 Peering은 그대로 유지합니다.
-route_proof spokea "$b" VirtualAppliance "$fw_ip"
-route_proof spokeb "$a" VirtualAppliance "$fw_ip"
-route_proof spokea 8.8.8.8 VirtualAppliance "$fw_ip"
-route_proof spokeb 8.8.8.8 VirtualAppliance "$fw_ip"
-route_proof hub "$a" VNetPeering
-route_proof hub "$b" VNetPeering
-admin_proof spokea "$a" "$hub" Allow hub-to-a
-admin_proof spokeb "$b" "$a" Allow a-to-b
+assert_ipv4_in_subnet "$hub" 10.0.1.0/24
+assert_ipv4_in_subnet "$a" 10.10.1.0/24
+assert_ipv4_in_subnet "$b" 10.20.1.0/24
+if [[ "$2" == denied ]]; then
+  # Firewall Deny의 원인은 이번 흐름의 로그로 판정하고, A의 현재 NIC 경로만 재확인합니다.
+  route_proof spokea "$b" VirtualAppliance "$fw_ip"
+else
+  assert_avnm_routes_ready "$fw_ip"
+  assert_no_spoke_nat
+  assert_admin_rules_ready "$hub" "$a" "$b" restored
+  route_proof spokea "$b" VirtualAppliance "$fw_ip"
+  route_proof spokeb "$a" VirtualAppliance "$fw_ip"
+  route_proof spokea 8.8.8.8 VirtualAppliance "$fw_ip"
+  route_proof spokeb 8.8.8.8 VirtualAppliance "$fw_ip"
+  route_proof hub "$a" VNetPeering
+  route_proof hub "$b" VNetPeering
+  admin_proof spokea "$a" "$hub" Allow hub-to-a
+  admin_proof spokeb "$b" "$a" Allow a-to-b
+fi
 http_proof "$1" hub "$a" spokea
 http_proof "$1" hub "$b" spokeb
 # 새 A→B 요청 직전에 시각을 기록해 이전 실습의 Allow/Deny 로그를 성공 증거로 재사용하지 않습니다.
@@ -77,4 +84,8 @@ for zone in spokea spokeb; do
     { fail "Egress IP mismatch/unverified: $response"; exit 1; }
   route_proof "$zone" "$destination" VirtualAppliance "$fw_ip"
 done
-printf 'PASS: extension %s has matching AVNM routes, admin rules, HTTP, Firewall log and egress evidence.\n' "$2"
+if [[ "$2" == denied ]]; then
+  printf 'PASS: extension denied has live A->B route, blocked HTTP, current Firewall Deny log, Hub HTTP and egress evidence.\n'
+else
+  printf 'PASS: extension %s has matching AVNM routes, admin rules, HTTP, Firewall log and egress evidence.\n' "$2"
+fi

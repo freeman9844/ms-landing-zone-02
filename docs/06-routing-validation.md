@@ -37,63 +37,9 @@ prepare_validation_session
 
 오류 없이 종료되어야 합니다. 검사는 읽기 전용이며 다른 실습의 구독·RG라면 중단합니다.
 `command not found`는 같은 셸에서 이 준비를 다시 실행해야 한다는 뜻입니다.
-이 준비에서 2단계와 4-1이 공유하는 경로 검사 함수를 읽습니다.
+이 준비에서 Policy 변경 전에 사용하는 경로 검사 함수를 읽습니다.
 
-## 1. 배포 상태·Subnet 경로·Spoke NAT 부재
-
-👁️ **설명**
-
-AVNM Routing은 Spoke A에 `10.20.0.0/16`, B에 `10.10.0.0/16`, 양쪽에
-`0.0.0.0/0`을 **Firewall 사설 IP**로 보냅니다. 서로 다른 Routing Group에
-서로 다른 반환 경로를 적용합니다. `/16`은 `/0`보다 우선하지만 Firewall 규칙의
-허용을 의미하지는 않습니다. 모듈 04의 구성 배포 응답만으로 적용 완료를 판단하지 마세요.
-`firewall_ready_ip`는 Policy의 `lab-http`가 **Allow**인 기준 상태에서만 사용합니다.
-
-🟢 **실행**
-
-<!-- exec:validate-avnm-subnets -->
-```bash
-validate_avnm_subnets() {
-  local fw_ip
-  fw_ip=$(firewall_ready_ip) || return 1
-  assert_avnm_routes_ready "$fw_ip" || return 1
-  assert_no_spoke_nat
-}
-validate_avnm_subnets
-```
-
-📋 **확인**
-
-두 Subnet의 경로 테이블 연결과 각각의 `/16`·`/0` 경로, 올바른 Group/next hop,
-Spoke Subnet의 NAT 연결 부재 및 두 Spoke RG의 NAT/Public IP 부재가 모두 통과해야
-합니다. AVNM 관리형 경로 테이블의 **이름·RG·태그는 추측하지 않습니다**.
-아직 준비되지 않았다면 모듈 04의 배포 상태·Routing Group 멤버십·Firewall IP를
-확인하고 1–2분 후 **이 블록을 다시 실행**하세요. Azure 조회 오류나 지속적인 불일치를
-성공으로 취급하거나 수동 route table을 만들어 우회하지 마세요.
-
-## 2. 실제 NIC 유효 `/16`·`/0` 경로
-
-👁️ **설명**
-
-Subnet에 경로가 보여도 VM NIC에 적용되지 않았을 수 있습니다. 두 NIC의 **Active**
-유효 경로에 상대 Spoke의 `/16`과 인터넷 `/0`이 모두 있어야 합니다. 둘 중 하나라도
-없거나 Firewall 사설 IP가 다르면 HTTP/egress 실험을 시작하지 마세요.
-
-🟢 **실행**
-
-<!-- exec:validate-effective-nic-routes -->
-```bash
-validate_effective_nic_routes
-```
-
-📋 **확인**
-
-두 줄의 `PASS`가 나타나야 합니다. 유효 경로도 AVNM 전파가 지연될 수 있으므로
-1–2분 기다렸다가 이 블록을 다시 실행하세요. 경로가 계속 없으면 모듈 04의 대상
-Group·Subnet 연결·방화벽 사설 IP와 모듈 05의 VM/NIC 상태를 확인합니다.
-`0.0.0.0/0`만 보고 반대 Spoke 왕복 경로까지 보장된다고 추측하지 마세요.
-
-## 3. 실제 HTTP·Firewall Allow 로그·인터넷 출구
+## 1. 경로·HTTP·Firewall Allow 로그·인터넷 출구 기준 확인
 
 👁️ **설명**
 
@@ -105,6 +51,12 @@ Group·Subnet 연결·방화벽 사설 IP와 모듈 05의 VM/NIC 상태를 확�
 A/B 사설 IP·TCP/8080·이번 Firewall 전체 ID를 대조해야 합니다. 단순 HTTP 성공이나
 과거 로그는 Firewall 경유의 증거가 아닙니다. 전용 `AZFWApplicationRule` 진단도
 설정되어 있어야 합니다.
+
+이 실행에서 AVNM 구성과 두 Subnet의 `/16`·`/0` 배포, 두 NIC의 Active 유효 경로,
+Spoke NAT/Public IP 부재를 함께 검사하므로 같은 항목을 별도 블록에서 반복하지
+않습니다. 전파 지연 시 1–2분 기다렸다가 **이 블록 전체**를 다시 실행하세요.
+경로가 계속 없으면 모듈 04의 Group·Subnet 연결·Firewall IP 및 모듈 05의
+VM/NIC 상태를 확인하고, 수동 경로를 만들어 우회하지 마세요.
 
 Security Admin 구성은 `sc-lzbegin-http-<실행 ID>`, collection은 `spokea`와
 `spokeb`입니다. 현재 NIC IP의 `/32`를 대상으로 `spokea/hub-to-a`(200),
@@ -168,24 +120,25 @@ PASS: extension allowed has matching AVNM routes, admin rules, HTTP, Firewall lo
 검증 실패는 허용의 증거가 아닙니다. 로그 수집이 늦다면 최대 10분 기다린 뒤
 **새 요청을 보내는 검증 전체**를 다시 실행하세요.
 
-## 4. Firewall Policy만 Deny로 바꾸고 복구
+## 2. Firewall Policy만 Deny로 바꾸고 복구
 
 👁️ **설명**
 
 AVNM Routing·Security Admin 규칙과 관리/HTTPS egress collection은 그대로 두고
 `lab-http` collection의 action만 바꿉니다. 이 워크숍의 유일한 차단·복구 실험입니다.
 Firewall Deny는 **A→B**만 차단하며 Hub→A/B는 유지돼야 합니다.
-각 전환 전 Subnet·NIC 경로 및 NAT 부재를 다시 검사합니다. Policy 전파
-중에는 이전 상태가 잠시 보일 수 있습니다.
+Deny 변경 직전에는 현재 NIC 경로·NAT 부재를 다시 확인합니다. 차단 증거 단계는
+이번 흐름의 Firewall 로그와 실제 통신에 집중하고, 복구 후에는 전체 경로·규칙을
+다시 검사합니다. Policy 전파 중에는 이전 상태가 잠시 보일 수 있습니다.
 
-### 4-1. `lab-http` Deny
+### 2-1. `lab-http` Deny
 
 👁️ **설명**
 
 현재 목록에서 정확히 하나의 `lab-http` 위치만 찾습니다. 사전 검사 실패 시 Policy를
 바꾸지 마세요. 상태 검사는 Allow인 기준 상태에서 수행합니다.
 `validate_effective_nic_routes`는 공통 준비에서 읽으므로, 재접속했다면 **공통 준비만**
-다시 실행하세요. 2단계 블록을 재실행하지 않아도 현재 NIC 경로를 다시 검사합니다.
+다시 실행하세요. 기준 검증의 성공을 변경 허가로 저장하지 않고 현재 NIC 경로를 검사합니다.
 
 🟢 **실행**
 
@@ -212,13 +165,14 @@ deny_lab_http
 `lab-http.action.type=Deny`이며 다른 collection은 Allow여야 합니다. 실패했거나
 변경 응답이 불분명하면 Policy의 현재 상태를 확인하고 **복구 단계로** 이동하세요.
 
-### 4-2. Deny 실제 증거
+### 2-2. Deny 실제 증거
 
 👁️ **설명**
 
 새 A→B 연결 실패 **및** 방금 시각 이후의 `AZFWNetworkRule` Deny 로그를 함께
 요구합니다. Hub→A/B HTTP 및 두 Spoke의 egress는 계속 정상이어야 합니다.
-단순 timeout이나 이전 Deny 로그를 방화벽 판정으로 해석하지 마세요.
+현재 A→B NIC 경로도 확인하지만 기준 단계의 AVNM 구성·Security Admin 규칙 전체
+조회는 반복하지 않습니다. 단순 timeout이나 이전 Deny 로그를 방화벽 판정으로 해석하지 마세요.
 
 🟢 **실행**
 
@@ -231,9 +185,9 @@ bash scripts/verify-extension.sh "$STATE_FILE" denied
 
 A 사설 IP→B 사설 IP TCP/8080의 **새 Deny**와 정확한 Firewall ID가 일치해야
 합니다. 전파·로그 지연 시 최대 10분까지 새 요청으로 재검증합니다. 통과하지
-못하더라도 차단 상태로 방치하지 말고 **4-3을 먼저 실행**하세요.
+못하더라도 차단 상태로 방치하지 말고 **2-3을 먼저 실행**하세요.
 
-### 4-3. `lab-http` Allow 복구
+### 2-3. `lab-http` Allow 복구
 
 👁️ **설명**
 
@@ -271,7 +225,7 @@ restore_lab_http
 `lab-http`가 Allow로 돌아와야 합니다. API 조회/업데이트 실패 시 원인을 해결하고
 **이 복구 블록만 다시 실행**하세요. 다른 규칙을 삭제하거나 NSG를 열어 우회하지 않습니다.
 
-### 4-4. 새 Allow 및 전체 복구 증거
+### 2-4. 새 Allow 및 전체 복구 증거
 
 🟢 **실행**
 
@@ -289,7 +243,7 @@ Hub→A/B와 A→B HTTP, A→B의 **새 Allow 로그**, NIC 왕복 `/16`·`/0`,
 | 단계 | Security Admin | AVNM `/16`·`/0` | A→B HTTP | 새 Firewall 로그 |
 |---|---|---|---|---|
 | allowed | Always Allow | Firewall | 성공 | Allow |
-| denied | Always Allow | Firewall | 차단 | Deny |
+| denied | 기준 단계에서 확인 | A→B 현재 NIC 경로 | 차단 | Deny |
 | restored | Always Allow | Firewall | 재성공 | Allow |
 
 ## Portal 확인과 트러블슈팅
