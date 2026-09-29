@@ -12,15 +12,33 @@ MODULES = [
 
 
 class DocsTests(unittest.TestCase):
-    def test_published_rehearsal_status_distinguishes_current_and_historical_workshop(self):
+    def test_entry_diagrams_and_basics_do_not_promise_static_addresses(self):
+        for name in ("README.md", "docs/00-azure-basics.md"):
+            text = (ROOT / name).read_text()
+            for old in ("10.0.0.0/16", "10.10.0.0/16", "10.20.0.0/16",
+                        "10.10.1.0/24"):
+                self.assertNotIn(old, text, f"{name}: static address {old}")
+            self.assertIn("IPAM", text, name)
+            self.assertIn("/20", text, name)
+
+    def test_operator_rehearsal_requires_concurrent_runs_and_preserves_pool(self):
+        text = (ROOT / "docs/maintainer-validation.md").read_text()
+        self.assertIn("## IPAM 동시 실행 리허설", text)
+        section = text.split("## IPAM 동시 실행 리허설", 1)[1].split("\n## ", 1)[0]
+        for term in ("승인", "서로 다른", "동시", "CIDR", "Subnet", "03–06",
+                     "Deny", "로그", "07", "rg-lzbegin-ipam", "정적"):
+            self.assertIn(term, section)
+
+    def test_published_rehearsal_status_distinguishes_ipam_from_historical_workshop(self):
         readme = (ROOT / "README.md").read_text()
         maintainer = (ROOT / "docs/maintainer-validation.md").read_text()
-        self.assertIn("2026-09-27 현재 과정의 실환경 리허설을 완료했습니다", readme)
+        self.assertIn("2026-09-27", readme)
         self.assertIn("2026-09-27", maintainer)
         self.assertIn("edb7827a799c", maintainer)
         self.assertIn("이전 아키텍처의 실제 Azure 리허설 기록", maintainer)
-        self.assertNotIn("아직 리허설하지 않았습니다", readme)
-        self.assertNotIn("이번 개편의 확인은 **로컬/mock만**", maintainer)
+        self.assertIn("IPAM 동시 실행", readme)
+        self.assertIn("미검증", readme)
+        self.assertIn("미검증", maintainer)
 
     def test_module_navigation_reaches_firewall_routing_and_cleanup_in_order(self):
         readme = (ROOT / "README.md").read_text()

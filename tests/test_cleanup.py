@@ -1,6 +1,6 @@
 import json
 import unittest
-from harness import run, call, account, group, STATE, SUB
+from harness import run, call, account, group, STATE, SUB, POOL_ID
 
 
 def inventory(absent=False):
@@ -51,6 +51,31 @@ def avnm_cleanup(manager=False):
 
 
 class CleanupTests(unittest.TestCase):
+    def test_partial_run_deletes_only_existing_run_group_without_ipam_allocations(self):
+        hub = STATE["resourceGroups"]["hub"]
+        calls = [account()]
+        for zone, name in STATE["resourceGroups"].items():
+            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"],
+                              "true" if zone == "hub" else "false"))
+            if zone == "hub":
+                calls.append(group(zone))
+        calls += [account(), group("hub"),
+                  call(["network", "manager", "list", "-g", hub, "-o", "json",
+                        "--subscription", SUB], []),
+                  call(["group", "delete", "--name", hub, "--yes", "--no-wait"]),
+                  call(["group", "exists", "--name", hub, "-o", "tsv"], "false")]
+        result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
+                     input_text=f"DELETE demo123 FROM {SUB}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"Deleted: {hub}", result.stdout)
+        self.assertNotIn("rg-lzbegin-ipam", result.stdout)
+
+    def test_pool_group_is_never_targeted_when_all_run_groups_are_absent(self):
+        result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', inventory(True))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("rg-lzbegin-ipam", result.stdout)
+        self.assertNotIn(POOL_ID, result.stdout)
+
     def test_wrong_confirmation_never_deletes(self):
         result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', inventory(), input_text="no\n")
         self.assertNotEqual(result.returncode, 0)

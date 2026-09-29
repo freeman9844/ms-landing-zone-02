@@ -27,23 +27,28 @@ RG 세 개를 만든다고 운영용 다중 구독 Landing Zone이 완성되는 
 👁️ **설명**
 
 **VNet**은 Azure 안의 사설 네트워크이고 **Subnet**은 그 안의 주소 구역입니다.
-`10.10.0.0/16`에서 `/16`은 주소 범위의 크기를 나타내는 CIDR 표기입니다.
-이번 Spoke A의 `10.10.1.0/24`는 그 VNet 안의 더 작은 구역입니다.
+`172.20.0.0/14`에서 `/14`는 주소 범위의 크기를 나타내는 CIDR 표기입니다.
+운영자가 Korea Central에 미리 마련한 **공유 AVNM IPAM pool**이 세 VNet에
+서로 다른 `/20` CIDR을 동적으로 배정합니다. `/24`와 `/26`은 각각 해당 VNet
+안에 속하는 더 작은 Subnet입니다. 정확한 주소는 미리 알 수 없으며 모듈 02에서
+배포 결과를 읽어 확인합니다.
 Azure는 Subnet마다 앞의 네 주소와 마지막 주소를 예약하므로 `.1`을 VM 주소로 고정하지 않습니다.
 
-| 구역 | VNet | VM용 Subnet | 목적 |
+| 구역 | VNet | Subnet | 목적 |
 |---|---|---|---|
-| Hub | `10.0.0.0/16` | `10.0.1.0/24` | 공통 기능, 교육용 검사 VM |
-| Spoke A | `10.10.0.0/16` | `10.10.1.0/24` | 첫 번째 워크로드 |
-| Spoke B | `10.20.0.0/16` | `10.20.1.0/24` | 두 번째 워크로드 |
+| Hub | pool 할당 `/20` | `snet-management` `/24`, `AzureFirewallSubnet` `/26` | 공통 기능, 교육용 검사 VM·Firewall |
+| Spoke A | 별도 pool 할당 `/20` | `snet-workload` `/24` | 첫 번째 워크로드 |
+| Spoke B | 별도 pool 할당 `/20` | `snet-workload` `/24` | 두 번째 워크로드 |
 
 겹치지 않는 주소를 쓰면 어느 네트워크로 보내야 하는지 구분할 수 있습니다.
+같은 pool의 할당 중복은 IPAM이 막지만 pool 외부 네트워크와의 충돌은 운영자가
+사전에 조사해야 합니다. 공유 RG와 pool은 참가자의 모듈 07 정리 대상이 아닙니다.
 이번 실습에서는 참가자가 네 방향 Peering을 직접 만들지 않고,
 **AVNM(Azure Virtual Network Manager)**가 Hub↔Spoke Peering을 중앙에서 관리합니다.
 Hub와 각각 연결해도 Spoke끼리 자동으로 연결되지는 않습니다. 이를
 **비전이성(non-transitivity)**이라고 합니다. 모듈 04의 A→B 차단 검사는
-직접 A↔B Peering이 없는 구성에서 실제 `None` 경로와 통신 실패를 확인합니다.
-통신 실패만으로 비전이성을 증명하지는 않습니다.
+직접 A↔B Peering은 만들지 않으며, 모듈 04에서 Firewall·Routing을 준비한 뒤
+Spoke 간 통신을 확인합니다. 피어링만으로 Spoke 간 transit이 생기지는 않습니다.
 
 ## 3. AVNM이 연결을 관리하는 방법
 
@@ -60,8 +65,8 @@ AVNM은 여러 VNet의 연결 구성을 **관리 계층(control plane)**에서 �
 
 Connectivity Configuration은 만든 즉시 적용되지 않습니다. **Korea Central에 commit/deploy**해야
 실제 Hub↔Spoke Peering이 생성됩니다. 즉, 리전 대상 배포가 빠지면 선언만 있고 연결은 없습니다.
-또한 AVNM은 데이터 경로의 라우터가 아닙니다. 모듈 06에서 UDR과 Firewall을 추가하기 전까지
-Spoke A→B 패킷을 대신 전달하지 않습니다.
+또한 AVNM은 데이터 경로의 라우터가 아닙니다. 모듈 04에서 AVNM Routing과
+Firewall을 준비하기 전에는 Spoke A→B 패킷을 대신 전달하지 않습니다.
 
 ## 4. 자주 혼동하는 보안 기능
 
@@ -112,7 +117,7 @@ Portal 메뉴 이름은 언어와 업데이트에 따라 달라질 수 있습니
 |---|---|
 | 구독 목록이 비어 있음 | 오른쪽 위 Directory + subscriptions에서 올바른 tenant 선택 |
 | 메뉴 이름이 다름 | Portal 상단 검색창에서 영문 서비스 이름 검색 |
-| CIDR이 낯설음 | 위 세 주소를 그대로 사용하고, `/24`가 `/16` 안의 작은 구역임을 먼저 이해 |
+| CIDR이 낯설음 | 배정된 각 `/20` 안에 `/24`와 `/26` Subnet이 들어간다는 점을 먼저 이해 |
 
 ## 완료 체크
 

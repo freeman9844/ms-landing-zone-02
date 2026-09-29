@@ -11,6 +11,38 @@ def recovery_block():
 
 
 class RecoveryDocsTests(unittest.TestCase):
+    def test_legacy_run_recovery_refuses_new_schema_and_points_to_pinned_revision(self):
+        legacy = {k: v for k, v in STATE.items() if k != "ipamPoolId"}
+        legacy["schemaVersion"] = 2
+        result = run('source scripts/workshop-common.sh && load_run state.json',
+                     files={"state.json": json.dumps(legacy)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("workshop-pre-ipam-8d4781f", result.stderr)
+        for name in ("README.md", "docs/07-cleanup-production.md",
+                     "docs/maintainer-validation.md"):
+            text = (ROOT / name).read_text()
+            self.assertIn("workshop-pre-ipam-8d4781f", text, name)
+            self.assertIn("8d4781f", text, name)
+        cleanup = (ROOT / "docs/07-cleanup-production.md").read_text()
+        self.assertIn("git fetch origin tag workshop-pre-ipam-8d4781f", cleanup)
+        self.assertIn("git checkout --detach workshop-pre-ipam-8d4781f", cleanup)
+        self.assertIn("git rev-parse --short=7 HEAD", cleanup)
+
+    def test_repeated_new_run_recovery_does_not_require_allocated_cidrs(self):
+        script = '''
+mkdir -p home
+ln -s "$PWD" home/ms-landing-zone-02
+export HOME="$PWD/home"
+'''
+        script += recovery_block() + "\n" + recovery_block()
+        script += '\nprintf "RECOVERED=%s:%s\\n" "$RUN_ID" "$IPAM_POOL_ID"\n'
+        result = run(script,
+                     [call(["account", "set", "--subscription", SUB]), account()] * 2,
+                     input_text="state.json\nstate.json\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"RECOVERED=demo123:{STATE['ipamPoolId']}", result.stdout)
+        self.assertNotIn("HUB_VNET_CIDR", result.stdout)
+
     def test_recovery_lists_available_state_file_before_path_input(self):
         script = '''
 mkdir -p home

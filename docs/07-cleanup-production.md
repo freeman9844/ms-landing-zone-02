@@ -20,6 +20,8 @@
 `예:`의 실제 경로를 참고해 `.workshop-state/<실행 ID>.json` 경로를 입력하세요.
 파일이 여러 개라면 삭제할 실습의 파일을 직접 선택하세요.
 파일을 잃었다면 아래 [상태 파일 복구](#상태파일을잃은경우)를 먼저 수행합니다.
+기존 schema 2 파일이면 이 버전의 cleanup을 실행하지 말고
+[기존 실행 복구](#기존-schema-2-실행-복구)를 따르세요.
 활성 구독이 다르거나 다른 실습/구독으로 전환했다면
 [모듈 01의 세션 복구](01-prerequisites.md#세션-재연결-시-변수-복구)를 먼저 실행한 뒤 공통 준비로 돌아오세요.
 같은 세션에서 한 번만 준비하며, 경로가 이미 설정돼 있으면 다시 묻지 않습니다.
@@ -44,6 +46,11 @@ assert_subscription
 👁️ **설명**
 
 리소스 이름뿐 아니라 활성 구독과 네 개의 소유 태그를 검사합니다.
+`IPAM_POOL_ID`는 삭제 대상을 만드는 데 사용하지 않습니다. schema 3의
+`resourceGroups.hub/spokea/spokeb` 세 이름만 검사하고, 이미 없는 RG는 건너뜁니다.
+모듈 02가 일부만 성공해 VNet이나 Subnet의 CIDR이 모두 배정되지 않아도
+`load_ipam_cidrs` 없이 정리할 수 있습니다. **존재하는 RG의 구독·소유 태그는
+부분 실행에서도 생략하지 않습니다.**
 AVNM의 Routing·Security Admin·Connectivity 목표 상태를 리전에서 `None`으로 전환한
 뒤 각 배포 완료와 Subnet의 관리형 경로 테이블 연결 해제·잔존 테이블 제거를
 최대 10분씩 기다립니다. 남아 있으면
@@ -104,6 +111,8 @@ Portal에서도 이번 실습의 세 RG가 없어야 합니다.
 구독의 배포 이력 `support-실행ID`가 남더라도 이는 실행 중인 VM/NAT가 아닙니다.
 Cloud Shell 저장소, 공유 Network Watcher와 운영자 소유 공유 IPAM RG
 `rg-lzbegin-ipam`은 삭제 대상이 아닙니다. 공유 pool 삭제는 운영자 별도 작업입니다.
+Portal에서 공유 RG와 `avnm-lzbegin-ipam/ipam-lzbegin-shared`가 그대로
+존재하는지 확인하되, 참가자는 이 자원에 대한 delete 명령을 실행하지 않습니다.
 삭제 실패나 시간 초과 후에는 **같은 상태 파일**로 남은 RG를 조회하고 cleanup을 다시 실행할
 수 있습니다. 이미 없는 그룹은 건너뛰지만, 조회 권한 오류나 소유 정보 불일치는 중단합니다.
 RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영될 수 있습니다.
@@ -115,6 +124,9 @@ RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영
 
 새 ID를 만들지 말고 Portal에서 **원래 실행 ID와 구독**을 확인하세요.
 다른 파일을 지우거나 비슷한 RG를 wildcard로 삭제하지 않습니다.
+**schema 2 실행**이었다면 아래 `create_run`으로 schema 3 JSON을 만들지 말고
+[고정 버전 절차](#기존-schema-2-실행-복구)를 따릅니다. 실행 시점이나 원본
+교재 버전을 확인할 수 없다면 운영자에게 확인받기 전까지 삭제하지 않습니다.
 
 ### 복구 1. 원래 식별 정보 입력
 
@@ -177,9 +189,39 @@ export STATE_FILE=".workshop-state/$ORIGINAL_RUN_ID.json"
 
 기존 파일이 있으면 `create_run`은 덮어쓰지 않습니다. 그 파일부터 복구하세요.
 여기서는 원래 ID로 로컬 JSON만 복구하는 `create_run`을 사용합니다.
+이 절차는 **schema 3으로 처음 시작한 실행에만** 해당합니다. 정확한 원래 구독·
+ID·Korea Central 및 원래 공유 pool ID를 확인한 경우에만 계속하세요. 복구
+파일에는 CIDR을 기록하지 않습니다. 이후 모듈 03–06 재개 시에는 실제 Azure의
+세 VNet·네 Subnet 할당을 다시 조회하고, 아직 누락된 자원이 있으면 모듈 02부터
+검사해 재개합니다. cleanup은 CIDR 조회 없이 부분 실행을 정리합니다.
 새 실습 전용 `new_run`은 기존 RG 이름을 재사용하지 않으므로 복구에 사용하지 않습니다.
 cleanup은 실제 Azure 자원의 태그까지 대조하므로 이름만 추측해서는 삭제할 수 없습니다.
 JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 않습니다.
+
+<a id="기존-schema-2-실행-복구"></a>
+## 기존 schema 2 실행 복구
+
+기존 고정 CIDR 실행의 상태·VNet 주소를 새 IPAM 버전으로 변환하지 않습니다.
+**원래 schema 2 상태 JSON을 보관**하고 별도 디렉터리에서 고정된
+`8d4781f` 버전의 교재·스크립트로만 재개하거나 cleanup하세요. 아래 Git 태그
+`workshop-pre-ipam-8d4781f`는 운영자가 게시하기 전에는 원격에서 가져올 수
+없습니다. 게시 여부를 먼저 확인하고, 없으면 운영자에게 요청하세요.
+
+```bash
+# 기존 작업 디렉터리는 변경하지 않습니다. 태그가 게시된 뒤 별도 clone에서 실행하세요.
+git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \
+  "$HOME/ms-landing-zone-02-legacy" &&
+cd "$HOME/ms-landing-zone-02-legacy" &&
+git fetch origin tag workshop-pre-ipam-8d4781f &&
+git checkout --detach workshop-pre-ipam-8d4781f &&
+git rev-parse --short=7 HEAD
+```
+
+마지막 출력이 `8d4781f`인지 확인합니다. 원래 JSON을 이 별도 clone에 안전하게
+복사한 뒤 **구버전 모듈 01의 복구**로 원래 구독·상태를 확인하고, 구버전
+모듈 07의 cleanup을 사용하세요. 파일을 잃었다면 원래 ID·구독·리전과
+schema 2였다는 사실을 운영자와 확인한 후에만 구버전 복구 절차를 따릅니다.
+이 저장소의 schema 3 `create_run`이나 `cleanup.sh`를 구버전 실행에 사용하지 않습니다.
 
 ## 운영 Landing Zone으로 확장하기
 
