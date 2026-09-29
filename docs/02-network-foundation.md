@@ -13,7 +13,7 @@
 
 👁️ **설명**
 
-이 모듈은 전체를 묶는 `( ... )` 없이 **자원 하나를 생성하는 명령마다 코드 블록을 분리**했습니다.
+이 모듈은 전체를 묶는 `( ... )` 없이 **단계별 코드 블록을 분리**했습니다.
 **코드 블록 하나만 복사 → 실행 결과 확인 → 다음 설명 읽기** 순서로 진행하세요.
 여러 코드 블록을 합쳐 한꺼번에 붙여 넣지 않습니다. 위에서 아래로 수행하되 각 단계에서 멈춰 확인합니다.
 
@@ -28,7 +28,9 @@ RG 생성 단계에서 같은 이름의 기존 RG를 재사용할 때만 소유�
 재접속, `STATE_FILE` 변경, 다른 실습/구독으로 전환했다면 **공통 준비를 다시 실행**하세요.
 모듈 02를 이어서 진행할 때는 작업할 RG의 생성 단계(1-1·2-1·3-1)도 다시 실행하여 소유권을 확인하세요.
 명령의 `--subscription`은 상태 파일의 구독을 명시합니다.
-앞 작업의 임시 변수에 의존하지 않지만, **RG → VNet/NSG → Subnet**이라는 Azure 자원 생성 순서는 지켜야 합니다.
+앞 작업의 임시 변수에 의존하지 않지만, **Hub RG → 실행별 AVNM → 각 RG·NSG → IPAM VNet·Subnet** 순서를 지켜야 합니다.
+pool 할당을 위한 VNet과 그 Subnet은 한 번의 선언형 배포로 원자적으로 요청하므로
+한 자원당 한 블록 원칙의 유일한 예외입니다.
 JSON 출력의 속성 순서는 달라도 되며, 각 단계 아래의 **확인** 항목을 비교하세요.
 
 ### 공통 준비
@@ -65,8 +67,8 @@ assert_subscription
 
 👁️ **설명**
 
-Hub는 중앙 관리용 네트워크입니다. 주소 공간은 `10.0.0.0/16`,
-관리 VM용 Subnet은 `10.0.1.0/24`입니다.
+Hub는 중앙 관리용 네트워크입니다. 공유 pool에서 VNet `/20`, 관리 Subnet `/24`,
+Firewall 전용 Subnet `/26`을 할당받습니다.
 
 ### 1-1. Hub 리소스 그룹
 
@@ -95,26 +97,90 @@ esac
 새 RG의 `name`은 `rg-lzbegin-hub-<실행 ID>`, `tags.runId`는 자신의 실행 ID입니다.
 이미 소유한 RG라면 소유 확인 완료 문구만 출력됩니다.
 
-### 1-2. Hub VNet
+### 1-2. 실행별 AVNM 만들기 (VNet보다 먼저)
 
 👁️ **설명**
 
-RG 안에 사설 주소 공간을 만듭니다. VNet 생성만으로 다른 VNet과 연결되지는 않습니다.
+운영자가 준비한 공유 pool의 AVNM과는 별도로 이번 실행의 Connectivity·SecurityAdmin·Routing
+AVNM을 Hub RG에 만듭니다. 이 관리자와 공유 pool을 혼동하지 마세요.
+먼저 목록을 조회해 예상치 못한 자원이 없는지 확인합니다. `Updating` 응답이면
+다시 생성하지 말고 아래 읽기 전용 확인을 재실행하세요.
 
 🟢 **실행**
 
-<!-- exec:foundation-hub-vnet -->
+<!-- exec:inspect-avnm -->
 ```bash
-# Hub 주소 공간은 두 Spoke와 겹치지 않는 10.0.0.0/16입니다.
-az network vnet create --resource-group "$RG_HUB" --name "vnet-lzbegin-hub-$RUN_ID" \
-  --location "$LOCATION" --address-prefixes 10.0.0.0/16 \
-  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID"
+az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-응답의 VNet 이름이 `vnet-lzbegin-hub-<실행 ID>`, `addressSpace.addressPrefixes`가
-`10.0.0.0/16`인지 확인합니다. VNet 생성 응답은 `newVNet` 안에 표시될 수 있습니다.
+`[]`여야 새 AVNM을 생성할 수 있습니다. 목록 조회 실패나 다른 자원이 있으면 중단하세요.
+
+🟢 **실행**
+
+<!-- exec:avnm-create -->
+```bash
+create_avnm_if_empty() {
+  local managers manager_id body result
+  managers=$(az network manager list \
+    --resource-group "$RG_HUB" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
+    { fail "Hub RG already contains an AVNM; do not overwrite it."; return 1; }
+  manager_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
+  body=$(jq -cn --arg location "$LOCATION" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '{
+    location:$location,
+    properties:{
+      description:"Beginner Hub and Spoke connectivity",
+      networkManagerScopes:{subscriptions:[$scope]},
+      networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]
+    }
+  }') || return 1
+  result=$(az rest --method put --url "$manager_id?api-version=2025-01-01" \
+    --body "$body" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$manager_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
+    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
+    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<<"$result" >/dev/null ||
+    { fail "Unexpected AVNM scope or resource ID; inspect the created manager before continuing."; return 1; }
+  printf '%s\n' "$result"
+}
+create_avnm_if_empty
+```
+
+📋 **확인**
+
+정확한 AVNM ID·구독 scope·세 access를 확인하세요. 실패하거나 `Updating`이면
+이 쓰기 블록을 다시 실행하지 마세요.
+
+🟢 **실행**
+
+<!-- exec:avnm-ready -->
+```bash
+inspect_avnm_ready() {
+  local manager expected_id
+  manager=$(az network manager show --name "$AVNM" \
+    --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  expected_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
+  jq -e --arg id "$expected_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    ((.id | ascii_downcase) == ($id | ascii_downcase)) and
+    .provisioningState == "Succeeded" and
+    (.networkManagerScopes.subscriptions | type == "array" and length == 1) and
+    ((.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<<"$manager" >/dev/null ||
+    { fail "AVNM scope or provisioning state is not ready."; return 1; }
+  printf '%s\n' "$manager"
+}
+inspect_avnm_ready
+```
+
+📋 **확인**
+
+`provisioningState=Succeeded`가 될 때까지 이 조회만 반복하세요. 범위가 다르면 중단합니다.
 
 ### 1-3. Hub NSG
 
@@ -137,26 +203,37 @@ az network nsg create --resource-group "$RG_HUB" --name "nsg-lzbegin-hub-$RUN_ID
 응답의 NSG 이름이 `nsg-lzbegin-hub-<실행 ID>`입니다.
 NSG 생성 응답은 `NewNSG` 안에 표시될 수 있습니다. 기본 규칙과 직접 추가하는 규칙을 구분합니다.
 
-### 1-4. 관리 Subnet 생성과 NSG 연결
+### 1-4. Hub VNet·관리·Firewall Subnet을 pool에서 할당
 
 👁️ **설명**
 
-여기서는 VM NIC별 NSG 대신 Subnet NSG를 사용해 관리 위치를 단순하게 유지합니다.
+공유 pool ID는 모듈 01의 검증된 상태에서 가져옵니다. Hub VNet `/20`, 관리
+Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 하나의 배포로 요청합니다.
+관리 Subnet만 NSG를 연결하고 기본 outbound를 끕니다. 실패·부분 성공 시
+이미 생성된 VNet을 다시 배포하지 말고 조회 블록으로 실제 상태를 확인한 뒤 진행하세요.
 
 🟢 **실행**
 
-<!-- exec:foundation-hub-subnet -->
+<!-- exec:foundation-hub-vnet -->
 ```bash
-# Hub VNet 안에 관리 VM용 /24 공간을 만들고 Hub NSG를 연결합니다.
-az network vnet subnet create --resource-group "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \
-  --name snet-management --address-prefixes 10.0.1.0/24 \
-  --network-security-group "nsg-lzbegin-hub-$RUN_ID" --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
+deploy_hub_vnet() {
+  local existing
+  existing=$(az network vnet list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg name "vnet-lzbegin-hub-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+    { fail "Hub VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
+  az deployment group create --resource-group "$RG_HUB" --name "ipam-vnet-hub-$RUN_ID" \
+    --template-file infra/workshop-ipam-vnet.bicep \
+    --parameters "runId=$RUN_ID" zone=hub "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+deploy_hub_vnet
 ```
 
 📋 **확인**
 
-`addressPrefix`가 `10.0.1.0/24`, `defaultOutboundAccess`가 `false`,
-`networkSecurityGroup.id`의 마지막 이름이 Hub NSG인지 확인합니다.
+출력의 `vnetPrefixes`, `subnets`에서 `/20`·`/24`·`/26` 실제 할당 주소와 pool 연결,
+관리 Subnet의 `defaultOutboundAccess=false` 및 Hub NSG ID를 확인합니다.
+`AzureFirewallSubnet`에는 NSG가 없어야 합니다. 불일치하면 다음 블록을 실행하지 마세요.
 암묵적 인터넷 출구는 사용하지 않으며 모듈 04에서 NAT를 명시적으로 연결합니다.
 
 ### 1-5. Hub의 기본 VNet 내부 허용보다 앞서는 차단
@@ -219,28 +296,7 @@ esac
 
 `name`은 `rg-lzbegin-spokea-<실행 ID>`입니다. 기존 RG이면 소유 확인 완료 문구가 나옵니다.
 
-### 2-2. Spoke A VNet
-
-👁️ **설명**
-
-Spoke A에 `10.10.0.0/16` 주소 공간을 만듭니다. Hub와 주소가 겹치지 않아야 다음 모듈의
-AVNM Connectivity가 Hub↔Spoke 연결을 올바르게 배포할 수 있습니다.
-
-🟢 **실행**
-
-<!-- exec:foundation-spokea-vnet -->
-```bash
-# Hub의 10.0.0.0/16과 겹치지 않는 A의 주소 공간입니다.
-az network vnet create --resource-group "$RG_SPOKEA" --name "vnet-lzbegin-spokea-$RUN_ID" \
-  --location "$LOCATION" --address-prefixes 10.10.0.0/16 \
-  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-VNet 이름의 `spokea`와 주소 공간 `10.10.0.0/16`을 확인합니다.
-
-### 2-3. Spoke A NSG
+### 2-2. Spoke A NSG
 
 👁️ **설명**
 
@@ -260,28 +316,36 @@ az network nsg create --resource-group "$RG_SPOKEA" --name "nsg-lzbegin-spokea-$
 
 NSG 이름은 `nsg-lzbegin-spokea-<실행 ID>`입니다.
 
-### 2-4. Spoke A 워크로드 Subnet과 NSG 연결
+### 2-3. Spoke A VNet·워크로드 Subnet을 pool에서 할당
 
 👁️ **설명**
 
-A VNet 안에 VM이 들어갈 `10.10.1.0/24` Subnet을 만들고 A의 NSG를 연결합니다.
-인터넷 출구는 암묵적으로 사용하지 않고 모듈 04에서 Firewall·AVNM Routing으로 준비합니다.
+A VNet `/20`과 워크로드 Subnet `/24`를 공유 pool에서 요청합니다.
+실제 할당 주소가 Hub와 겹치면 중단하세요. 인터넷 출구는 모듈 04에서 준비합니다.
 
 🟢 **실행**
 
-<!-- exec:foundation-spokea-subnet -->
+<!-- exec:foundation-spokea-vnet -->
 ```bash
-# A의 VNet 안에 A의 NSG를 연결합니다. Hub NSG를 지정하지 않습니다.
-az network vnet subnet create --resource-group "$RG_SPOKEA" --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
-  --name snet-workload --address-prefixes 10.10.1.0/24 \
-  --network-security-group "nsg-lzbegin-spokea-$RUN_ID" --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
+deploy_spokea_vnet() {
+  local existing
+  existing=$(az network vnet list --resource-group "$RG_SPOKEA" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg name "vnet-lzbegin-spokea-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+    { fail "Spoke A VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
+  az deployment group create --resource-group "$RG_SPOKEA" --name "ipam-vnet-spokea-$RUN_ID" \
+    --template-file infra/workshop-ipam-vnet.bicep \
+    --parameters "runId=$RUN_ID" zone=spokea "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+deploy_spokea_vnet
 ```
 
 📋 **확인**
 
-`addressPrefix=10.10.1.0/24`, `defaultOutboundAccess=false`이며 NSG ID는 Spoke A의 NSG입니다.
+출력의 `vnetPrefixes`, `subnets`와 실제 VNet을 조회하여 `/20`·`/24` pool
+할당, `defaultOutboundAccess=false`, Spoke A NSG ID를 확인하세요.
 
-### 2-5. Spoke A의 VNet 내부 인바운드 차단
+### 2-4. Spoke A의 VNet 내부 인바운드 차단
 
 👁️ **설명**
 
@@ -340,28 +404,7 @@ esac
 
 `name`은 `rg-lzbegin-spokeb-<실행 ID>`입니다. 기존 RG이면 소유 확인 완료 문구가 나옵니다.
 
-### 3-2. Spoke B VNet
-
-👁️ **설명**
-
-Hub·A와 겹치지 않는 `10.20.0.0/16`을 B의 주소 공간으로 지정합니다.
-명령의 RG·VNet 이름과 주소가 모두 B를 가리키는지 읽고 실행하세요.
-
-🟢 **실행**
-
-<!-- exec:foundation-spokeb-vnet -->
-```bash
-# Hub·A와 겹치지 않는 세 번째 주소 공간입니다.
-az network vnet create --resource-group "$RG_SPOKEB" --name "vnet-lzbegin-spokeb-$RUN_ID" \
-  --location "$LOCATION" --address-prefixes 10.20.0.0/16 \
-  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-VNet 이름의 `spokeb`와 주소 공간 `10.20.0.0/16`을 확인합니다.
-
-### 3-3. Spoke B NSG
+### 3-2. Spoke B NSG
 
 👁️ **설명**
 
@@ -381,28 +424,37 @@ az network nsg create --resource-group "$RG_SPOKEB" --name "nsg-lzbegin-spokeb-$
 
 NSG 이름은 `nsg-lzbegin-spokeb-<실행 ID>`입니다.
 
-### 3-4. Spoke B 워크로드 Subnet과 NSG 연결
+### 3-3. Spoke B VNet·워크로드 Subnet을 pool에서 할당
 
 👁️ **설명**
 
-B VNet에 `10.20.1.0/24` Subnet을 만들고 B NSG를 연결합니다.
+B VNet `/20`과 `/24` Subnet을 할당하고 B NSG를 연결합니다.
+Hub·A와 겹치지 않는 주소는 서비스가 같은 pool에서 선택합니다.
 A와 Subnet 이름은 같지만 VNet과 주소 범위가 다른 별도 자원입니다.
 
 🟢 **실행**
 
-<!-- exec:foundation-spokeb-subnet -->
+<!-- exec:foundation-spokeb-vnet -->
 ```bash
-# 이름은 A와 같은 snet-workload이지만 B VNet 안에 생성됩니다.
-az network vnet subnet create --resource-group "$RG_SPOKEB" --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
-  --name snet-workload --address-prefixes 10.20.1.0/24 \
-  --network-security-group "nsg-lzbegin-spokeb-$RUN_ID" --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
+deploy_spokeb_vnet() {
+  local existing
+  existing=$(az network vnet list --resource-group "$RG_SPOKEB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg name "vnet-lzbegin-spokeb-$RUN_ID" 'type == "array" and all(.[]; .name != $name)' <<<"$existing" >/dev/null ||
+    { fail "Spoke B VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
+  az deployment group create --resource-group "$RG_SPOKEB" --name "ipam-vnet-spokeb-$RUN_ID" \
+    --template-file infra/workshop-ipam-vnet.bicep \
+    --parameters "runId=$RUN_ID" zone=spokeb "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
+    -o json --subscription "$SUBSCRIPTION_ID"
+}
+deploy_spokeb_vnet
 ```
 
 📋 **확인**
 
-`addressPrefix=10.20.1.0/24`, `defaultOutboundAccess=false`이며 NSG ID는 Spoke B의 NSG입니다.
+출력의 `vnetPrefixes`, `subnets`와 실제 VNet을 조회하여 `/20`·`/24` pool
+할당, `defaultOutboundAccess=false`, Spoke B NSG ID를 확인하세요.
 
-### 3-5. Spoke B의 VNet 내부 인바운드 차단
+### 3-4. Spoke B의 VNet 내부 인바운드 차단
 
 👁️ **설명**
 
@@ -429,26 +481,17 @@ Azure Portal에서도 **Resource groups → `rg-lzbegin-spokeb-<실행 ID>` → 
 
 ![Azure Portal의 Spoke B 리소스 그룹 Overview에 표시된 Spoke B VNet과 NSG](images/02-spokeb-resources.png)
 
-## 4. Firewall용 Subnet 예약
+## 4. Firewall용 Subnet 확인
 
 👁️ **설명**
 
-모듈 04에서 사용할 주소 공간만 Hub 안에 준비합니다. **이 단계는 유료 Firewall 장비를 배포하지 않습니다.**
-
-🟢 **실행**
-
-<!-- exec:foundation-firewall-subnet -->
-```bash
-# Azure Firewall이 요구하는 예약 이름과 전용 /26 주소 공간입니다. VM용 Subnet과 구분합니다.
-az network vnet subnet create --resource-group "$RG_HUB" \
-  --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name AzureFirewallSubnet \
-  --address-prefixes 10.0.2.0/26 -o json --subscription "$SUBSCRIPTION_ID"
-```
+Hub VNet 배포에서 함께 만든 `AzureFirewallSubnet`을 아래 조회로 확인합니다.
+**이 단계는 유료 Firewall 장비를 배포하지 않습니다.**
 
 📋 **확인**
 
-Subnet 이름은 정확히 `AzureFirewallSubnet`, 주소는 `10.0.2.0/26`입니다.
-관리 Subnet과 달리 이 명령에는 NSG를 연결하지 않습니다.
+Subnet 이름은 정확히 `AzureFirewallSubnet`, 주소 크기는 `/26`입니다.
+관리 Subnet과 달리 NSG는 연결하지 않습니다.
 
 ## 5. 주소와 태그를 하나씩 조회하기
 
@@ -469,12 +512,12 @@ Hub의 주소 공간과 두 Subnet을 조회합니다. VM용 관리 Subnet과 Fi
 ```bash
 # 관리 Subnet과 Firewall 예약 Subnet이 서로 다른 주소인지 확인합니다.
 az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
-  --query '{VNet:name,Address:addressSpace.addressPrefixes,Subnets:subnets[].{Name:name,Prefix:addressPrefix,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
+  --query '{VNet:name,Address:addressSpace.addressPrefixes,Pool:addressSpace.ipamPoolPrefixAllocations,Subnets:subnets[].{Name:name,Prefix:addressPrefix,Pool:ipamPoolPrefixAllocations,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-주소 공간 `10.0.0.0/16` 안에 `snet-management`와 `AzureFirewallSubnet`이 있습니다.
+할당된 `/20` 안에 `snet-management`(`/24`)와 `AzureFirewallSubnet`(`/26`)이 있습니다.
 관리 Subnet의 `DefaultOutbound`는 `false`입니다.
 
 ### 5-2. Spoke A 조회
@@ -489,12 +532,12 @@ A VNet의 주소·Subnet·태그를 조회합니다. 생성 명령의 입력값�
 ```bash
 # Hub와 겹치지 않는 A의 VNet·Subnet 주소와 실행 ID 태그를 비교합니다.
 az network vnet show -g "$RG_SPOKEA" -n "vnet-lzbegin-spokea-$RUN_ID" \
-  --query '{VNet:name,Address:addressSpace.addressPrefixes,Subnets:subnets[].{Name:name,Prefix:addressPrefix,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
+  --query '{VNet:name,Address:addressSpace.addressPrefixes,Pool:addressSpace.ipamPoolPrefixAllocations,Subnets:subnets[].{Name:name,Prefix:addressPrefix,Pool:ipamPoolPrefixAllocations,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-VNet은 `10.10.0.0/16`, Subnet은 `10.10.1.0/24`, `DefaultOutbound`는 `false`입니다.
+VNet `/20`, Subnet `/24`, `DefaultOutbound=false`와 pool 연결을 확인하세요.
 
 ### 5-3. Spoke B 조회
 
@@ -509,12 +552,12 @@ B의 저장된 설정을 조회하여 A와 주소가 겹치지 않는지 확인�
 ```bash
 # A와 같은 Subnet 이름이지만 VNet과 주소 공간이 다르다는 점을 확인합니다.
 az network vnet show -g "$RG_SPOKEB" -n "vnet-lzbegin-spokeb-$RUN_ID" \
-  --query '{VNet:name,Address:addressSpace.addressPrefixes,Subnets:subnets[].{Name:name,Prefix:addressPrefix,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
+  --query '{VNet:name,Address:addressSpace.addressPrefixes,Pool:addressSpace.ipamPoolPrefixAllocations,Subnets:subnets[].{Name:name,Prefix:addressPrefix,Pool:ipamPoolPrefixAllocations,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess},Tags:tags}' -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-VNet은 `10.20.0.0/16`, Subnet은 `10.20.1.0/24`, `DefaultOutbound`는 `false`입니다.
+VNet `/20`, Subnet `/24`, `DefaultOutbound=false`와 pool 연결을 확인하세요.
 세 VNet의 태그에 자신의 `runId`가 있어야 합니다. 이전처럼 마지막 `PASS` 문구 하나로
 전체 성공을 판단하지 말고, 각 단계의 응답을 직접 확인하세요.
 
@@ -535,8 +578,9 @@ Hub·A·B의 주소가 위 단계의 값과 일치하고 RG와 VNet의 `runId`�
 RG 태그가 하위 리소스로 자동 상속되는 것은 아닙니다.
 
 아래는 **Virtual networks → Hub VNet → Subnets**의 참고 화면입니다. 목록의 Hub·Spoke A·
-Spoke B VNet과 Hub의 `snet-management`(`10.0.1.0/24`), `AzureFirewallSubnet`(`10.0.2.0/26`)을
-비교하세요. 화면의 실행 ID는 예시입니다. 이 화면만으로 Spoke Subnet 주소,
+Spoke B VNet과 Hub의 `snet-management`, `AzureFirewallSubnet`을
+비교하세요. 화면은 이전 고정 주소 실행의 예시이므로 주소 값은 일치하지 않습니다.
+이 화면만으로 Spoke Subnet 주소,
 `defaultOutboundAccess` 또는 RG·VNet 태그까지 확인한 것으로 간주하지 말고
 각 VNet·RG의 해당 화면과 위 CLI 조회 결과를 별도로 대조하세요.
 
@@ -548,9 +592,9 @@ Spoke B VNet과 Hub의 `snet-management`(`10.0.1.0/24`), `AzureFirewallSubnet`(`
 |---|---|
 | Ownership mismatch | 구독·실행 ID 확인; 기존 RG 태그를 수정해 우회하지 않기 |
 | Subscription mismatch | 올바른 구독을 명시적으로 선택하고 실패한 단계부터 다시 확인 |
-| 주소 겹침 | 기본 표의 세 주소를 대조; 이미 연결한 운영 VNet과 혼합하지 않기 |
+| 주소 겹침 | 실제 할당을 조회하고 중단; pool 밖 운영 네트워크와 겹치면 운영자에게 문의 |
 | Policy 거부 | 오류의 정책 이름과 scope를 운영자에게 전달 |
-| 중간에 실패 | 다음 블록을 실행하지 않기; 해당 자원의 현재 상태 확인 후 실패한 단계만 재시도하거나 cleanup |
+| 중간에 실패 | 다음 블록을 실행하지 않기; 실제 AVNM·VNet·Subnet 상태를 읽기 전용으로 확인하고 아직 생성되지 않은 단계부터 계속하기. 기존 VNet을 재배포하거나 주소를 수정하지 않기 |
 | 재접속 후 변수 없음 | 모듈 01의 상태 복구로 `STATE_FILE`을 복구한 뒤 필요한 단계 실행 |
 
 ## 완료 체크

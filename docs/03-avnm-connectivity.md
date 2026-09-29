@@ -20,7 +20,8 @@
 각 블록의 결과를 확인하고 다음 블록을 **직접** 실행합니다. 실패 시 이어서
 붙여 넣거나 다음 생성 단계로 넘어가지 마세요. 공통 준비와 생성 블록의
 안전 검사는 실패할 때 오류를 반환하지만 Cloud Shell을 종료하지 않습니다.
-이 모듈의 AVNM·Group·정적 멤버·구성은 모두 **이번 실행에서 처음 생성**합니다.
+이 모듈의 Group·정적 멤버·구성은 모두 **이번 실행에서 처음 생성**합니다.
+실행별 AVNM은 모듈 02에서 VNet보다 먼저 생성했습니다.
 기존 자원을 재사용하거나 덮어쓰지 않습니다. 각 생성 블록은 해당 범위가 비어
 있는지만 확인한 뒤 Azure CLI 생성 명령 한 개를 실행하고, 이미 자원이 있다면
 오류로 멈춥니다. 부분 실행 후 생성 블록을 다시 실행하지 말고 현재 상태를
@@ -48,90 +49,17 @@ prepare_avnm_session
 경로 입력이 필요하면 `.workshop-state/`의 파일명을 먼저 확인합니다.
 오류 없이 프롬프트로 돌아오면 모듈 03 작업을 실행할 준비가 된 상태입니다.
 
-## 1. Connectivity·Security Admin·Routing AVNM 만들기
+## 1. 실행별 Connectivity·Security Admin·Routing AVNM 확인
 
 👁️ **설명**
 
 이 워크숍은 AVNM의 **Connectivity·Security Admin·Routing** 기능을 사용합니다.
 동적 멤버십, Direct connectivity, global mesh, hub gateway, 기존 Peering 자동 삭제는 사용하지 않습니다.
-이번 Hub RG에는 AVNM이 아직 없어야 합니다. 목록 조회가 실패하거나 이미
-자원이 있으면 생성하지 않습니다.
-**모듈 03에서 AVNM을 생성합니다.** 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있으므로
-실습 후 모듈 07에서 정리하세요.
+모듈 02에서 생성한 동일 AVNM의 전체 ID·구독 범위·세 기능과 준비 상태를
+읽기 전용으로 검증합니다. 없거나 범위가 다르면 다음 단계로 넘어가지 마세요.
+`Updating`이면 이 확인 블록만 다시 실행하세요.
 
-### 1-1. 현재 AVNM 목록 조회
-
-👁️ **설명**
-
-이번 Hub RG의 AVNM 목록이 비어 있는지 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm -->
-```bash
-# Hub RG의 AVNM 목록을 변경하지 않고 출력합니다.
-az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-빈 배열 `[]`을 확인하세요. 목록에 자원이 있거나 조회가 실패하면 생성하지 마세요.
-
-### 1-2. 세 기능 범위의 AVNM 최초 생성
-
-👁️ **설명**
-
-생성 직전 Hub RG의 목록이 비어 있는지 다시 확인합니다. 기존 AVNM을
-재사용하거나 설정을 갱신하지 않습니다. 현재 CLI 확장의 manager 생성 옵션에는
-Routing이 나열되지 않으므로 ARM 2025-01-01 API를 `az rest`로 호출합니다.
-
-🟢 **실행**
-
-<!-- exec:avnm-create -->
-```bash
-# Hub RG에 AVNM이 없을 때 Connectivity·Security Admin·Routing 범위로 만듭니다.
-create_avnm_if_empty() {
-  local managers manager_id body result
-  managers=$(az network manager list \
-    --resource-group "$RG_HUB" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
-    { fail "Hub RG already contains an AVNM; do not overwrite it."; return 1; }
-  manager_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
-  body=$(jq -cn --arg location "$LOCATION" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '{
-    location:$location,
-    properties:{
-      description:"Beginner Hub and Spoke connectivity",
-      networkManagerScopes:{subscriptions:[$scope]},
-      networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]
-    }
-  }') || return 1
-  result=$(az rest --method put --url "$manager_id?api-version=2025-01-01" \
-    --body "$body" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$manager_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
-    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
-    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
-  ' <<<"$result" >/dev/null ||
-    { fail "Unexpected AVNM scope or resource ID; inspect the created manager before continuing."; return 1; }
-  printf '%s\n' "$result"
-}
-create_avnm_if_empty
-```
-
-📋 **확인**
-
-Hub RG에 `avnm-lzbegin-<runId>`가 만들어집니다. 응답의 scope access가
-Connectivity·SecurityAdmin·Routing이고 구독 scope가 이번 구독인지 확인하세요.
-생성 응답이 `Updating`이면 해당 AVNM의 `provisioningState=Succeeded`가
-될 때까지 기다린 뒤 Group 생성으로 이동하세요. 응답이 오류이거나 범위가 다르면
-생성 블록을 반복 실행하지 말고 실제 자원 상태를 확인합니다.
-
-Azure Portal의 **Virtual Network Manager → Network managers → 이번 실행의 AVNM → Overview**에서도
-세 기능, **Scope (In-tenant): Subscriptions (1)**, **Provisioning state: Succeeded**를 확인하세요.
-
-### 1-3. AVNM 배포 완료 확인
+### 1-1. AVNM 배포 완료 확인
 
 👁️ **설명**
 

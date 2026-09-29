@@ -468,9 +468,9 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def test_ordinary_actions_check_ownership_once_for_a_prepared_session(self):
         cases = dict(self.cases())
-        cases[3] = test_network_docs.avnm_cases()
+        cases[3] = test_network_docs.connectivity_cases()
         for module, names in (
-            (3, ("avnm-create", "network-group-create", "member-spokea",
+            (3, ("avnm-ready", "network-group-create", "member-spokea",
                  "member-spokeb", "connectivity-config-create",
                  "connectivity-commit", "effective-hub")),
             (4, ("firewall-workspace", "firewall-public-ip", "firewall-http-rule")),
@@ -488,7 +488,7 @@ class StepwiseDocsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_preparation_rejects_foreign_groups_and_lookup_failures(self):
-        for module, action in ((3, "avnm-create"), (4, "firewall-workspace"),
+        for module, action in ((3, "avnm-ready"), (4, "firewall-workspace"),
                                (5, "support-deploy"), (6, "verify-allowed")):
             steps = blocks(DOCS[module])
             for index in (1, 2, 3):
@@ -918,7 +918,8 @@ key.with_suffix('.pub').write_text('fixture-public-key')
         cases = [
             (2, "foundation-hub-rg", test_network_docs.foundation_cases()["foundation-hub-rg"]),
             (2, "foundation-hub-vnet", test_network_docs.foundation_cases()["foundation-hub-vnet"]),
-            (3, "avnm-create", test_network_docs.avnm_cases()["avnm-create"]),
+            (2, "avnm-create", test_network_docs.avnm_cases()["avnm-create"]),
+            (3, "avnm-ready", test_network_docs.avnm_cases()["avnm-ready"]),
             (4, "register-logs", firewall_cases()["register-logs"]),
             (4, "firewall-http-rule", firewall_cases()["firewall-http-rule"]),
             (4, "firewall-diagnostics", firewall_cases()["firewall-diagnostics"]),

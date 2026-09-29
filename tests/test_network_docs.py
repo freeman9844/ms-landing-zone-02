@@ -2,7 +2,7 @@ import copy
 import json
 import re
 import unittest
-from harness import ROOT, run, account, call, group, STATE, SUB
+from harness import ROOT, run, account, call, group, STATE, SUB, POOL_ID
 
 
 def blocks(path):
@@ -82,22 +82,14 @@ def nic(zone, ip):
 
 def foundation_cases():
     cases = {}
-    for zone, prefix, subnet_prefix in (
-        ("hub", "10.0.0.0/16", "10.0.1.0/24"),
-        ("spokea", "10.10.0.0/16", "10.10.1.0/24"),
-        ("spokeb", "10.20.0.0/16", "10.20.1.0/24"),
-    ):
+    cases["avnm-create"] = avnm_cases()["avnm-create"]
+    cases["avnm-ready"] = avnm_cases()["avnm-ready"]
+    cases["inspect-avnm"] = avnm_cases()["avnm-create"][:1]
+    for zone in ("hub", "spokea", "spokeb"):
         nsg = f"nsg-lzbegin-{zone}-demo123"
         for kind, args in (
-            ("vnet", ["network", "vnet", "create", "--resource-group", rg(zone), "--name", vnet(zone),
-                      "--location", "koreacentral", "--address-prefixes", prefix, *TAGS, "-o", "json"]),
             ("nsg", ["network", "nsg", "create", "--resource-group", rg(zone), "--name", nsg,
                      "--location", "koreacentral", *TAGS, "-o", "json"]),
-            ("subnet", ["network", "vnet", "subnet", "create", "--resource-group", rg(zone),
-                        "--vnet-name", vnet(zone), "--name",
-                        "snet-management" if zone == "hub" else "snet-workload",
-                        "--address-prefixes", subnet_prefix, "--network-security-group", nsg,
-                        "--default-outbound-access", "false", "-o", "json"]),
             ("deny", ["network", "nsg", "rule", "create", "--resource-group", rg(zone), "--nsg-name", nsg,
                       "--name", "deny-other-vnet-inbound", "--priority", "4000", "--direction", "Inbound",
                       "--access", "Deny", "--protocol", "*", "--source-address-prefixes", "VirtualNetwork",
@@ -105,17 +97,20 @@ def foundation_cases():
                       "--destination-port-ranges", "*", "-o", "json"]),
         ):
             cases[f"foundation-{zone}-{kind}"] = [az(args)]
+        cases[f"foundation-{zone}-vnet"] = [
+            az(["network", "vnet", "list", "--resource-group", rg(zone), "-o", "json"], []),
+            az(["deployment", "group", "create", "--resource-group", rg(zone),
+                "--name", f"ipam-vnet-{zone}-demo123",
+                "--template-file", "infra/workshop-ipam-vnet.bicep",
+                "--parameters", "runId=demo123", f"zone={zone}", "location=koreacentral",
+                f"ipamPoolId={POOL_ID}", "-o", "json"])]
         cases[f"foundation-{zone}-rg"] = [
             az(["group", "exists", "--name", rg(zone), "-o", "tsv"], "false"),
             az(["group", "create", "--name", rg(zone), "--location", "koreacentral", *TAGS, "-o", "json"])]
         cases[f"inspect-foundation-{zone}"] = [
             az(["network", "vnet", "show", "-g", rg(zone), "-n", vnet(zone), "--query",
-                            "{VNet:name,Address:addressSpace.addressPrefixes,Subnets:subnets[].{Name:name,Prefix:addressPrefix,DefaultOutbound:defaultOutboundAccess},Tags:tags}",
+                            "{VNet:name,Address:addressSpace.addressPrefixes,Pool:addressSpace.ipamPoolPrefixAllocations,Subnets:subnets[].{Name:name,Prefix:addressPrefix,Pool:ipamPoolPrefixAllocations,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess},Tags:tags}",
                             "-o", "json"])]
-    cases["foundation-firewall-subnet"] = [
-        az(["network", "vnet", "subnet", "create", "--resource-group", rg("hub"),
-                          "--vnet-name", vnet("hub"), "--name", "AzureFirewallSubnet",
-                          "--address-prefixes", "10.0.2.0/26", "-o", "json"])]
     return cases
 
 
@@ -452,6 +447,11 @@ def avnm_cases():
     }
 
 
+def connectivity_cases():
+    return {name: calls for name, calls in avnm_cases().items()
+            if name != "avnm-create"}
+
+
 def recase_ids(calls, transform):
     """Vary Azure ID casing without changing tags, names, or CLI option names."""
     def convert(value):
@@ -667,11 +667,37 @@ printf 'SHELL_ALIVE\\n'
                 self.assertIn("PREPARE_STATUS=1\nSHELL_ALIVE", result.stdout)
 
     def test_foundation_and_avnm_actions_are_independent_and_subscription_scoped(self):
-        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
+        for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):
             for name, calls in cases.items():
                 with self.subTest(module=module, step=name):
                     result = self.execute(module, name, calls)
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_module_02_creates_manager_before_any_pool_allocation(self):
+        steps = blocks(DOCS[2])
+        order = list(steps)
+        self.assertLess(order.index("foundation-hub-rg"), order.index("avnm-create"))
+        self.assertLess(order.index("avnm-ready"), order.index("foundation-spokea-rg"))
+        for zone in ("hub", "spokea", "spokeb"):
+            self.assertLess(order.index(f"foundation-{zone}-nsg"), order.index(f"foundation-{zone}-vnet"))
+            script = steps[f"foundation-{zone}-vnet"]
+            self.assertIn("infra/workshop-ipam-vnet.bicep", script)
+            self.assertIn('"ipamPoolId=$IPAM_POOL_ID"', script)
+            self.assertNotIn("--address-prefixes 10.", script)
+            self.assertNotIn("rg-lzbegin-ipam", script)
+        self.assertNotIn("network manager list", blocks(DOCS[3])["avnm-ready"])
+        self.assertNotIn("avnm-create", blocks(DOCS[3]))
+        self.assertFalse(any("subnet create" in value for value in steps.values()))
+
+    def test_pool_deployment_rejects_existing_vnet_or_malformed_discovery_without_writing(self):
+        for zone in ("hub", "spokea", "spokeb"):
+            lookup = foundation_cases()[f"foundation-{zone}-vnet"][0]
+            for payload in ([{"name": vnet(zone)}], {"unexpected": True}):
+                with self.subTest(zone=zone, payload=payload):
+                    response = dict(lookup, stdout=json.dumps(payload))
+                    result = self.execute(2, f"foundation-{zone}-vnet", [response])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("ERROR:", result.stderr)
         config_calls = avnm_cases()["connectivity-config-create"]
         for name, calls in (
             ("inspect-static-members", [az([
@@ -688,7 +714,6 @@ printf 'SHELL_ALIVE\\n'
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_avnm_inspection_blocks_are_read_only_and_show_cli_output(self):
-        steps = blocks(DOCS[3])
         for name, calls in (
             ("inspect-avnm", avnm_cases()["avnm-create"][:1]),
             ("inspect-network-groups", avnm_cases()["network-group-create"][:1]),
@@ -696,8 +721,9 @@ printf 'SHELL_ALIVE\\n'
             ("inspect-members-before-spokeb", avnm_cases()["member-spokeb"][:1]),
         ):
             with self.subTest(step=name):
+                steps = blocks(DOCS[2 if name == "inspect-avnm" else 3])
                 self.assertNotIn(" create ", steps[name])
-                result = self.execute(3, name, calls)
+                result = self.execute(2 if name == "inspect-avnm" else 3, name, calls)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(calls[0]["stdout"], result.stdout)
 
@@ -737,7 +763,7 @@ printf 'SHELL_ALIVE\\n'
                     self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
     def test_foundation_and_avnm_actions_stop_on_each_failed_lookup(self):
-        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
+        for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):
             for name, calls in cases.items():
                 for index in range(len(calls) - 1):
                     with self.subTest(step=name, failure=index):
@@ -762,7 +788,7 @@ printf 'SHELL_ALIVE\\n'
         cases = foundation_cases()
         for zone in ("hub", "spokea", "spokeb"):
             with self.subTest(zone=zone):
-                names = [f"foundation-{zone}-{kind}" for kind in ("rg", "vnet", "nsg")]
+                names = [f"foundation-{zone}-{kind}" for kind in ("rg", "nsg", "vnet")]
                 script = 'export STATE_FILE=state.json\n'
                 script += " &&\n".join([steps["prepare-02"], *(steps[name] for name in names)])
                 calls = [account(), az(["group", "exists", "--name", rg(zone), "-o", "tsv"], "true"), group(zone)]
@@ -830,7 +856,7 @@ printf 'SHELL_ALIVE\\n'
             with self.subTest(step=name):
                 calls = copy.deepcopy(cases[name])
                 calls[0]["stdout"] = json.dumps(payload)
-                result = self.execute(3, name, calls[:1])
+                result = self.execute(2 if name == "avnm-create" else 3, name, calls[:1])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 
@@ -840,7 +866,7 @@ printf 'SHELL_ALIVE\\n'
             with self.subTest(step=name):
                 calls = copy.deepcopy(avnm_cases()[name])
                 calls[0]["stdout"] = '{"unexpected":true}'
-                result = self.execute(3, name, calls[:1])
+                result = self.execute(2 if name == "avnm-create" else 3, name, calls[:1])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 
@@ -855,7 +881,7 @@ printf 'SHELL_ALIVE\\n'
                 networkManagerScopes={"subscriptions": ["/subscriptions/00000000-0000-0000-0000-000000000000"]})),
         ):
             with self.subTest(response=changed):
-                result = self.execute(3, "avnm-create",
+                result = self.execute(2, "avnm-create",
                                       [calls[0], dict(calls[-1], stdout=json.dumps(changed))])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
@@ -887,7 +913,7 @@ printf 'SHELL_ALIVE\\n'
         response = json.loads(calls[-1]["stdout"])
         response["properties"]["networkManagerScopes"]["subscriptions"][0] = (
             response["properties"]["networkManagerScopes"]["subscriptions"][0].upper())
-        result = self.execute(3, "avnm-create",
+        result = self.execute(2, "avnm-create",
                               [calls[0], dict(calls[-1], stdout=json.dumps(response))])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -927,7 +953,7 @@ printf 'SHELL_ALIVE\\n'
                 self.assertNotEqual(result.returncode, 0)
 
     def test_foundation_and_avnm_propagate_final_cli_errors(self):
-        for module, cases in ((2, foundation_cases()), (3, avnm_cases())):
+        for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):
             for name, calls in cases.items():
                 with self.subTest(module=module, step=name):
                     failed = copy.deepcopy(calls)

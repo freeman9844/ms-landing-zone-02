@@ -1,4 +1,6 @@
 import copy
+import json
+import subprocess
 import unittest
 
 from harness import ROOT, STATE, SUB, call, group, run
@@ -8,6 +10,30 @@ BASE = (f"/subscriptions/{SUB}/resourceGroups/{STATE['resourceGroups']['hub']}"
         "/providers/Microsoft.Network/networkManagers/avnm-lzbegin-demo123")
 CONFIG = BASE + "/routingConfigurations/rc-lzbegin-spokes-demo123"
 FIREWALL_IP = "10.0.2.4"
+
+
+class IpamVnetTemplateTests(unittest.TestCase):
+    def test_compiled_vnet_and_subnets_request_pool_allocations(self):
+        result = subprocess.run(
+            ["az", "bicep", "build", "--file", "infra/workshop-ipam-vnet.bicep", "--stdout"],
+            cwd=ROOT, text=True, capture_output=True, check=True)
+        template = json.loads(result.stdout)
+        self.assertEqual(template["parameters"]["zone"]["allowedValues"], ["hub", "spokea", "spokeb"])
+        vnet = next(resource for resource in template["resources"]
+                    if resource["type"] == "Microsoft.Network/virtualNetworks")
+        self.assertEqual(vnet["apiVersion"], "2024-05-01")
+        self.assertEqual(vnet["properties"]["addressSpace"]["ipamPoolPrefixAllocations"][0]["numberOfIpAddresses"],
+                         "4096")
+        self.assertNotIn("addressPrefixes", vnet["properties"]["addressSpace"])
+        serialized = json.dumps(vnet["properties"]["subnets"])
+        self.assertIn("'numberOfIpAddresses', '256'", serialized)
+        self.assertIn("'numberOfIpAddresses', '64'", serialized)
+        self.assertIn("AzureFirewallSubnet", serialized)
+        self.assertIn("defaultOutboundAccess", serialized)
+        self.assertIn("networkSecurityGroup", serialized)
+        self.assertNotIn("'addressPrefix',", serialized)
+        self.assertNotIn("rg-lzbegin-ipam", result.stdout)
+        self.assertEqual(set(template["outputs"]), {"vnetId", "vnetPrefixes", "subnets"})
 
 
 def az(argv, value):
