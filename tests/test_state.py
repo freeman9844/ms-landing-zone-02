@@ -90,8 +90,8 @@ jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
         variables = ("RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB "
                      "AVNM NETWORK_GROUP CONNECTIVITY_CONFIG AVNM_ID NETWORK_GROUP_ID "
                      "CONNECTIVITY_CONFIG_ID IPAM_POOL_ID HUB_VNET_CIDR SPOKEA_VNET_CIDR "
-                     "SPOKEB_VNET_CIDR HUB_MANAGEMENT_CIDR HUB_FIREWALL_CIDR "
-                     "SPOKEA_WORKLOAD_CIDR SPOKEB_WORKLOAD_CIDR RG SUBNET PREFIX VNET VM NSG")
+                     "SPOKEB_VNET_CIDR HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR "
+                     "SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR RG SUBNET PREFIX VNET VM NSG")
         for path, files in (
             ("missing.json", {}),
             ("bad.json", {"bad.json": '{"schemaVersion":999}'}),
@@ -101,6 +101,8 @@ jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
             with self.subTest(path=path, files=files):
                 result = run(SOURCE + f'''
 load_run state.json && zone_context spokea || exit 90
+export IPAM_POOL_ID=stale HUB_VNET_CIDR=stale SPOKEA_VNET_CIDR=stale SPOKEB_VNET_CIDR=stale
+export HUB_SUBNET_CIDR=stale SPOKEA_SUBNET_CIDR=stale SPOKEB_SUBNET_CIDR=stale FIREWALL_SUBNET_CIDR=stale
 export STATE_FILE='{path}'
 load_run "$STATE_FILE"
 status=$?
@@ -121,12 +123,12 @@ load_run state.json && zone_context hub &&
         result = run(SOURCE + f'''
 load_run state.json && zone_context spokea &&
   export HUB_VNET_CIDR=stale SPOKEA_VNET_CIDR=stale SPOKEB_VNET_CIDR=stale &&
-  export HUB_MANAGEMENT_CIDR=stale HUB_FIREWALL_CIDR=stale &&
-  export SPOKEA_WORKLOAD_CIDR=stale SPOKEB_WORKLOAD_CIDR=stale &&
+  export HUB_SUBNET_CIDR=stale SPOKEA_SUBNET_CIDR=stale &&
+  export SPOKEB_SUBNET_CIDR=stale FIREWALL_SUBNET_CIDR=stale &&
   create_run abc123 {SUB} koreacentral >/dev/null &&
   load_run .workshop-state/abc123.json || exit 90
-for name in HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR HUB_MANAGEMENT_CIDR \
-  HUB_FIREWALL_CIDR SPOKEA_WORKLOAD_CIDR SPOKEB_WORKLOAD_CIDR RG SUBNET PREFIX VNET VM NSG; do
+for name in HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR HUB_SUBNET_CIDR \
+  SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR RG SUBNET PREFIX VNET VM NSG; do
   [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
 done
 zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG"
