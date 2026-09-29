@@ -102,7 +102,8 @@ Type exactly: DELETE <실행ID> FROM <실제 구독 UUID>
 `PASS: workshop group deletion complete...` 또는 세 RG가 이미 없다는 메시지가 나와야 합니다.
 Portal에서도 이번 실습의 세 RG가 없어야 합니다.
 구독의 배포 이력 `support-실행ID`가 남더라도 이는 실행 중인 VM/NAT가 아닙니다.
-Cloud Shell 저장소와 공유 Network Watcher는 삭제 대상이 아닙니다.
+Cloud Shell 저장소, 공유 Network Watcher와 운영자 소유 공유 IPAM RG
+`rg-lzbegin-ipam`은 삭제 대상이 아닙니다. 공유 pool 삭제는 운영자 별도 작업입니다.
 삭제 실패나 시간 초과 후에는 **같은 상태 파일**로 남은 RG를 조회하고 cleanup을 다시 실행할
 수 있습니다. 이미 없는 그룹은 건너뛰지만, 조회 권한 오류나 소유 정보 불일치는 중단합니다.
 RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영될 수 있습니다.

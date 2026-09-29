@@ -58,6 +58,23 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 
 사용할 Azure 구독의 이름과 UUID가 표시됩니다.
 
+### 새 실행의 공유 IPAM 사전 준비
+
+새 실행은 운영자가 **별도로 준비한** Korea Central 공유 RG
+`rg-lzbegin-ipam`의 AVNM `avnm-lzbegin-ipam`과 pool
+`ipam-lzbegin-shared`를 사용합니다. 공유 pool의 단일 root prefix는
+`172.20.0.0/14`이며 전체 ID는
+`/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared`
+입니다. `$SUBSCRIPTION_ID`는 실습 구독 UUID로 대체됩니다. 구독이 다르거나
+pool에 접근할 수 없다면 새 실행을 시작하지 말고 운영자에게 문의하세요.
+참가자 명령으로 공유 RG/pool을 생성하거나 변경하지 않습니다. 공유 pool의
+사용 권한과 Network Manager 읽기 권한은 운영자와 확인하세요.
+
+기존 실행을 재개한다면 현재 상태 JSON을 그대로 보관하고 운영자가 게시한
+`workshop-pre-ipam-8d4781f` 태그(`8d4781f`)의 교재·스크립트를 **별도 clone**에서
+사용하세요. 기존 Cloud Shell checkout을 reset하거나 상태 파일을 새 실행용으로
+덮어쓰지 마세요.
+
 ## 실행 블록 읽는 법
 
 👁️ **설명**

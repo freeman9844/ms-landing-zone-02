@@ -2,7 +2,7 @@ import re
 import subprocess
 import unittest
 from urllib.parse import unquote
-from harness import ROOT
+from harness import ROOT, SUB, call, run
 
 MODULES = [
     "00-azure-basics.md", "01-prerequisites.md", "02-network-foundation.md",
@@ -116,3 +116,34 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("ms-security-landingzone-workshop01", text)
         self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)
+
+    def test_operator_guidance_identifies_shared_pool_and_deployment_scope(self):
+        text = (ROOT / "docs/maintainer-validation.md").read_text()
+        pool_id = ("/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/"
+                   "providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
+                   "ipamPools/ipam-lzbegin-shared")
+        for phrase in (pool_id, "172.20.0.0/14", "az group create",
+                       "az deployment group create", "--template-file infra/shared-ipam.bicep",
+                       '--subscription "$SUBSCRIPTION_ID"', "pool 사용 권한", "온프레미스"):
+            self.assertTrue(phrase in text, f"operator guidance missing: {phrase}")
+
+    def test_operator_deployment_stops_if_subscription_selection_fails(self):
+        text = (ROOT / "docs/maintainer-validation.md").read_text()
+        block = next(block for block in re.findall(r"```bash\n(.*?)\n```", text, re.S)
+                     if "az group create" in block)
+        result = run(block, [call(["account", "set", "--subscription", SUB],
+                                  code=1, stderr="Subscription not found")],
+                     input_text=SUB + "\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Subscription not found", result.stderr)
+
+    def test_participant_blocks_do_not_provision_shared_pool(self):
+        for name in MODULES:
+            text = (ROOT / "docs" / name).read_text()
+            blocks = re.findall(r"```bash\n(.*?)\n```", text, re.S)
+            for block in blocks:
+                self.assertNotIn("shared-ipam.bicep", block, name)
+                self.assertNotIn("rg-lzbegin-ipam", block, name)
+        cleanup = (ROOT / "docs/07-cleanup-production.md").read_text()
+        self.assertTrue("rg-lzbegin-ipam" in cleanup, "cleanup must exclude shared IPAM RG by name")
+        self.assertTrue("삭제 대상이 아닙니다" in cleanup, "cleanup must explicitly preserve the shared RG")

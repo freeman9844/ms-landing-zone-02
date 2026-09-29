@@ -2,6 +2,56 @@
 
 참가자 경로는 [README](../README.md)입니다. 이 문서는 교재 유지보수와 워크숍 개최 전 확인용입니다.
 
+## 새 실행용 공유 IPAM 준비 (운영자 전용)
+
+기존 실습을 재개하는 참가자는 기존 상태 JSON이나 Azure 자원을 새 버전으로
+변환하지 않습니다. 기존 실행용 Git 태그 `workshop-pre-ipam-8d4781f`는 정확히
+`8d4781f`를 가리킵니다. 운영자가 별도로 태그를 게시한 뒤, 기존 참가자는
+**별도 clone**에서 이 태그의 교재와 스크립트를 사용하세요. 사용 중인 Cloud Shell
+checkout을 reset하거나 기존 상태 파일을 덮어쓰지 마세요. 새 실행용 상태 스키마와
+할당 자동화는 후속 작업에서 구현합니다.
+
+수업 전에 운영자가 대상 구독을 확인하고, `172.20.0.0/14`가 기존 연결 네트워크·
+온프레미스 주소 계획과 겹치지 않는지 검토하세요. IPAM은 같은 pool 내부의
+할당 중복을 방지할 뿐 외부 주소와의 충돌은 막지 못합니다. 다음 배포는 **운영자만
+한 번** 실행하며 참가자의 초기화, `preflight.sh`, 모듈 02 및 정리 스크립트에는
+포함하지 않습니다. 실제 구독과 배포 대상을 확인하고 별도의 변경 승인 절차를 따르세요.
+
+```bash
+# 운영자 전용: 사용할 구독을 명시적으로 확인하고 선택합니다.
+read -rp "공유 IPAM 대상 subscription ID: " SUBSCRIPTION_ID &&
+az account set --subscription "$SUBSCRIPTION_ID" &&
+az account show --query '{name:name,id:id}' -o table &&
+# 대상 구독의 Korea Central 공유 RG에만 배포합니다.
+az group create --name rg-lzbegin-ipam --location koreacentral \
+  --subscription "$SUBSCRIPTION_ID" &&
+az deployment group create -g rg-lzbegin-ipam \
+  --template-file infra/shared-ipam.bicep \
+  --subscription "$SUBSCRIPTION_ID"
+```
+
+예상 pool ID(구독 UUID만 실제 값으로 치환):
+`/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared`.
+공유 AVNM `avnm-lzbegin-ipam`의 구독 범위·Connectivity 접근, pool
+`ipam-lzbegin-shared`의 Korea Central 위치와 단일 root prefix
+`172.20.0.0/14`를 결과에서 확인하세요.
+
+```bash
+# 운영자 전용 읽기 전용 확인: 출력의 id, location, prefixes를 예상값과 비교합니다.
+POOL_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"
+az resource show --ids "$POOL_ID" --api-version 2024-05-01 \
+  --query '{id:id,location:location,prefixes:properties.addressPrefixes}' -o json
+az resource show --ids "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam" \
+  --api-version 2024-05-01 \
+  --query '{location:location,scopes:properties.networkManagerScopes,accesses:properties.networkManagerScopeAccesses}' -o json
+```
+
+참가자에게 대상 구독 Contributor(또는 동등한 역할)가 있는지 확인하세요. 별도
+RBAC로 제한했다면 참가자의 실제 pool 사용 권한과 Network Manager 읽기 권한도
+확인한 뒤 새 실행을 시작합니다. 공유 RG `rg-lzbegin-ipam`과 이 pool은 모든
+실행에 걸쳐 유지하며 모듈 07 삭제 대상이 아닙니다. pool 삭제는 운영자 별도
+작업으로만 진행합니다.
+
 ## 참가자 실행 블록 작성 원칙
 
 각 실습 단계는 `👁️ **설명**` → `🟢 **실행**` → `📋 **확인**` 순서로 작성하고,
@@ -166,6 +216,7 @@ VM 보안 설정 및 **Hub NAT 연결만** 별도 단계인 이유를 설명합�
 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
+| `infra/shared-ipam.bicep` | 운영자 전용 공유 RG의 별도 Connectivity AVNM과 단일 `/14` IPAM root pool |
 | `infra/lab-support.bicep` | 기존 세 RG에 VM과 Hub NAT만 보조 배포, 구독을 명시한 Subnet ID, 구역별 출력 |
 | `infra/modules/nat.bicep` | Hub 관리 Subnet용 NAT와 고정 Public IP, 참조로 생기는 의존 관계, CLI에서 별도로 수행하는 Hub 연결 |
 | `infra/modules/test-vm.bicep` | 공인 IP 없는 NIC, SSH 공개 키/VM agent, Trusted Launch, VM 삭제 시 디스크·NIC 수명 |
