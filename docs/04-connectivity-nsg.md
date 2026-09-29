@@ -575,30 +575,19 @@ assert_peering_forwarded "$RG_SPOKEB" "vnet-lzbegin-spokeb-$RUN_ID" \
 <!-- exec:enforce-peering -->
 ```bash
 assert_forwarded_peerings &&
-current=$(az network manager connect-config show -g "$RG_HUB" \
+assert_connectivity_config_ready &&
+az network manager connect-config update -g "$RG_HUB" \
   --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-  (.id | ascii_downcase) == ($id | ascii_downcase) and
-  .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke"
-' <<< "$current" >/dev/null &&
-updated=$(az network manager connect-config update -g "$RG_HUB" \
-    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
-    --connect-capabilities '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}' \
-    -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-  (.id | ascii_downcase) == ($id | ascii_downcase) and
-  .provisioningState == "Succeeded" and
-  .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
-  .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard" and
-  .connectivityCapabilities.peeringEnforcement == "Enforced"
-' <<< "$updated" >/dev/null &&
+  --connect-capabilities '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}' \
+  -o json --subscription "$SUBSCRIPTION_ID" &&
+assert_connectivity_config_ready Enforced &&
 printf 'PASS: peeringEnforcement=Enforced saved; redeploy Connectivity next\n'
 ```
 
 📋 **확인**
 
-`peeringEnforcement=Enforced`가 저장됐습니다. 아직 **설정만 변경**했으므로
+다시 조회한 설정에 `peeringEnforcement=Enforced`가 저장돼 있어야 합니다.
+아직 **설정만 변경**했으므로
 다음 단계에서 반드시 Connectivity를 재배포합니다.
 
 ### 3-6. 강제 설정 재배포
@@ -608,14 +597,7 @@ printf 'PASS: peeringEnforcement=Enforced saved; redeploy Connectivity next\n'
 <!-- exec:commit-enforced-connectivity -->
 ```bash
 assert_forwarded_peerings &&
-current=$(az network manager connect-config show -g "$RG_HUB" \
-  --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
-  -o json --subscription "$SUBSCRIPTION_ID") &&
-jq -e --arg id "$CONNECTIVITY_CONFIG_ID" '
-  (.id | ascii_downcase) == ($id | ascii_downcase) and
-  .provisioningState == "Succeeded" and
-  .connectivityCapabilities.peeringEnforcement == "Enforced"
-' <<< "$current" >/dev/null &&
+assert_connectivity_config_ready Enforced &&
 az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
   --commit-type Connectivity --configuration-ids "$CONNECTIVITY_CONFIG_ID" \
   --target-locations "$LOCATION" --subscription "$SUBSCRIPTION_ID"

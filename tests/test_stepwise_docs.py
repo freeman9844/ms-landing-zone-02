@@ -242,6 +242,7 @@ def enforcement_cases():
                 "--connect-capabilities",
                 '{"connectedGroupAddressOverlap":"Allowed","connectedGroupPrivateEndpointsScale":"Standard","peeringEnforcement":"Enforced"}',
                 "-o", "json"], json.loads(updated["stdout"])),
+            updated,
         ],
         "commit-enforced-connectivity": [
             *forwarding_check_calls(),
@@ -627,8 +628,18 @@ class StepwiseDocsTests(unittest.TestCase):
                     self.assertNotEqual(self.execute(4, name, calls).returncode, 0)
         for name in ("enforce-peering", "commit-enforced-connectivity"):
             calls = copy.deepcopy(enforcement_cases()[name])
-            calls[-2]["stdout"] = json.dumps(dict(connectivity_config(), id="wrong-config"))
-            self.assertNotEqual(self.execute(4, name, calls[:-1]).returncode, 0)
+            before_update = -3 if name == "enforce-peering" else -2
+            calls[before_update]["stdout"] = json.dumps(dict(connectivity_config(), id="wrong-config"))
+            self.assertNotEqual(self.execute(4, name, calls[:len(calls) + before_update + 1]).returncode, 0)
+
+    def test_enforcement_update_rechecks_saved_configuration_before_reporting_success(self):
+        calls = copy.deepcopy(enforcement_cases()["enforce-peering"])
+        persisted = json.loads(calls[-1]["stdout"])
+        persisted["connectivityCapabilities"]["peeringEnforcement"] = "Unenforced"
+        calls[-1]["stdout"] = json.dumps(persisted)
+        result = self.execute(4, "enforce-peering", calls)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("PASS: peeringEnforcement=Enforced saved", result.stdout)
 
     def test_routing_configuration_rejects_wrong_member_and_full_group_ids(self):
         calls = route_configuration_calls()
@@ -692,6 +703,12 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertIn("assert_routing_", steps[name])
         for name in ("enforce-peering", "commit-enforced-connectivity", "routing-commit"):
             self.assertIn("az network manager", steps[name])
+        for name in ("enforce-peering", "commit-enforced-connectivity"):
+            self.assertIn("assert_connectivity_config_ready", steps[name])
+            self.assertNotIn("jq -e", steps[name])
+        self.assertEqual(steps["enforce-peering"].count("assert_connectivity_config_ready"), 2)
+        self.assertIn("az network manager connect-config update", steps["enforce-peering"])
+        self.assertIn("az network manager post-commit", steps["commit-enforced-connectivity"])
 
     def test_routing_commit_only_checks_subnet_ownership_and_existing_attachments(self):
         calls = routing_commit_calls()

@@ -786,8 +786,11 @@ printf 'SHELL_ALIVE\\n'
                         expected = {
                             (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
                             (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
-                            (4, "enforce-peering"): ["assert_forwarded_peerings"],
-                            (4, "commit-enforced-connectivity"): ["assert_forwarded_peerings"],
+                            (4, "enforce-peering"): ["assert_forwarded_peerings",
+                                                    "assert_connectivity_config_ready",
+                                                    "assert_connectivity_config_ready"],
+                            (4, "commit-enforced-connectivity"): ["assert_forwarded_peerings",
+                                                                  "assert_connectivity_config_ready"],
                             (4, "forward-hub-to-spokea"): ["assert_peering_forwarded"],
                             (4, "forward-spokea-to-hub"): ["assert_peering_forwarded"],
                             (4, "forward-hub-to-spokeb"): ["assert_peering_forwarded"],

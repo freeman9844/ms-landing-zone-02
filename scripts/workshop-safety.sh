@@ -158,6 +158,22 @@ assert_forwarded_peerings() {
   done
 }
 
+assert_connectivity_config_ready() {
+  local config expected_enforcement="${1:-}"
+  config=$(az network manager connect-config show -g "$RG_HUB" \
+    --network-manager-name "$AVNM" --configuration-name "$CONNECTIVITY_CONFIG" \
+    -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  jq -e --arg id "$CONNECTIVITY_CONFIG_ID" --arg enforcement "$expected_enforcement" '
+    (.id | ascii_downcase) == ($id | ascii_downcase) and
+    .provisioningState == "Succeeded" and .connectivityTopology == "HubAndSpoke" and
+    ($enforcement == "" or
+      (.connectivityCapabilities.peeringEnforcement == $enforcement and
+       .connectivityCapabilities.connectedGroupAddressOverlap == "Allowed" and
+       .connectivityCapabilities.connectedGroupPrivateEndpointsScale == "Standard"))
+  ' <<< "$config" >/dev/null ||
+    { fail "Connectivity configuration is not ready or peering enforcement is not saved."; return 1; }
+}
+
 # 새 Connectivity 목표 상태와 Spoke의 실제 적용 상태를 별도로 확인합니다.
 assert_enforced_connectivity() {
   local config status effective zone rg vnet hub_id vnet_id
