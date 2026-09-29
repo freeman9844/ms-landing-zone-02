@@ -41,6 +41,8 @@ def resource(value, expected_id, name):
     require(isinstance(value.get("id"), str) and value["id"].lower() == expected_id.lower()
             and isinstance(value.get("name"), str) and value["name"].lower() == name.lower(),
             f"Unexpected {name} resource ID or name")
+    require(value.get("provisioningState") == "Succeeded",
+            f"Resource not provisioned successfully: {name}")
 
 
 def prefix_from_subnet(value):

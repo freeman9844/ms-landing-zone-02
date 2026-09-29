@@ -43,3 +43,12 @@
 ## 범위 및 주의
 
 이 작업은 CIDR 계약과 세션 준비를 확립한다. 기존 모듈 04–06의 모든 방화벽/라우팅 규칙 및 예시 안에 남은 고정 `10.x` 주소를 실제 변수로 변경하는 일은 다음 작업이 필요하다. 정적 테스트를 실환경 pool 할당이나 통신 검증으로 오인하지 않는다.
+
+## Task 4 리뷰 수정 — 자원 provisioningState 확인
+
+- Azure CLI `network vnet show` 및 `network vnet subnet show`의 최상위 `provisioningState`가 **`Succeeded`**인 경우에만 CIDR을 내보낸다. `Failed`, `Updating`, 필드 누락은 VNet 세 개와 Subnet 네 개 각각에서 모두 거부한다. 성공 fixture도 실제 CLI 응답처럼 최상위 상태를 포함한다.
+- 실패 시 일곱 기존 CIDR export가 모두 제거됨을 각 경우에 검증했다. 성공 조회 후 마지막 Subnet이 `Failed`로 재조회되는 경우에도 기존 일곱 CIDR과 `PREFIX`/zone 대상이 남지 않는다.
+- RED: `python3 -m unittest discover -s tests -p test_ipam_cidrs.py -k non_succeeded -v` → **FAIL** (상태별 21개 subtest가 성공으로 잘못 허용됨); `python3 -m unittest discover -s tests -p test_ipam_cidrs.py -k failed_provisioning_state_after_success -v` → **FAIL** (실패해야 할 재조회가 성공).
+- GREEN: `python3 -m unittest discover -s tests -p test_ipam_cidrs.py -q` → **Ran 20 tests, OK**; `python3 -m unittest discover -s tests -p test_state.py -q` → **Ran 22 tests, OK**.
+- 공유 fixture를 사용하는 회귀: `python3 -m unittest discover -s tests -p test_core.py -q` → **24 tests, OK**; `test_extension.py` → **14 tests, OK**; `test_run_vm.py` → **11 tests, OK**; `test_network_docs.py` → **30 tests, OK**; `test_stepwise_docs.py` → **36 tests, OK** (각 파일에 동일한 unittest discover 명령 사용).
+- `git --no-pager diff --check` 및 `bash -n scripts/workshop-ipam.sh` → **성공**. 모든 테스트는 fake Azure CLI 사용; 실제 Azure 호출·변경 없음.

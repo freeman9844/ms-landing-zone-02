@@ -27,6 +27,7 @@ def fixtures():
     for zone, (vnet_prefix, subnet_prefix) in PREFIXES.items():
         vnets[zone] = {
             "id": vnet_id(zone), "name": f"vnet-lzbegin-{zone}-demo123",
+            "provisioningState": "Succeeded",
             "tags": {"workshop": "lz-beginner", "environment": "lab",
                      "runId": "demo123", "managedBy": "workshop"},
             "addressSpace": {"addressPrefixes": [vnet_prefix],
@@ -35,12 +36,13 @@ def fixtures():
         name = "snet-management" if zone == "hub" else "snet-workload"
         subnets[(zone, name)] = {
             "id": f"{vnet_id(zone)}/subnets/{name}",
-            "name": name, "addressPrefix": subnet_prefix,
+            "name": name, "provisioningState": "Succeeded", "addressPrefix": subnet_prefix,
             "ipamPoolPrefixAllocations": allocation(256),
         }
     subnets[("hub", "AzureFirewallSubnet")] = {
         "id": f"{vnet_id('hub')}/subnets/AzureFirewallSubnet",
-        "name": "AzureFirewallSubnet", "addressPrefix": "172.20.1.0/26",
+        "name": "AzureFirewallSubnet", "provisioningState": "Succeeded",
+        "addressPrefix": "172.20.1.0/26",
         "ipamPoolPrefixAllocations": allocation(64),
     }
     return vnets, subnets
@@ -100,6 +102,23 @@ class LiveCidrTests(unittest.TestCase):
             self.assertIn(f"{zone.upper()}_VNET_CIDR={parent}", result.stdout)
             self.assertIn(f"{zone.upper()}_SUBNET_CIDR={child}", result.stdout)
         self.assertIn("FIREWALL_SUBNET_CIDR=172.20.1.0/26", result.stdout)
+
+    def test_rejects_non_succeeded_vnet_and_subnet_without_stale_exports(self):
+        for resource in (("vnet", "hub"), ("vnet", "spokea"), ("vnet", "spokeb"),
+                         ("subnet", "hub", "snet-management"),
+                         ("subnet", "hub", "AzureFirewallSubnet"),
+                         ("subnet", "spokea", "snet-workload"),
+                         ("subnet", "spokeb", "snet-workload")):
+            for state in ("Failed", "Updating", None):
+                with self.subTest(resource=resource, state=state):
+                    vnets, subnets = fixtures()
+                    item = (vnets[resource[1]] if resource[0] == "vnet"
+                            else subnets[resource[1:]])
+                    if state is None:
+                        del item["provisioningState"]
+                    else:
+                        item["provisioningState"] = state
+                    self.resolve(reads(vnets, subnets))
 
     def test_rejects_wrong_pool_and_size(self):
         for path, value in [
@@ -225,6 +244,25 @@ class LiveCidrTests(unittest.TestCase):
                      reads(vnets, subnets, error=("vnet", "hub")))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("STATUS=1 PREFIX=UNSET RG=UNSET", result.stdout)
+
+    def test_failed_provisioning_state_after_success_drops_all_previous_exports(self):
+        vnets, subnets = fixtures()
+        failed_vnets, failed_subnets = fixtures()
+        failed_subnets[("spokeb", "snet-workload")]["provisioningState"] = "Failed"
+        script = ('source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; '
+                  'source "$WORKSHOP_ROOT/scripts/workshop-ipam.sh"; '
+                  'load_run state.json && load_ipam_cidrs && zone_context spokea || exit 90; '
+                  'load_ipam_cidrs; status=$?; '
+                  'printf "STATUS=%s PREFIX=%s RG=%s\\n" "$status" "${PREFIX-UNSET}" "${RG-UNSET}"; '
+                  'for name in ' + " ".join(EXPORTS) +
+                  '; do printf "%s=%s\\n" "$name" "${!name-UNSET}"; done; '
+                  'test "$status" -ne 0')
+        result = run(script, reads(vnets, subnets) + reads(failed_vnets, failed_subnets))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ERROR:", result.stderr)
+        self.assertIn("STATUS=1 PREFIX=UNSET RG=UNSET", result.stdout)
+        for name in EXPORTS:
+            self.assertIn(f"{name}=UNSET", result.stdout)
 
     def test_zone_context_uses_live_parent_prefix(self):
         vnets, subnets = fixtures()
