@@ -3,7 +3,7 @@
 Azure Virtual Network Manager를 사용하는 독립 저장소
 `jungwoonlee_microsoft/ms-landing-zone-02`의 루트에서 실행합니다.
 
-> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 185–220분** 동안
+> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 175–210분** 동안
 > Cloud Shell과 Portal로 Hub & Spoke를 만들고, AVNM 연결·라우팅·보안 정책과
 > 중앙 Firewall·로그를 확인한 뒤 안전하게 정리합니다.
 
@@ -33,8 +33,8 @@ Hub↔Spoke 연결을 배포합니다. 모듈 04에서는 네 방향 피어링�
 AVNM 피어링 강제를 배포한 뒤, VM을 만들기 전에 Firewall과 AVNM Routing으로
 Spoke의 왕복 경로와 인터넷 출구를 준비합니다. 강제 배포 후에는 피어링을 AVNM 외부에서
 직접 변경·삭제할 수 없습니다. 모듈 05에서는 사설 VM과
-AVNM Security Admin 규칙으로 정상·차단·복구 통신을 검증합니다. 모듈 06에서는
-Firewall의 Allow/Deny 로그와 아웃바운드를 확인합니다. AVNM은 연결·경로·L4 정책을
+AVNM Security Admin 규칙으로 정상 HTTP 통신을 검증합니다. 모듈 06에서는
+Firewall의 Allow→Deny→Allow 전환과 새 로그·아웃바운드를 확인합니다. AVNM은 연결·경로·L4 정책을
 중앙 관리하지만 Firewall의 FQDN 검사·로그나 NAT 주소 변환을 대신하지 않습니다.
 **모듈 00–07을 순서대로 진행하는 하나의 과정**이며, Firewall과 최종 정리까지 모두 포함합니다.
 
@@ -113,10 +113,10 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
 | 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위·Network Group·Hub-and-Spoke 연결 배포 | 25분 |
 | 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–45분 |
-| 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·차단·복구 | 35–45분 |
+| 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·실제 HTTP 확인 | 25–35분 |
 | 06 | [경로와 Firewall 검증](docs/06-routing-validation.md) | 실제 경로·Allow/Deny 로그·egress 검증 | 30–40분 |
 | 07 | [정리와 운영 전환](docs/07-cleanup-production.md) | 정확한 실습 리소스 삭제와 운영 차이 이해 | 10–15분 |
-| | **전체 합계** | | **185–220분** |
+| | **전체 합계** | | **175–210분** |
 
 모듈 04 이후에도 같은 실행 ID와 리소스를 유지한 채 **05 → 06 → 07**로 진행합니다.
 목표 시간은 배포·정책 반영·로그 수집·삭제 대기에 따라 늘어날 수 있습니다.

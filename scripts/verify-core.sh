@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 모듈 05의 Security Admin 기준 상태, 임시 차단, 복구를 검증합니다.
+# Security Admin 기준 상태를 검증합니다. 임시 차단·복구 모드는 이전 실습 진단용입니다.
 # 규칙을 직접 변경하지 않습니다. 교재의 해당 변경을 적용한 뒤 실행합니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/verify-common.sh"

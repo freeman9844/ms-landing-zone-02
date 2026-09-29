@@ -21,12 +21,6 @@ def support_cases():
         "support-deploy": [az([*support_args("create"), "-o", "json"])],
         "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
-        "inspect-nat-hub": [az(["network", "vnet", "subnet", "show", *subnet_args("hub"),
-                               "--query", "{Subnet:name,NatGateway:natGateway.id,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess}",
-                               "-o", "json"], {"Subnet": "snet-management",
-                                               "NatGateway": netid("hub", "natGateways", "nat-lzbegin-hub-demo123"),
-                                               "NSG": netid("hub", "networkSecurityGroups", "nsg-lzbegin-hub-demo123"),
-                                               "DefaultOutbound": False})],
         "read-vm-ips": [nic("hub", "10.0.1.4"), nic("spokea", "10.10.1.4"), nic("spokeb", "10.20.1.4")],
     }
     return cases
@@ -349,23 +343,6 @@ def admin_rule_checks(stage="baseline"):
     return calls
 
 
-def undeployed_security_status(deployments=None):
-    if deployments is None:
-        deployments = [{
-            "deploymentType": "SecurityAdmin",
-            "region": "koreacentral",
-            "commitTime": "2026-09-27T04:00:00Z",
-            "deploymentStatus": "Deployed",
-            "configurationIds": [],
-        }]
-    return az([
-        "rest", "--method", "post",
-        "--url", avnm_id() + "/listDeploymentStatus?api-version=2025-05-01",
-        "--body", '{"deploymentTypes":["SecurityAdmin"],"regions":["koreacentral"]}',
-        "-o", "json",
-    ], deployments)
-
-
 def security_cases():
     base = ["network", "manager", "security-admin-config"]
     options = ["-g", rg("hub"), "--network-manager-name", "avnm-lzbegin-demo123",
@@ -384,7 +361,6 @@ def security_cases():
         ("allow-hub-spokea", "spokea", "hub-to-a", "10.0.1.4", "10.10.1.4", "AlwaysAllow", 200),
         ("allow-hub-spokeb", "spokeb", "hub-to-b", "10.0.1.4", "10.20.1.4", "AlwaysAllow", 210),
         ("allow-spokea-spokeb", "spokeb", "a-to-b", "10.10.1.4", "10.20.1.4", "AlwaysAllow", 220),
-        ("deny-hub", "spokea", "deny-hub-to-a", "10.0.1.4", "10.10.1.4", "Deny", 100),
     ):
         cases[step] = [az([*base, "rule-collection", "rule", "create", *options,
                            "--rule-collection-name", zone, "--rule-name", rule,
@@ -394,26 +370,12 @@ def security_cases():
                            "--source-port-ranges", "0-65535", "--destinations",
                            f"address-prefix={dest}/32", "address-prefix-type=IPPrefix",
                            "--dest-port-ranges", "8080", "-o", "json"])]
-    for step in ("security-deploy", "security-deploy-deny", "security-deploy-restore"):
+    for step in ("security-deploy",):
         cases[step] = [az(["network", "manager", "post-commit", "-g", rg("hub"),
                            "--network-manager-name", "avnm-lzbegin-demo123", "--commit-type",
                            "SecurityAdmin", "--configuration-ids", config,
                            "--target-locations", "koreacentral", "-o", "json"])]
-    cases["security-undeploy-for-restore"] = [
-        az(["network", "manager", "post-commit", "-g", rg("hub"),
-            "--network-manager-name", "avnm-lzbegin-demo123", "--commit-type",
-            "SecurityAdmin", "--configuration-ids", "[]",
-            "--target-locations", "koreacentral", "-o", "json"]),
-        undeployed_security_status(),
-    ]
-    cases["restore-hub"] = [undeployed_security_status(),
-                            az([*base, "rule-collection", "rule", "delete", *options,
-                                "--rule-collection-name", "spokea", "--rule-name",
-                                "deny-hub-to-a", "--yes"])]
-    for step, stage in (("inspect-security-rules", "baseline"),
-                        ("inspect-admin-deny", "denied"),
-                        ("inspect-admin-restored", "restored")):
-        cases[step] = admin_rule_checks(stage)
+    cases["inspect-security-rules"] = admin_rule_checks("baseline")
     return cases
 
 
@@ -437,9 +399,8 @@ class StepwiseDocsTests(unittest.TestCase):
         if module == 5 and name in ("support-preview", "support-deploy"):
             prefix += "check_vm_network() { :; }\n"
         if module == 5 and name in ("allow-hub-spokea", "allow-hub-spokeb",
-                                     "allow-spokea-spokeb", "deny-hub",
-                                     "inspect-security-rules", "inspect-admin-deny",
-                                     "inspect-admin-restored"):
+                                     "allow-spokea-spokeb",
+                                     "inspect-security-rules"):
             prefix += 'hub_ip=10.0.1.4; a_ip=10.10.1.4; b_ip=10.20.1.4\n'
         if module == 5 and name.startswith("verify-admin-") and name not in (
             "verify-admin-http-baseline", "verify-admin-http-denied", "verify-admin-http-restored"):
@@ -455,50 +416,39 @@ class StepwiseDocsTests(unittest.TestCase):
             with self.subTest(step=name):
                 self.assertNotIn("&&", script)
 
-    def test_security_undeploy_is_confirmed_before_deleting_deployed_deny_rule(self):
+    def test_only_module_06_has_a_deny_restore_exercise(self):
+        steps05 = blocks(DOCS[5])
+        for name in ("deny-hub", "security-deploy-deny", "verify-admin-deny",
+                     "verify-admin-http-denied", "security-undeploy-for-restore",
+                     "restore-hub", "security-deploy-restore", "verify-admin-restored",
+                     "verify-admin-http-restored"):
+            self.assertNotIn(name, steps05)
+        self.assertIn("inspect-security-rules", steps05)
+        self.assertIn("verify-admin-http-baseline", steps05)
+        steps06 = blocks(DOCS[6])
+        for name in ("firewall-deny", "verify-denied", "firewall-restore", "verify-restored"):
+            self.assertIn(name, steps06)
+
+    def test_module_05_uses_hub_nat_update_result_without_duplicate_inspection(self):
         steps = blocks(DOCS[5])
-        names = ("security-undeploy-for-restore", "restore-hub", "security-deploy-restore")
-        self.assertTrue(names[0] in steps,
-                        "A deployed Security Admin configuration must be undeployed before rule deletion")
-        self.assertLess(list(steps).index(names[0]), list(steps).index(names[1]))
-        script = 'export STATE_FILE=state.json\n' + steps["prepare-05"] + "\n"
-        script += "\n".join(f'{steps[name]}\n[[ $? == 0 ]] || exit 1' for name in names)
-        calls = [*preparation_calls(5)]
-        for name in names:
-            calls.extend(security_cases()[name])
-        result = run(script, calls)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("attach-nat-hub", steps)
+        self.assertIn("vm-route-gate", steps)
+        self.assertNotIn("inspect-nat-hub", steps)
+        self.assertNotIn("inspect-no-spoke-nat", steps)
+        self.assertIn("assert_no_spoke_nat", steps["vm-route-gate"])
+        self.assertIn("assert_no_spoke_nat", blocks(DOCS[6])["validate-avnm-subnets"])
 
-        latest_deployed = {"deploymentType": "SecurityAdmin", "region": "koreacentral",
-                           "commitTime": "2026-09-27T04:00:00Z", "deploymentStatus": "Deployed",
-                           "configurationIds": []}
-        previous_deployed = dict(latest_deployed, commitTime="2026-09-27T03:00:00Z",
-                                 configurationIds=[avnm_id() +
-                                                   "/securityAdminConfigurations/sc-lzbegin-http-demo123"])
-        for label, deployments in (
-            ("still-deployed", [previous_deployed]),
-            ("latest-failed", [previous_deployed, dict(latest_deployed, deploymentStatus="Failed")]),
-            ("latest-pending", [previous_deployed, dict(latest_deployed, deploymentStatus="Deploying")]),
-            ("stale-empty", [dict(latest_deployed, commitTime="2026-09-27T02:00:00Z"),
-                             previous_deployed]),
-            ("wrong-region", [dict(latest_deployed, region="eastus")]),
-            ("missing", []),
-        ):
-            with self.subTest(label=label):
-                invalid = security_cases()["security-undeploy-for-restore"][:1]
-                invalid.append(undeployed_security_status(deployments))
-                self.assertNotEqual(self.execute(5, "security-undeploy-for-restore", invalid).returncode, 0)
-                self.assertNotEqual(self.execute(5, "restore-hub",
-                                                [undeployed_security_status(deployments)]).returncode, 0)
-
-        newest = [latest_deployed, previous_deployed]
-        self.assertEqual(self.execute(5, "security-undeploy-for-restore", [
-            security_cases()["security-undeploy-for-restore"][0],
-            undeployed_security_status(newest),
-        ]).returncode, 0)
-        self.assertEqual(self.execute(5, "restore-hub", [
-            undeployed_security_status(newest), security_cases()["restore-hub"][-1],
-        ]).returncode, 0)
+    def test_module_06_allowed_result_example_covers_route_http_and_fresh_log(self):
+        doc = DOCS[6].read_text()
+        example = doc.split("<!-- exec:verify-allowed -->", 1)[1].split("## 4.", 1)[0]
+        for evidence in ("Waiting for current flow logs", "VirtualAppliance",
+                         "VNetPeering", "effective AVNM rule", "PASS: HTTP spokeb",
+                         '"Action": "Allow"', '"SourceIp": "10.10.1.4"',
+                         '"DestinationIp": "10.20.1.4"',
+                         "PASS: matching Firewall Allow evidence found.",
+                         "PASS: extension allowed"):
+            with self.subTest(evidence=evidence):
+                self.assertIn(evidence, example)
 
     def test_ordinary_actions_check_ownership_once_for_a_prepared_session(self):
         cases = dict(self.cases())
@@ -562,16 +512,6 @@ class StepwiseDocsTests(unittest.TestCase):
                         calls[-1]["stdout"] = json.dumps(setting)
                     result = self.execute(4, name, calls)
                     self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_nat_inspections_display_ids_in_original_casing(self):
-        for zone in ("hub",):
-            name = f"inspect-nat-{zone}"
-            for transform in (str.lower, str.swapcase):
-                with self.subTest(step=name, casing=transform.__name__):
-                    result = self.execute(5, name, recase_ids(support_cases()[name], transform))
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertIn(transform(netid(zone, "natGateways", f"nat-lzbegin-{zone}-demo123")),
-                                  result.stdout)
 
     def test_reference_mismatches_remain_errors_not_suffix_matches(self):
         for bad in foreign_ids(LAW):
@@ -755,8 +695,6 @@ class StepwiseDocsTests(unittest.TestCase):
             ("verify-admin-allow-a", "spokea", "10.10.1.4", "10.0.1.4", "Allow", "hub-to-a"),
             ("verify-admin-allow-b", "spokeb", "10.20.1.4", "10.0.1.4", "Allow", "hub-to-b"),
             ("verify-admin-allow-ab", "spokeb", "10.20.1.4", "10.10.1.4", "Allow", "a-to-b"),
-            ("verify-admin-deny", "spokea", "10.10.1.4", "10.0.1.4", "Deny", "deny-hub-to-a"),
-            ("verify-admin-restored", "spokea", "10.10.1.4", "10.0.1.4", "Allow", "hub-to-a"),
         ):
             access = "AlwaysAllow" if action == "Allow" else "Deny"
             with self.subTest(step=step):
@@ -775,7 +713,7 @@ class StepwiseDocsTests(unittest.TestCase):
                     self.assertNotEqual(self.execute(5, step, attempts).returncode, 0)
 
     def test_security_admin_rules_reject_wrong_action_priority_ip_target_and_full_ids(self):
-        for step in ("inspect-security-rules", "inspect-admin-deny", "inspect-admin-restored"):
+        for step in ("inspect-security-rules",):
             calls = security_cases()[step]
             self.assertEqual(self.execute(5, step, calls).returncode, 0)
             for index, field, value in (
@@ -793,19 +731,17 @@ class StepwiseDocsTests(unittest.TestCase):
                     data[field] = value
                     altered[-1]["stdout"] = json.dumps(data)
                     self.assertNotEqual(self.execute(5, step, altered).returncode, 0)
-        denied = security_cases()["inspect-admin-deny"]
-        for field, wrong in (("access", "AlwaysAllow"), ("priority", 300),
-                             ("destinations", [{"addressPrefixType": "IPPrefix", "addressPrefix": "10.20.1.4/32"}])):
-            altered = copy.deepcopy(denied[:5])
-            data = json.loads(altered[-1]["stdout"])
-            data[field] = wrong
-            altered[-1]["stdout"] = json.dumps(data)
-            self.assertNotEqual(self.execute(5, "inspect-admin-deny", altered).returncode, 0)
+        altered = copy.deepcopy(security_cases()["inspect-security-rules"][:3])
+        rules = json.loads(altered[-1]["stdout"])
+        rules.append({"id": avnm_id() +
+                      "/securityAdminConfigurations/sc-lzbegin-http-demo123"
+                      "/ruleCollections/spokea/rules/deny-hub-to-a"})
+        altered[-1]["stdout"] = json.dumps(rules)
+        self.assertNotEqual(self.execute(5, "inspect-security-rules", altered).returncode, 0)
 
     def test_vm_and_validation_gates_require_deployed_avnm_routes_and_no_spoke_nat(self):
         for module, step, calls in (
             (5, "vm-route-gate", [*ready_calls(), *deployed_route_calls(), *no_spoke_nat_calls()]),
-            (5, "inspect-no-spoke-nat", no_spoke_nat_calls()),
             (6, "validate-avnm-subnets", [*ready_calls(), *deployed_route_calls(), *no_spoke_nat_calls()]),
             (6, "validate-effective-nic-routes", effective_route_calls()),
         ):
@@ -841,7 +777,8 @@ class StepwiseDocsTests(unittest.TestCase):
             calls = no_spoke_nat_calls()
             altered = copy.deepcopy(calls[:2] if index == 1 else calls[:4])
             altered[index]["stdout"] = json.dumps(payload)
-            self.assertNotEqual(self.execute(5, "inspect-no-spoke-nat", altered).returncode, 0)
+            self.assertNotEqual(self.execute(6, "validate-avnm-subnets",
+                                            [*ready_calls(), *deployed_route_calls(), *altered]).returncode, 0)
 
     def test_each_action_stops_after_any_failed_dependency_lookup(self):
         for module, cases in self.cases():
@@ -891,19 +828,6 @@ class StepwiseDocsTests(unittest.TestCase):
         for name in ("support-preview", "support-deploy"):
             with self.subTest(step=name):
                 self.assertNotEqual(self.execute(5, name, input_text="CREATE\n").returncode, 0)
-
-    def test_nat_inspection_shows_settings_for_manual_comparison_without_claiming_pass(self):
-        for zone in ("hub",):
-            calls = copy.deepcopy(support_cases()[f"inspect-nat-{zone}"])
-            data = json.loads(calls[-1]["stdout"])
-            data["NSG"] = None
-            data["DefaultOutbound"] = True
-            calls[-1]["stdout"] = json.dumps(data)
-            result = self.execute(5, f"inspect-nat-{zone}", calls)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('"NSG": null', result.stdout)
-            self.assertIn('"DefaultOutbound": true', result.stdout)
-            self.assertNotIn("PASS", result.stdout)
 
     def test_module05_effective_routes_need_no_watcher_activation(self):
         steps = blocks(DOCS[5])

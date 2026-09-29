@@ -1,6 +1,6 @@
 # 05. VM과 AVNM 중앙 보안
 
-> 목표 시간 35–50분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙으로 HTTP를 허용·차단·복구합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
+> 목표 시간 25–35분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙의 HTTP 허용을 확인합니다. 차단·복구는 모듈 06에서 Firewall Policy로 한 번만 실습합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
 
 ## 공통 준비
 
@@ -201,32 +201,7 @@ az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID
 
 Hub 관리 Subnet의 `natGateway.id`가 이번 Hub NAT입니다. Spoke Subnet에는 연결하지 않습니다.
 
-### 2-5. Hub NAT와 Spoke NAT 부재 조회
-
-🟢 **실행**
-
-<!-- exec:inspect-nat-hub -->
-```bash
-az network vnet subnet show -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
-  --query '{Subnet:name,NatGateway:natGateway.id,NSG:networkSecurityGroup.id,DefaultOutbound:defaultOutboundAccess}' \
-  -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-`Subnet=snet-management`, NAT 이름은 `nat-lzbegin-hub-<실행 ID>`,
-NSG 이름은 `nsg-lzbegin-hub-<실행 ID>`, `DefaultOutbound=false`입니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-no-spoke-nat -->
-```bash
-assert_no_spoke_nat
-```
-
-📋 **확인**
-
-두 Spoke Subnet 모두 NAT 연결이 없으며 이번 실행의 Spoke NAT/Public IP도 없습니다.
+Spoke NAT/Public IP의 부재는 VM 배포 전 검사와 모듈 06의 경로 검사에서 확인합니다.
 
 ## 3. NIC에 실제 적용된 경로 확인
 
@@ -563,207 +538,12 @@ Hub→A=`spokea`, Hub→B=`spokeb`, A→B=`spokeb`의 **새 HTTP 연결** 세 �
 A→B는 모듈 04의 AVNM `/16` 왕복 경로로 Firewall을 통과하며 Firewall Policy도
 허용해야 합니다. Hub→Spoke는 직접 Peering을 사용하므로 Firewall 로그가 없을 수 있습니다.
 
-## 6. 더 높은 우선순위 Deny와 복구
-
-👁️ **설명**
-
-Spoke A 컬렉션에 우선순위 `100`인 **Hub NIC→A NIC TCP 8080 한 건**을 Deny로
-추가합니다. `100`은 `200`보다 먼저 평가되므로 A 연결만 막고 Hub→B는 그대로 둡니다.
-규칙 추가/삭제 후에는 **각각 리전에 다시 배포**해야 반영됩니다. Deny 실험이 실패해도
-아래 복구(삭제·재배포)를 실행하세요. 이 실험은 Firewall의 FQDN 규칙이나 기존 NSG를 변경하지 않습니다.
-
-### 6-1. 임시 Hub → A Deny
-
-🟢 **실행**
-
-<!-- exec:deny-hub -->
-```bash
-az network manager security-admin-config rule-collection rule create -g "$RG_HUB" \
-  --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
-  --rule-collection-name spokea --rule-name deny-hub-to-a \
-  --priority 100 --direction Inbound --access Deny --protocol Tcp \
-  --sources address-prefix="$hub_ip/32" address-prefix-type=IPPrefix \
-  --source-port-ranges 0-65535 --destinations address-prefix="$a_ip/32" address-prefix-type=IPPrefix \
-  --dest-port-ranges 8080 -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-`deny-hub-to-a`의 주소·포트와 priority `100`을 확인합니다. 아직 적용 전입니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-admin-deny -->
-```bash
-assert_admin_rules_ready "$hub_ip" "$a_ip" "$b_ip" denied
-```
-
-📋 **확인**
-
-두 Group의 적용 범위와 `Deny`, `Inbound`, `Tcp`, `8080`, Hub/A 각각 `/32`,
-우선순위 `100`을 현재 규칙 응답에서 검사합니다.
-
-🟢 **실행**
-
-<!-- exec:security-deploy-deny -->
-```bash
-az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
-  --commit-type SecurityAdmin --configuration-ids "$AVNM_ID/securityAdminConfigurations/sc-lzbegin-http-$RUN_ID" \
-  --target-locations "$LOCATION" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-변경된 동일 구성을 리전에 재배포했습니다. 전파 판정은 다음 블록에서 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:verify-admin-deny -->
-```bash
-check_admin_flow spokea "$a_ip" "$hub_ip" Deny deny-hub-to-a
-```
-
-📋 **확인**
-
-Spoke A의 effective 규칙에 `Deny`와 **이번 임시 규칙의 전체 ID**가 표시됩니다.
-우연한 NSG Deny가 아님은 다음 HTTP 차단과 구성 상태를 함께 대조합니다.
-
-🟢 **실행**
-
-<!-- exec:verify-admin-http-denied -->
-```bash
-check_denied_http() {
-  http_proof "$STATE_FILE" hub "$a_ip" blocked || return 1
-  http_proof "$STATE_FILE" hub "$b_ip" spokeb || return 1
-  bash scripts/run-vm.sh "$STATE_FILE" spokea scripts/guest-server.sh
-}
-check_denied_http
-```
-
-📋 **확인**
-
-새 Hub→A 연결은 실패하지만 Hub→B는 성공하고 A 로컬 HTTP 서비스는 살아 있습니다.
-HTTP 실패 단독으로 보안 규칙의 원인을 판단하지 않습니다.
-
-### 6-2. 임시 규칙 제거와 리전 재배포
-
-⚠️ **주의**
-
-차단 증거 수집이 실패했더라도 **복구를 진행합니다**. AVNM은 배포 중인
-Security Admin 구성의 규칙 삭제를 거부하므로 먼저 이 구성만 리전에서 배포 해제하고,
-상태 확인 후 임시 Deny를 삭제·재배포합니다. 해제 중에는 세 `AlwaysAllow`도
-잠시 적용되지 않아 통신이 끊길 수 있습니다. NSG·Firewall 구성은 변경하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:security-undeploy-for-restore -->
-```bash
-undeploy_security_for_restore() {
-  az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
-    --commit-type SecurityAdmin --configuration-ids '[]' \
-    --target-locations "$LOCATION" -o json --subscription "$SUBSCRIPTION_ID" || return 1
-  assert_security_admin_undeployed
-}
-undeploy_security_for_restore
-```
-
-📋 **확인**
-
-최신 `SecurityAdmin` 배포가 구성 ID 없는 `Deployed` 상태여야 합니다.
-아직 적용 중이라면 잠시 기다렸다가 **아래 삭제 블록은 실행하지 말고**
-배포 상태를 다시 확인하세요.
-
-🟢 **실행**
-
-<!-- exec:restore-hub -->
-```bash
-restore_hub_admin_rule() {
-  assert_security_admin_undeployed || return 1
-  az network manager security-admin-config rule-collection rule delete -g "$RG_HUB" \
-    --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
-    --rule-collection-name spokea --rule-name deny-hub-to-a \
-    --yes --subscription "$SUBSCRIPTION_ID"
-}
-restore_hub_admin_rule
-```
-
-📋 **확인**
-
-임시 Deny만 삭제됐습니다. 삭제 응답만으로 적용된 규칙이 사라졌다고 가정하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-admin-restored -->
-```bash
-assert_admin_rules_ready "$hub_ip" "$a_ip" "$b_ip" restored
-```
-
-📋 **확인**
-
-두 컬렉션의 세 AlwaysAllow가 올바릅니다. 임시 Deny의 **부재**도 다음 조회에서
-확인한 뒤 재배포합니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-deny-absent -->
-```bash
-check_deny_absent() {
-  local rules
-  rules=$(az network manager security-admin-config rule-collection rule list -g "$RG_HUB" \
-    --network-manager-name "$AVNM" --configuration-name "sc-lzbegin-http-$RUN_ID" \
-    --rule-collection-name spokea -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length == 1 and
-    .[0].name == "hub-to-a"' <<<"$rules" >/dev/null || return 1
-  printf 'PASS: temporary Deny absent\n'
-}
-check_deny_absent
-```
-
-📋 **확인**
-
-Spoke A 컬렉션에 `hub-to-a`만 남았습니다. 누락되거나 다른 규칙이 있으면 재배포 전에 바로잡습니다.
-
-🟢 **실행**
-
-<!-- exec:security-deploy-restore -->
-```bash
-az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
-  --commit-type SecurityAdmin --configuration-ids "$AVNM_ID/securityAdminConfigurations/sc-lzbegin-http-$RUN_ID" \
-  --target-locations "$LOCATION" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-복구 구성을 **같은 리전**에 다시 배포했습니다. 최종 판정과 통신 증거를 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:verify-admin-restored -->
-```bash
-check_admin_flow spokea "$a_ip" "$hub_ip" Allow hub-to-a
-```
-
-📋 **확인**
-
-Hub→A에 다시 AlwaysAllow가 적용되고 임시 Deny는 더 이상 우선하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:verify-admin-http-restored -->
-```bash
-check_baseline_http
-```
-
-📋 **확인**
-
-Hub→A/B와 A→B의 새 HTTP 세 건이 다시 성공합니다. CLI 배포 응답과 **실제 통신 복구**를 구분하세요.
-
 ## Portal 확인·트러블슈팅
 
 👁️ **설명**
 
 **Virtual Network Manager → 이번 AVNM → Configurations → Security admin configurations**에서
-Spoke Group 대상 컬렉션, 세 AlwaysAllow와 Deny 부재를 확인하세요.
+Spoke Group 대상 컬렉션과 세 AlwaysAllow를 확인하세요.
 **VM → Networking → Effective security rules**에서 중앙 규칙과 Subnet NSG의
 `deny-other-vnet-inbound`(4000)를 함께 확인합니다. AlwaysAllow는 NSG Deny를 **우회**하지
 NSG 규칙을 삭제하지 않습니다. **NIC → Effective routes**에서 `/16`과 `/0`의
@@ -774,14 +554,14 @@ VirtualAppliance IP를 확인하세요.
 | VM Run Command 실패 | Spoke NIC의 `/0` → Firewall, Firewall 관리 HTTPS 규칙, VM Agent 상태 |
 | IP Flow Verify가 NSG Deny 반환 | 단독 판정하지 않고 effective Admin 규칙·실제 HTTP를 대조 |
 | effective Admin 규칙은 허용, HTTP는 실패 | 서비스, 양방향 `/16` 경로, Firewall TCP 8080 정책 |
-| 복구 후 Hub→A가 계속 Deny | 임시 규칙 삭제 읽기와 SecurityAdmin **재배포**·전파 확인 |
+| Hub→A가 실패 | Security Admin 배포·effective 규칙과 서비스 상태 확인 |
 
 ## 완료 체크
 
 - VM보다 먼저 Firewall·AVNM 경로를 확인했고 Spoke NAT/Public IP를 만들지 않았습니다.
 - Hub NAT만 연결하고 양쪽 Spoke NIC의 실제 `/16`·`/0` 경로를 확인했습니다.
-- 좁은 세 AlwaysAllow의 effective 규칙·HTTP 증거와 한 Deny의 차단·복구 증거를 확인했습니다.
-- 임시 Deny를 제거하고 같은 리전에 복구 구성을 재배포했습니다.
+- 좁은 세 AlwaysAllow의 effective 규칙과 Hub→A/B·A→B HTTP 성공을 확인했습니다.
+- Firewall Policy 차단·복구 실습은 모듈 06에서 한 번만 수행합니다.
 
 ## 다음 단계
 

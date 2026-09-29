@@ -135,8 +135,8 @@ A/B 사설 IP·TCP/8080·이번 Firewall 전체 ID를 대조해야 합니다. �
 Security Admin 구성은 `sc-lzbegin-http-<실행 ID>`, collection은 `spokea`와
 `spokeb`입니다. 현재 NIC IP의 `/32`를 대상으로 `spokea/hub-to-a`(200),
 `spokeb/hub-to-b`(210), `spokeb/a-to-b`(220)가 `AlwaysAllow`여야 합니다.
-모듈 05의 임시 `spokea/deny-hub-to-a`(100)는 **제거된 상태**여야 하며,
-이 모듈의 Firewall Deny 실험 중에도 다시 추가하지 않습니다.
+모듈 05에서는 임시 Security Admin Deny를 만들지 않습니다. Firewall Deny 실험
+중에도 AVNM 규칙은 변경하지 않습니다.
 
 🟢 **실행**
 
@@ -148,8 +148,49 @@ bash scripts/verify-extension.sh "$STATE_FILE" allowed
 📋 **확인**
 
 세 HTTP 흐름과 **새 Allow 로그**, Spoke A/B의 Firewall Public IP egress 및
-실제 외부 목적지로의 유효 경로가 함께 PASS여야 합니다. 스크립트가 보고하는
-`EGRESS`는 외부 서비스가 본 공인 출발지이며 Spoke NAT IP가 아닙니다.
+실제 외부 목적지로의 유효 경로가 함께 PASS여야 합니다.
+
+실제 실행 결과의 **발췌 예시**입니다. 구독·실행 ID와 시각은 실행마다 다릅니다.
+반복되는 CLI Preview 경고와 `--ids` 사용 시 구독 옵션 경고는 생략했습니다.
+
+```text
+PASS: Enforced Connectivity is effective on both spokes; four forwarded peerings are connected.
+PASS: 10.20.1.4 /16 -> VirtualAppliance
+PASS: 10.10.1.4 /16 -> VirtualAppliance
+PASS: 8.8.8.8 /0 -> VirtualAppliance
+PASS: 8.8.8.8 /0 -> VirtualAppliance
+PASS: 10.10.1.4 /16 -> VNetPeering
+PASS: 10.20.1.4 /16 -> VNetPeering
+PASS: effective AVNM rule spokea/hub-to-a (AlwaysAllow)
+PASS: effective AVNM rule spokeb/a-to-b (AlwaysAllow)
+PASS: HTTP spokea
+PASS: HTTP spokeb
+PASS: HTTP spokeb
+Waiting for current flow logs (1/20).
+...
+[
+  {
+    "Action": "Allow",
+    "SourceIp": "10.10.1.4",
+    "DestinationIp": "10.20.1.4",
+    "DestinationPort": "8080",
+    "TimeGenerated": "<이번 요청 이후 UTC 시각>",
+    "_ResourceId": "<이번 Firewall 전체 resource ID>"
+  }
+]
+PASS: matching Firewall Allow evidence found.
+PASS: 104.26.12.205 /0 -> VirtualAppliance
+PASS: 172.67.74.152 /0 -> VirtualAppliance
+PASS: extension allowed has matching AVNM routes, admin rules, HTTP, Firewall log and egress evidence.
+```
+
+`/16`·`/0`의 `VirtualAppliance`는 Spoke 왕복·인터넷 경로가 Firewall을 향함을,
+`VNetPeering`은 Hub→Spoke 직접 경로를 뜻합니다. `AlwaysAllow`와 HTTP 응답은
+중앙 규칙 적용 및 실제 통신을, 새 `AZFWNetworkRule`의 A→B `Allow`는 Firewall
+경유를 증명합니다. `Waiting for current flow logs`는 이번 요청의 로그를
+기다리는 정상 동작입니다. 마지막 `/0` 두 줄은 조회한 외부 IP로의 경로이며,
+최종 PASS는 egress 검사까지 통과했다는 뜻입니다. 외부 IP 값은 달라질 수 있습니다.
+
 검증 실패는 허용의 증거가 아닙니다. 로그 수집이 늦다면 최대 10분 기다린 뒤
 **새 요청을 보내는 검증 전체**를 다시 실행하세요.
 
@@ -158,9 +199,9 @@ bash scripts/verify-extension.sh "$STATE_FILE" allowed
 👁️ **설명**
 
 AVNM Routing·Security Admin 규칙과 관리/HTTPS egress collection은 그대로 두고
-`lab-http` collection의 action만 바꿉니다. 모듈 05의 Security Admin Hub→A
-차단 실험과 다릅니다. Firewall Deny는 **A→B**만 차단하며 Hub→A/B는 유지돼야
-합니다. 각 전환 전 Subnet·NIC 경로 및 NAT 부재를 다시 검사합니다. Policy 전파
+`lab-http` collection의 action만 바꿉니다. 이 워크숍의 유일한 차단·복구 실험입니다.
+Firewall Deny는 **A→B**만 차단하며 Hub→A/B는 유지돼야 합니다.
+각 전환 전 Subnet·NIC 경로 및 NAT 부재를 다시 검사합니다. Policy 전파
 중에는 이전 상태가 잠시 보일 수 있습니다.
 
 ### 4-1. `lab-http` Deny

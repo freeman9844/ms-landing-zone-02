@@ -30,8 +30,8 @@ Firewall과 중앙 경로는 모듈 04, VM·Hub NAT·Security Admin은 모듈 05
 `AZFWNetworkRule`·`AZFWApplicationRule` 전용 category를 확인한 뒤 생성하고,
 저장된 workspace/두 category도 다시 읽습니다. 모듈 05의 Security Admin 규칙은
 세 VM의 실제 NIC IP 조회가 성공해야 만들며, `AlwaysAllow`가 기존 NSG Deny를
-우회한다는 점을 함께 설명합니다. 임시 Security Admin Deny를 제거하지 못했다면
-모듈 06 Firewall 실험으로 넘어가지 않습니다.
+우회한다는 점을 함께 설명합니다. 모듈 05에서는 임시 Deny를 만들지 않고
+모듈 06에서만 Firewall Policy 차단·복구를 실습합니다.
 재접속·상태 파일 변경·실습/구독 전환 시 준비를 다시 수행하도록 안내합니다.
 직접 Azure 자원 명령은 `--subscription "$SUBSCRIPTION_ID"`로 대상을 고정합니다.
 모듈 03–06은 공통 준비에서 세 RG의 소유권을 한 번 확인하고, 일반 작업의 중복 `assert`는 생략합니다.
@@ -66,8 +66,8 @@ Connectivity 구성을 `Enforced`로 재배포·적용 확인합니다. 그 후 
 `/0`을 같은 Firewall 사설 IP로 보내는 AVNM Routing을 배포합니다. 양쪽
 Subnet의 적용을 확인하되 관리형 route table 이름·RG·태그는 가정하지 않습니다.
 모듈 05의 VM 생성 후 양쪽 NIC의 Active `/16`·`/0`을 재확인합니다.
-Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개와 더 높은 우선순위의
-임시 Hub→A Deny를 한 구성의 지역 배포/재배포로 검증합니다.
+Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개를 한 구성의 지역 배포로
+검증하며, effective 규칙과 실제 HTTP 성공을 함께 확인합니다.
 모듈 06은 Firewall `lab-http` Allow→Deny→Allow에서 새 HTTP 요청과 **매번
 새 UTC 시각 이후의 `AZFWNetworkRule` 로그**, 두 Spoke의 Firewall egress를
 검증합니다. 로그 지연이나 AVNM 비동기 적용에는 읽기 전용 재조회로 대응합니다.
@@ -89,7 +89,7 @@ Security Admin은 좁은 TCP/8080 `AlwaysAllow` 세 개와 더 높은 우선순�
 기존 운영 기초·종료 선택 모듈은 내용 전체를 제거했으며 다른 모듈로 이관하지 않았습니다.
 AVNM의 Connectivity·Routing·Security Admin, Firewall 허용/차단/복구와
 Hub NAT만 정규 과정입니다. Spoke NAT 제거 단계는 존재하지 않습니다.
-README의 목표 시간 합계는 **185–220분**이며 Azure 배포·AVNM 전파·로그 수집·삭제
+README의 목표 시간 합계는 **175–210분**이며 Azure 배포·AVNM 전파·로그 수집·삭제
 대기 때문에 더 길어질 수 있습니다.
 중간 실패·중단 시의 cleanup 경로는 계속 제공하되 별도의 기본 과정 완료 분기로 안내하지 않습니다.
 
@@ -97,8 +97,9 @@ README의 목표 시간 합계는 **185–220분**이며 Azure 배포·AVNM 전�
 별도의 Firewall 사전 점검은 수행하지 않습니다. `preflight.sh "$STATE_FILE"`은
 모듈 01과 05에서 실제 VM 수요에 따른 SKU·vCPU quota를 확인합니다.
 성공해도 용량 예약은 아닙니다.
-`verify-core.sh "$STATE_FILE" baseline|admin-denied|restored`는 모듈 05의
-Security Admin/HTTP·NIC 경로 증거를, `verify-extension.sh "$STATE_FILE"
+모듈 05의 Security Admin/HTTP·NIC 경로는 교재의 독립 실행 블록으로 확인합니다.
+`verify-core.sh`의 `admin-denied`·`restored` 모드는 이전 실습의 진단용이며 현재
+진행 순서에서는 사용하지 않습니다. `verify-extension.sh "$STATE_FILE"
 allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 증거를 담당합니다.
 이 파일명은 이전 과정과 같지만 검증 의미는 달라졌으며 `--extension` 옵션은
 현재 계약에 없습니다.
@@ -132,8 +133,8 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
   사설 IP로 지정합니다. 두 Group을 합치거나 중복 충돌 `/0`을 배포하지 않습니다.
 - 모듈 05의 Security Admin 구성 `sc-lzbegin-http-$RUN_ID`는 대상 Group이 분리된
   `spokea`·`spokeb` collection으로 실제 VM IP의 TCP/8080 `AlwaysAllow`를 배포합니다.
-  임시 Hub→A Deny는 우선순위가 높고 복구 시 삭제 후 지역에 재배포해야 합니다.
-  기존 NSG deny를 지우거나 Security Admin `Allow`로 대체하면 기준 상태가 달라집니다.
+  모듈 05에서는 임시 Hub→A Deny를 만들지 않습니다. 기존 NSG deny를 지우거나
+  Security Admin `AlwaysAllow`를 일반 `Allow`로 대체하면 기준 상태가 달라집니다.
 - 직접 A↔B connectivity, global mesh, hub gateway 공유, 수동 peering deletion,
   동적 membership은 이 과정의 변경 대상이 아닙니다.
 
@@ -151,7 +152,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
 | `verify-common.sh`, `assert-route.py` | IP·effective Security Admin 규칙·HTTP 증거와 최장 접두사 NIC 유효 경로 판정 |
-| `verify-core.sh`, `verify-extension.sh` | 모듈 05 Admin baseline/admin-denied/restored와 모듈 06 Firewall allowed/denied/restored의 독립 증거 |
+| `verify-core.sh`, `verify-extension.sh` | Security Admin baseline 검증(이전 Deny/복구 진단 모드는 유지)과 모듈 06 Firewall allowed/denied/restored의 독립 증거 |
 | `firewall-logs.sh` | 이번 흐름의 로그 필터, 수집 지연 대기와 조회 오류 구분 |
 | `cleanup.sh` | 정확한 삭제 범위, 사용자 확인, 삭제 요청 후 실제 부재 확인 |
 
@@ -202,7 +203,7 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 connectivity configuration/commit/effective-configuration의 호출 순서와 인수를 확인합니다.
 모듈 04–06 mock은 Firewall 선행, 서로 다른 Group 대상 `/16`·`/0` 경로와
 실제 Subnet/NIC 적용, VM·Hub NAT만 생성, Security Admin의
-`baseline|admin-denied|restored` 및 Firewall의 `allowed|denied|restored`
+baseline 및 Firewall의 `allowed|denied|restored`
 증거를 검사합니다. 실제 NIC IP와 관리자 규칙의 범위·우선순위·동작, 단측 경로,
 늦은 배포, 불완전한 Firewall 및 Spoke NAT/PIP가 있으면 실패해야 합니다.
 상태·복구 테스트는 schema 2/topology 거부, generated-name 불안정성에 영향받지 않는
