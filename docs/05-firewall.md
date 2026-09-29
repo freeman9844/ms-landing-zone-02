@@ -227,9 +227,8 @@ assert_no_spoke_nat
 📋 **확인**
 
 두 Spoke Subnet 모두 NAT 연결이 없으며 이번 실행의 Spoke NAT/Public IP도 없습니다.
-공유 리전 Network Watcher를 삭제하거나 태그를 바꾸지 않습니다.
 
-## 3. NIC에 실제 적용된 경로와 진단 도구 확인
+## 3. NIC에 실제 적용된 경로 확인
 
 👁️ **설명**
 
@@ -274,63 +273,6 @@ check_vm_effective_routes
 Spoke A에는 `10.20.0.0/16`, Spoke B에는 `10.10.0.0/16`, 양쪽에는
 `0.0.0.0/0`이 `Active`·`VirtualAppliance`·동일 Firewall 사설 IP입니다.
 다른 next hop이나 비활성 경로를 통과로 해석하지 않습니다.
-
-### 3-1. 공유 Network Watcher 재사용·필요한 경우에만 활성화
-
-👁️ **설명**
-
-[IP Flow Verify](https://learn.microsoft.com/azure/network-watcher/ip-flow-verify-overview)는
-NSG 진단에 유용하지만 이 환경에서 AVNM `AlwaysAllow`의 실제 판정과 달리 NSG
-`Deny`를 반환할 수 있습니다. 따라서 이 모듈의 허용·차단 증거로 단독 사용하지
-않습니다. 리전 Network Watcher는 VNet 생성 시 자동 활성화됐을 수 있습니다.
-기존 Watcher와 공유 `NetworkWatcherRG`의 태그를 변경하거나 실습 종료 시 삭제하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-watcher -->
-```bash
-az network watcher list --query "[?location=='$LOCATION'].id" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-ID가 있으면 재사용합니다. `[]`일 때만 다음 활성화 블록이 공유 RG를 만들 수 있습니다.
-조회 오류를 빈 배열로 해석하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:watcher-enable -->
-```bash
-ensure_region_watcher() {
-  local watchers exists
-  watchers=$(az network watcher list --query "[?location=='$LOCATION'].id" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<<"$watchers" >/dev/null || return 1
-  if [[ $(jq length <<<"$watchers") == 0 ]]; then
-    exists=$(az group exists --name NetworkWatcherRG -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-    case "$exists" in
-      true) printf '기존 공유 RG를 그대로 사용합니다.\n' ;;
-      false) az group create --name NetworkWatcherRG --location "$LOCATION" -o json \
-        --subscription "$SUBSCRIPTION_ID" || return 1 ;;
-      *) fail "Cannot determine whether NetworkWatcherRG exists"; return 1 ;;
-    esac
-    az network watcher configure --locations "$LOCATION" --enabled true \
-      --resource-group NetworkWatcherRG -o json --subscription "$SUBSCRIPTION_ID" || return 1
-  else
-    printf '기존 리전 Watcher를 사용합니다.\n'
-  fi
-  watchers=$(az network watcher list --query "[?location=='$LOCATION'].id" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and length > 0)' \
-    <<<"$watchers" >/dev/null || return 1
-}
-ensure_region_watcher
-```
-
-📋 **확인**
-
-기존 watcher 사용 메시지 또는 활성화 응답 뒤 리전 Watcher ID를 다시 확인합니다.
-공유 RG에는 이번 실행의 소유 태그를 붙이지 않습니다.
 
 ## 4. 응답 서비스와 VM 사설 IP
 

@@ -192,8 +192,8 @@ CLI 대체 응답은 [Azure CLI의 Linux 실행 기록](https://github.com/Azure
 `ProvisioningState/succeeded` 메시지에 `[stdout]`과 `[stderr]`를 함께 담습니다.
 분리된 `ComponentStatus` 응답도 지원하지만, API 성공만으로 게스트 성공을 간주하지 않습니다.
 실패한 게스트·누락된 종료 마커·stderr의 가짜 성공 마커·잘못된 응답 형식을 회귀 검사합니다.
-난수 ID와 기존 RG 충돌 거부, 기존 VM 재사용 시 quota 계산, Network Watcher
-신규 활성화와 공유 RG 보존도 로컬 회귀 검사에 포함됩니다.
+난수 ID와 기존 RG 충돌 거부, 기존 VM 재사용 시 quota 계산도 로컬 회귀 검사에 포함됩니다.
+현재 과정에서는 Network Watcher를 조회하거나 활성화하지 않으며, 정리 시 공유 RG도 삭제하지 않습니다.
 모듈 02–07의 개별 블록은 공통 준비 뒤 독립 실행하며, 실패한 조회/잘못된 응답,
 소유권 불일치, 승인 거절, Firewall/AVNM 배포 준비 누락과 Spoke NAT 부재를 검사합니다.
 `tests/test_docs.py`는 README와 활성 참가자 모듈에서 이전 수동-peering 링크와

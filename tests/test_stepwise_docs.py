@@ -19,13 +19,6 @@ def support_cases():
     cases = {
         "support-preview": [az(support_args("what-if"))],
         "support-deploy": [az([*support_args("create"), "-o", "json"])],
-        "inspect-watcher": [az(["network", "watcher", "list", "--query",
-                               "[?location=='koreacentral'].id", "-o", "json"], [])],
-        "watcher-enable": [az(["network", "watcher", "list", "--query",
-                              "[?location=='koreacentral'].id", "-o", "json"], []),
-                           az(["group", "exists", "--name", "NetworkWatcherRG", "-o", "tsv"], "true"),
-                           az(["network", "watcher", "configure", "--locations", "koreacentral",
-                               "--enabled", "true", "--resource-group", "NetworkWatcherRG", "-o", "json"])],
         "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
         "inspect-nat-hub": [az(["network", "vnet", "subnet", "show", *subnet_args("hub"),
@@ -592,8 +585,7 @@ class StepwiseDocsTests(unittest.TestCase):
                     or k.startswith("routing-collection-") or k.startswith("routing-rule-")
                     or k.startswith("routing-deploy-status")}
                  | enforcement_cases()),
-                (5, {k: v for k, v in support_cases().items() if k not in ("watcher-enable",)}
-                 | security_cases()),
+                (5, support_cases() | security_cases()),
                 (6, {k: v for k, v in routing_cases().items() if k.startswith("firewall-")}))
 
     def test_each_action_runs_after_only_preparation_with_explicit_targets(self):
@@ -913,17 +905,12 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertIn('"DefaultOutbound": true', result.stdout)
             self.assertNotIn("PASS", result.stdout)
 
-    def test_shared_watcher_is_preserved_and_malformed_discovery_never_enables(self):
-        listing = support_cases()["watcher-enable"][0]
-        for value, success in ((["/existing/watcher"], True), (None, False), ({}, False), ("malformed", False)):
-            altered = copy.deepcopy(listing)
-            altered["stdout"] = json.dumps(value)
-            calls = [altered, az(["network", "watcher", "list", "--query",
-                                "[?location=='koreacentral'].id", "-o", "json"], ["/existing/watcher"])]
-            if success:
-                self.assertEqual(self.execute(5, "watcher-enable", calls).returncode, 0)
-            else:
-                self.assertNotEqual(self.execute(5, "watcher-enable", [altered]).returncode, 0)
+    def test_module05_effective_routes_need_no_watcher_activation(self):
+        steps = blocks(DOCS[5])
+        self.assertIn("effective-vm-routes", steps)
+        self.assertNotIn("inspect-watcher", steps)
+        self.assertNotIn("watcher-enable", steps)
+        self.assertNotIn("az network watcher", DOCS[5].read_text())
 
     def test_script_actions_remain_single_purpose_and_propagate_failures(self):
         cases = [
