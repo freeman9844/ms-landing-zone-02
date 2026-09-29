@@ -381,6 +381,34 @@ assert_avnm_routes_ready() {
   done
 }
 
+validate_effective_nic_routes() {
+  local fw_ip zone rg remote routes
+  fw_ip=$(firewall_ready_ip) || return 1
+  assert_avnm_routes_ready "$fw_ip" || return 1
+  for zone in spokea spokeb; do
+    if [[ "$zone" == spokea ]]; then
+      rg="$RG_SPOKEA"; remote=10.20.0.0/16
+    else
+      rg="$RG_SPOKEB"; remote=10.10.0.0/16
+    fi
+    routes=$(az network nic show-effective-route-table -g "$rg" \
+      -n "nic-lzbegin-$zone-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg remote "$remote" --arg ip "$fw_ip" '
+      . as $routes |
+      (.value | type == "array") and
+      all([$remote, "0.0.0.0/0"][];
+        . as $prefix |
+        any($routes.value[]; .state == "Active" and
+          (.addressPrefix | index($prefix)) != null and
+          .nextHopType == "VirtualAppliance" and
+          .nextHopIpAddress == [$ip])
+      )
+    ' <<< "$routes" >/dev/null ||
+      { fail "NIC effective /16 or /0 route is not ready: $zone"; return 1; }
+    printf 'PASS: %s NIC active %s and 0.0.0.0/0 -> %s\n' "$zone" "$remote" "$fw_ip"
+  done
+}
+
 # Spoke에는 실습용뿐 아니라 다른 NAT/PIP도 없어야 합니다. RG와 Subnet의 실제 상태를 대조합니다.
 assert_no_spoke_nat() {
   local zone rg subnet nats pips

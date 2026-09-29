@@ -155,7 +155,8 @@ def routing_cases():
                  "destination": {"type": "AddressPrefix", "destinationAddress": prefix},
                  "nextHop": {"nextHopType": "VirtualAppliance", "nextHopAddress": FW_IP}})]
     for name, action in (("firewall-deny", "Deny"), ("firewall-restore", "Allow")):
-        cases[name] = [az(["network", "firewall", "policy", "rule-collection-group", "show", "-g", rg("hub"),
+        prerequisites = [*effective_route_calls(), *no_spoke_nat_calls()] if action == "Deny" else []
+        cases[name] = [*prerequisites, az(["network", "firewall", "policy", "rule-collection-group", "show", "-g", rg("hub"),
                            "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop", "-o", "json"],
                           {"ruleCollections": [{"name": "egress-check"}, {"name": "management"},
                                                {"name": "lab-http", "action": {"type": "Allow" if action == "Deny" else "Deny"}}]}),
@@ -406,8 +407,6 @@ class StepwiseDocsTests(unittest.TestCase):
             "verify-admin-http-baseline", "verify-admin-http-denied", "verify-admin-http-restored"):
             prefix += steps["admin-flow-check"] + "\n"
             prefix += 'hub_ip=10.0.1.4; a_ip=10.10.1.4; b_ip=10.20.1.4\n'
-        if module == 6 and name == "firewall-deny":
-            prefix += "validate_effective_nic_routes() { :; }\nassert_no_spoke_nat() { :; }\n"
         return test_network_docs.NetworkDocsTests.execute(
             self, module, name, calls, input_text, files, prefix, state)
 
@@ -428,6 +427,15 @@ class StepwiseDocsTests(unittest.TestCase):
         steps06 = blocks(DOCS[6])
         for name in ("firewall-deny", "verify-denied", "firewall-restore", "verify-restored"):
             self.assertIn(name, steps06)
+
+    def test_firewall_deny_validates_routes_in_a_fresh_prepared_shell(self):
+        calls = routing_cases()["firewall-deny"]
+        self.assertEqual(self.execute(6, "firewall-deny", calls).returncode, 0)
+        invalid = copy.deepcopy(calls[:len(effective_route_calls())])
+        routes = json.loads(invalid[-1]["stdout"])
+        routes["value"][0]["nextHopIpAddress"] = ["10.0.2.5"]
+        invalid[-1]["stdout"] = json.dumps(routes)
+        self.assertNotEqual(self.execute(6, "firewall-deny", invalid).returncode, 0)
 
     def test_module_05_uses_hub_nat_update_result_without_duplicate_inspection(self):
         steps = blocks(DOCS[5])
@@ -857,7 +865,7 @@ class StepwiseDocsTests(unittest.TestCase):
         for name in ("firewall-deny", "firewall-restore"):
             for collections in ([], [{"name": "lab-http"}, {"name": "lab-http"}], None,
                                 {"not-an-array": {"name": "lab-http"}}):
-                calls = routing_cases()[name][:1]
+                calls = routing_cases()[name][:-1]
                 calls[-1]["stdout"] = json.dumps({"ruleCollections": collections})
                 self.assertNotEqual(self.execute(6, name, calls).returncode, 0)
 

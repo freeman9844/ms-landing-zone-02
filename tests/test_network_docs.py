@@ -812,7 +812,6 @@ printf 'SHELL_ALIVE\\n'
                             (5, "read-vm-ips"): ["assert_ipv4_in_subnet"] * 3,
                             (5, "inspect-security-rules"): ["assert_admin_rules_ready"],
                             (6, "validate-avnm-subnets"): ["assert_avnm_routes_ready", "assert_no_spoke_nat"],
-                            (6, "validate-effective-nic-routes"): ["assert_avnm_routes_ready"],
                             (6, "firewall-deny"): ["assert_no_spoke_nat"],
                         }.get((module, name), [])
                     self.assertEqual(assertions, expected)

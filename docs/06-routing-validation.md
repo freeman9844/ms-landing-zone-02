@@ -37,6 +37,7 @@ prepare_validation_session
 
 오류 없이 종료되어야 합니다. 검사는 읽기 전용이며 다른 실습의 구독·RG라면 중단합니다.
 `command not found`는 같은 셸에서 이 준비를 다시 실행해야 한다는 뜻입니다.
+이 준비에서 2단계와 4-1이 공유하는 경로 검사 함수를 읽습니다.
 
 ## 1. 배포 상태·Subnet 경로·Spoke NAT 부재
 
@@ -82,33 +83,6 @@ Subnet에 경로가 보여도 VM NIC에 적용되지 않았을 수 있습니다.
 
 <!-- exec:validate-effective-nic-routes -->
 ```bash
-validate_effective_nic_routes() {
-  local fw_ip zone rg remote routes
-  fw_ip=$(firewall_ready_ip) || return 1
-  assert_avnm_routes_ready "$fw_ip" || return 1
-  for zone in spokea spokeb; do
-    if [[ "$zone" == spokea ]]; then
-      rg="$RG_SPOKEA"; remote=10.20.0.0/16
-    else
-      rg="$RG_SPOKEB"; remote=10.10.0.0/16
-    fi
-    routes=$(az network nic show-effective-route-table -g "$rg" \
-      -n "nic-lzbegin-$zone-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg remote "$remote" --arg ip "$fw_ip" '
-      . as $routes |
-      (.value | type == "array") and
-      all([$remote, "0.0.0.0/0"][];
-        . as $prefix |
-        any($routes.value[]; .state == "Active" and
-          (.addressPrefix | index($prefix)) != null and
-          .nextHopType == "VirtualAppliance" and
-          .nextHopIpAddress == [$ip])
-      )
-    ' <<< "$routes" >/dev/null ||
-      { fail "NIC effective /16 or /0 route is not ready: $zone"; return 1; }
-    printf 'PASS: %s NIC active %s and 0.0.0.0/0 -> %s\n' "$zone" "$remote" "$fw_ip"
-  done
-}
 validate_effective_nic_routes
 ```
 
@@ -210,6 +184,8 @@ Firewall Deny는 **A→B**만 차단하며 Hub→A/B는 유지돼야 합니다.
 
 현재 목록에서 정확히 하나의 `lab-http` 위치만 찾습니다. 사전 검사 실패 시 Policy를
 바꾸지 마세요. 상태 검사는 Allow인 기준 상태에서 수행합니다.
+`validate_effective_nic_routes`는 공통 준비에서 읽으므로, 재접속했다면 **공통 준비만**
+다시 실행하세요. 2단계 블록을 재실행하지 않아도 현재 NIC 경로를 다시 검사합니다.
 
 🟢 **실행**
 
