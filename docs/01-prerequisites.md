@@ -122,6 +122,7 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 | `jq -e`, `<<< "$값"` | JSON의 조건을 검사하고 실패를 종료 코드로 알림 / 변수 내용을 명령의 입력으로 전달합니다. |
 
 `source scripts/workshop-common.sh`는 다음 **교재 전용 함수**를 현재 셸에 읽습니다.
+공유 pool 검사 함수는 `source scripts/workshop-ipam.sh`로 읽습니다.
 이 함수들은 Azure CLI 자체 명령이 아닙니다.
 
 | 함수 | 하는 일 |
@@ -129,6 +130,7 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 | `new_run` | 새 난수 ID와 로컬 상태 JSON을 준비합니다. Azure RG 이름 충돌을 조회하지만 RG를 만들지는 않습니다. |
 | `load_run` | 이전 실습·구역 변수를 비운 뒤 JSON을 검증하고 `RUN_ID`, `LOCATION`, 세 RG 이름 등을 복구합니다. 실패하면 대상 변수는 미설정 상태입니다. |
 | `assert_subscription` | 활성 구독과 상태 파일의 구독이 같은지 확인합니다. 임의로 구독을 바꾸지 않습니다. |
+| `assert_shared_ipam_pool` | 운영자 공유 pool의 전체 ID·구독·리전·범위·준비 상태를 읽기 전용으로 검증합니다. |
 | `assert_owned_rg` | 정확한 RG 이름·구독·네 가지 소유 태그를 확인합니다. 태그는 실수 방지 장치이지 RBAC 권한 경계가 아닙니다. |
 
 `zone_context`는 내부 검증 스크립트에서 구역별 이름을 선택할 때만 사용합니다.
@@ -150,10 +152,17 @@ source하므로 검증 실패가 Cloud Shell 전체를 종료하지 않습니다
 
 ```bash
 # 공통 함수를 읽기만 합니다. 이 줄 자체는 Azure 리소스를 만들지 않습니다.
-source scripts/workshop-common.sh
-read -rp "실습 Azure subscription ID: " SELECTED_SUBSCRIPTION
-# 구독 선택이 성공한 경우에만 새 실습 JSON을 만들고, 그 경로를 이후 단계에 전달합니다.
+source scripts/workshop-common.sh &&
+source scripts/workshop-ipam.sh &&
+# 이전 실습 상태 경로·pool ID가 새 실행의 실패 뒤에 남지 않도록 비웁니다.
+clear_run &&
+unset STATE_FILE &&
+read -rp "실습 Azure subscription ID: " SELECTED_SUBSCRIPTION &&
+# 선택 구독과 공유 pool을 읽기 전용으로 확인한 뒤에만 새 실습 JSON을 만듭니다.
 az account set --subscription "$SELECTED_SUBSCRIPTION" &&
+  SUBSCRIPTION_ID="${SELECTED_SUBSCRIPTION,,}" &&
+  assert_subscription &&
+  assert_shared_ipam_pool &&
   STATE_FILE=$(new_run "$SELECTED_SUBSCRIPTION" koreacentral) &&
   export STATE_FILE &&
   load_run "$STATE_FILE" &&
@@ -170,10 +179,14 @@ az account set --subscription "$SELECTED_SUBSCRIPTION" &&
 태그가 같아도 새 실습 생성을 거부하며, 상태 파일을 만들지 않습니다.
 충돌 오류이면 이 블록을 다시 실행해 새 ID를 받으세요.
 로컬 상태 파일도 덮어쓰지 않습니다. **기존 실습 재개에는 아래 상태 복구만 사용**하세요.
+공유 pool 검사에서 실패하면 새 상태 파일을 만들지 마세요. `az account show --query id -o tsv`로
+활성 구독을 확인하고 운영자에게 `rg-lzbegin-ipam`의 pool 존재 여부, Network Manager
+읽기·pool 사용 권한, Korea Central 및 `172.20.0.0/14` 구성을 문의하세요.
+조회가 실패하거나 다른 pool을 반환하면 임의 pool 또는 고정 CIDR로 대신하지 마세요.
 
 ⚠️ **주의**
 
-상태 JSON에는 구독, 리전, 실행 ID, RG 이름만 저장합니다.
+상태 JSON(schema 3)에는 구독, 리전, 실행 ID, RG 이름과 정확한 공유 pool ID만 저장합니다.
 토큰·비밀번호·SSH 개인 키를 추가하지 마세요.
 
 ## 4. Provider와 용량 확인

@@ -1,6 +1,6 @@
 import json
 import unittest
-from harness import run, call, account, group, STATE, SUB
+from harness import run, call, account, group, STATE, SUB, POOL_ID
 
 SOURCE = 'source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; '
 
@@ -27,6 +27,51 @@ printf '%s\n' \
             base + "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123",
         ])
 
+    def test_schema_three_round_trip_records_and_exports_exact_pool(self):
+        result = run(SOURCE + f'''
+create_run abc123 {SUB.upper()} koreacentral >/dev/null &&
+load_run .workshop-state/abc123.json &&
+printf '%s\\n' "$IPAM_POOL_ID" &&
+jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            POOL_ID, json.dumps({"schemaVersion": 3, "ipamPoolId": POOL_ID},
+                                separators=(",", ":")),
+        ])
+
+    def test_schema_two_rejected_with_legacy_resume_instructions(self):
+        old = dict(STATE, schemaVersion=2)
+        result = run(SOURCE + "load_run state.json",
+                     files={"state.json": json.dumps(old)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("workshop-pre-ipam-8d4781f", result.stderr)
+
+    def test_pool_id_must_be_exactly_derived_from_state_subscription(self):
+        for pool in (None, "", POOL_ID.replace(SUB, "22222222-2222-2222-2222-222222222222"),
+                     POOL_ID.replace("ipam-lzbegin-shared", "another"),
+                     POOL_ID.replace("rg-lzbegin-ipam", "another"), 42):
+            with self.subTest(pool=pool):
+                data = dict(STATE)
+                if pool is None:
+                    del data["ipamPoolId"]
+                else:
+                    data["ipamPoolId"] = pool
+                result = run(SOURCE + 'load_run state.json; '
+                             '[[ ! -v IPAM_POOL_ID && ! -v SUBSCRIPTION_ID ]]',
+                             files={"state.json": json.dumps(data)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Invalid or unreadable state file", result.stderr)
+
+    def test_multiple_json_states_in_one_file_cannot_mix_runs_or_pool_ids(self):
+        other = dict(STATE, runId="another", resourceGroups={
+            zone: f"rg-lzbegin-{zone}-another" for zone in ("hub", "spokea", "spokeb")})
+        result = run(SOURCE + 'load_run state.json; '
+                     '[[ ! -v RUN_ID && ! -v IPAM_POOL_ID ]]',
+                     files={"state.json": json.dumps(STATE) + "\n" + json.dumps(other)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Invalid or unreadable state file", result.stderr)
+
     def test_schema_one_and_other_topologies_are_rejected(self):
         for change in (
             {"schemaVersion": 1},
@@ -44,7 +89,9 @@ printf '%s\n' \
     def test_failed_reload_clears_previous_state_and_zone_targets_without_exiting(self):
         variables = ("RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB "
                      "AVNM NETWORK_GROUP CONNECTIVITY_CONFIG AVNM_ID NETWORK_GROUP_ID "
-                     "CONNECTIVITY_CONFIG_ID RG SUBNET PREFIX VNET VM NSG")
+                     "CONNECTIVITY_CONFIG_ID IPAM_POOL_ID HUB_VNET_CIDR SPOKEA_VNET_CIDR "
+                     "SPOKEB_VNET_CIDR HUB_MANAGEMENT_CIDR HUB_FIREWALL_CIDR "
+                     "SPOKEA_WORKLOAD_CIDR SPOKEB_WORKLOAD_CIDR RG SUBNET PREFIX VNET VM NSG")
         for path, files in (
             ("missing.json", {}),
             ("bad.json", {"bad.json": '{"schemaVersion":999}'}),
@@ -73,9 +120,13 @@ load_run state.json && zone_context hub &&
     def test_switching_state_drops_zone_targets_from_previous_run(self):
         result = run(SOURCE + f'''
 load_run state.json && zone_context spokea &&
+  export HUB_VNET_CIDR=stale SPOKEA_VNET_CIDR=stale SPOKEB_VNET_CIDR=stale &&
+  export HUB_MANAGEMENT_CIDR=stale HUB_FIREWALL_CIDR=stale &&
+  export SPOKEA_WORKLOAD_CIDR=stale SPOKEB_WORKLOAD_CIDR=stale &&
   create_run abc123 {SUB} koreacentral >/dev/null &&
   load_run .workshop-state/abc123.json || exit 90
-for name in RG SUBNET PREFIX VNET VM NSG; do
+for name in HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR HUB_MANAGEMENT_CIDR \
+  HUB_FIREWALL_CIDR SPOKEA_WORKLOAD_CIDR SPOKEB_WORKLOAD_CIDR RG SUBNET PREFIX VNET VM NSG; do
   [[ ! -v "$name" ]] || {{ printf 'STALE:%s\\n' "$name"; exit 91; }}
 done
 zone_context spokeb && printf '%s %s %s\\n' "$RUN_ID" "$LOCATION" "$RG"
@@ -160,7 +211,7 @@ printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
         self.assertIn("state", result.stderr)
 
     def test_rejects_unknown_schema_and_shell_injection(self):
-        for field, value in (("schemaVersion", 3), ("runId", "$(touch escaped)"),
+        for field, value in (("schemaVersion", 4), ("runId", "$(touch escaped)"),
                              ("subscriptionId", "not-a-subscription")):
             with self.subTest(field=field):
                 data = dict(STATE, **{field: value})

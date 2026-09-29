@@ -7,8 +7,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SUB = "11111111-1111-1111-1111-111111111111"
+POOL_ID = (f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-ipam/providers/"
+           "Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
+           "ipamPools/ipam-lzbegin-shared")
 STATE = {
-    "schemaVersion": 2, "topology": "avnm-hub-spoke", "runId": "demo123", "subscriptionId": SUB,
+    "schemaVersion": 3, "topology": "avnm-hub-spoke", "runId": "demo123",
+    "subscriptionId": SUB, "ipamPoolId": POOL_ID,
     "location": "koreacentral",
     "resourceGroups": {
         "hub": "rg-lzbegin-hub-demo123",
@@ -37,7 +41,7 @@ def group(zone):
 
 
 def run(script, calls=(), files=None, input_text=None):
-    with tempfile.TemporaryDirectory() as directory:
+    with tempfile.TemporaryDirectory(dir=ROOT) as directory:
         work = Path(directory)
         binary = work / "bin"
         binary.mkdir()

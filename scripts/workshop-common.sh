@@ -11,11 +11,12 @@ fail() {
 # 지정한 실행 ID의 로컬 복구 파일만 만듭니다. Azure에 이미 있는 실습의 상태 복구에도 사용합니다.
 # 함수 본문을 별도 셸 (...)로 실행해 파일 권한 설정과 임시 파일 정리 trap을 바깥 셸과 분리합니다.
 create_run() (
-  local run_id="${1:-}" subscription="${2:-}" location="${3:-}" tmp path
+  local run_id="${1:-}" subscription="${2:-}" location="${3:-}" tmp path pool_id
   [[ "$run_id" =~ ^[a-z0-9]{6,12}$ ]] || { fail "runId: use 6-12 lowercase letters/digits."; return 1; }
   [[ "$subscription" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
     { fail "subscriptionId must be a UUID."; return 1; }
   [[ "$location" == "koreacentral" ]] || { fail "Invalid Azure location. Use koreacentral."; return 1; }
+  pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"
   # 상태 파일은 본인만 읽고 쓸 수 있게 하며, 기존 파일을 덮어쓰지 않습니다.
   umask 077
   mkdir -p .workshop-state || return 1
@@ -23,11 +24,12 @@ create_run() (
   [[ ! -e "$path" ]] || { fail "State exists: $path. Restore it; do not overwrite."; return 1; }
   tmp=$(mktemp .workshop-state/.new.XXXXXX) || return 1
   trap 'rm -f "$tmp"' EXIT
-  jq -n --arg id "$run_id" --arg sub "${subscription,,}" --arg loc "$location" '{
-    schemaVersion: 2,
+  jq -n --arg id "$run_id" --arg sub "${subscription,,}" --arg loc "$location" --arg pool "$pool_id" '{
+    schemaVersion: 3,
     topology: "avnm-hub-spoke",
     runId: $id,
     subscriptionId: $sub,
+    ipamPoolId: $pool,
     location: $loc,
     resourceGroups: {
       hub: ("rg-lzbegin-hub-" + $id),
@@ -63,10 +65,12 @@ new_run() (
 )
 
 clear_run() {
-  unset RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB \
+  unset RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
     AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID \
     ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID \
+    HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
+    HUB_MANAGEMENT_CIDR HUB_FIREWALL_CIDR SPOKEA_WORKLOAD_CIDR SPOKEB_WORKLOAD_CIDR \
     RG SUBNET PREFIX VNET VM NSG ||
     { fail "Cannot clear previous workshop variables."; return 1; }
 }
@@ -107,12 +111,20 @@ load_run() {
   local data
   # 복구 실패 후 별도 실행 블록이 이전 실습을 대상으로 삼지 않도록 파생 구역 변수도 비웁니다.
   clear_run || return 1
+  if jq -se 'length == 1 and (.[0] | type == "object" and .schemaVersion == 2)' "${1:-}" >/dev/null 2>&1; then
+    fail "Schema 2 run: resume with git tag workshop-pre-ipam-8d4781f"
+    return 1
+  fi
   # jq -e는 조건에 맞는 JSON이 없을 때도 실패합니다. JSON을 읽었다는 사실만으로 성공 처리하지 않습니다.
   # 실패 시 대상 변수는 미설정 상태입니다. 호출자는 &&/오류 처리로 후속 Azure 명령을 중단해야 합니다.
-  data=$(jq -ce '
-    select(type == "object" and .schemaVersion == 2 and .topology == "avnm-hub-spoke")
+  data=$(jq -cse '
+    if length == 1 then .[0] else empty end
+    |
+    select(type == "object" and .schemaVersion == 3 and .topology == "avnm-hub-spoke")
     | select(.runId | type == "string" and test("^[a-z0-9]{6,12}$"))
     | select(.subscriptionId | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+    | select(.ipamPoolId | type == "string")
+    | select(.ipamPoolId == ("/subscriptions/" + .subscriptionId + "/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"))
     | select(.location == "koreacentral")
     | select((.resourceGroups | keys) == ["hub", "spokea", "spokeb"])
     | select(.resourceGroups.hub == ("rg-lzbegin-hub-" + .runId))
@@ -122,6 +134,7 @@ load_run() {
   # 검증된 동일 JSON에서 값을 추출합니다. 복구는 환경 변수만 준비하며 Azure 자원을 생성하지 않습니다.
   RUN_ID=$(jq -r .runId <<< "$data")
   SUBSCRIPTION_ID=$(jq -r .subscriptionId <<< "$data")
+  IPAM_POOL_ID=$(jq -r .ipamPoolId <<< "$data")
   LOCATION=$(jq -r .location <<< "$data")
   RG_HUB=$(jq -r .resourceGroups.hub <<< "$data")
   RG_SPOKEA=$(jq -r .resourceGroups.spokea <<< "$data")
@@ -135,7 +148,7 @@ load_run() {
   ROUTE_GROUP_A_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokea-$RUN_ID"
   ROUTE_GROUP_B_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokeb-$RUN_ID"
   # 하위 스크립트도 같은 실습 정보를 사용하도록 환경 변수로 전달합니다.
-  export RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB \
+  export RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
     AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID
 }
