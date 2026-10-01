@@ -213,6 +213,12 @@ pool의 root prefix는 `172.20.0.0/14`, `provisioningState=Succeeded`여야 합�
 생성에 실패하면 현재 pool을 조회해 원인을 확인하고 새 실행을 만들지 마세요.
 주소 root가 기존 연결망·온프레미스와 겹치면 진행하지 않습니다.
 
+Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → `avnm-lzbegin-<실행 ID>` → IP address pools**에서
+생성된 pool을 열어 `Provisioning state: Succeeded`와 `Address prefixes: 172.20.0.0/14`를 확인할 수 있습니다.
+아래 화면의 실행 ID는 예시이며, 자신의 실행 ID를 사용하세요.
+
+![Azure Portal의 실행별 AVNM IP address pool Overview에 표시된 Succeeded 상태와 172.20.0.0/14 주소 범위](images/02-ipam-pool-overview.png)
+
 ### 1-4. Hub NSG
 
 👁️ **설명**
