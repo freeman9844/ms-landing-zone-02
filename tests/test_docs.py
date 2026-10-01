@@ -134,6 +134,20 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)
 
+    def test_first_cloud_shell_setup_shows_local_screenshots_before_clone(self):
+        text = (ROOT / "docs/01-prerequisites.md").read_text()
+        self.assertIn("### Cloud Shell 최초 준비", text)
+        start = text.index("### Cloud Shell 최초 준비")
+        clone = text.index('git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git')
+        paths = ["images/01-cloudshell-step4-ready.png",
+                 "images/01-cloudshell-step1-bash.png",
+                 "images/01-cloudshell-step2-storage.png",
+                 "images/01-cloudshell-step3-mount-storage.png"]
+        positions = [text.index(f"]({path})", start, clone) for path in paths]
+        self.assertEqual(positions, sorted(positions))
+        for path in paths:
+            self.assertTrue((ROOT / "docs" / path).is_file(), path)
+
     def test_avnm_extension_is_installed_before_new_run_inventory(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         install = re.search(r"<!-- exec:install-avnm-cli -->\s*```bash\n(.*?)\n```", text, re.S)

@@ -29,7 +29,49 @@ Firewall 시간·처리량 및 로그 수집·보존 비용을 포함하여 확�
 👁️ **설명**
 
 브라우저의 Cloud Shell Bash에서 Azure CLI와 교재 파일을 함께 사용합니다.
-교재를 clone한 폴더가 이후 명령의 기준 위치이며, 저장소 파일과 실습 상태 JSON을 구분해 보관합니다.
+처음 시작할 때 영구 스토리지를 연결하면 재접속 후에도 홈 디렉터리의
+clone 파일과 `.workshop-state/`의 실습 상태 JSON을 사용할 수 있습니다.
+교재를 clone한 폴더가 이후 명령의 기준 위치입니다.
+
+### Cloud Shell 최초 준비
+
+처음 Cloud Shell을 여는 경우 다음 순서로 준비합니다. 이미 Bash와 영구
+스토리지가 연결되어 있다면 이 설정을 반복하지 말고 아래 **워크숍 소스 준비**로 이동하세요.
+
+1. [Azure Portal](https://portal.azure.com)에 로그인해 상단 **Cloud Shell (`>_`)**을 열고 **Bash**를 선택합니다.
+
+   ![Cloud Shell 첫 실행에서 Bash를 선택하는 화면](images/01-cloudshell-step4-ready.png)
+
+2. **Getting started**에서 **Mount storage account**를 선택하고 **Storage account subscription**에서
+   실습에 사용할 구독을 선택한 뒤 **Apply**를 누릅니다.
+
+   ![Cloud Shell 영구 스토리지 방식과 구독을 선택하는 화면](images/01-cloudshell-step1-bash.png)
+
+3. **Mount storage account**에서 **We will create a storage account for you**를 선택하고 **Next**를 누릅니다.
+   이 단계는 별도의 Cloud Shell 스토리지 자원을 만들므로 해당 구독에 생성 권한이 필요합니다.
+
+   ![Cloud Shell 스토리지 계정 자동 생성을 선택하는 화면](images/01-cloudshell-step2-storage.png)
+
+4. 요청이 완료돼 Bash 프롬프트가 표시되면 다음 단계로 진행합니다.
+
+   ![Cloud Shell 요청 완료와 Bash 프롬프트가 표시된 화면](images/01-cloudshell-step3-mount-storage.png)
+
+위 화면은 [참고 워크숍의 Cloud Shell 준비 절차](https://github.com/freeman9844/aca-github-runner-workshop-private/blob/master/docs/01-prerequisites-github.md)에서
+재게시 허가를 받아 사용했습니다. Portal 화면과 표시 이름은 예시이므로 자신의 구독을 선택하세요.
+
+**No storage account required**를 선택하면 세션 종료 후 파일이 보존되지 않습니다.
+이미 임시 세션으로 시작했다면 상태 파일과 키를 먼저 안전하게 내려받은 다음
+Cloud Shell **Settings → Reset User Settings**를 선택하고 다시 열어 위 영구 스토리지
+연결 절차를 진행하세요. 새로 연 뒤에는 필요한 파일을 다시 업로드해야 합니다.
+[Microsoft Learn: 영구 스토리지로 Cloud Shell 시작](https://learn.microsoft.com/azure/cloud-shell/get-started/new-storage)에 화면별 설명이 있습니다.
+
+⚠️ **주의**
+
+Cloud Shell용 스토리지 계정·파일 공유는 **실습용 Hub/Spoke RG 세 개와 별개**이며
+모듈 07의 삭제 대상이 아닙니다. 보관 비용과 접근 권한을 별도로 관리하세요.
+홈 디렉터리에는 상태 파일·SSH 키 등이 보관될 수 있으므로 공유하지 마세요.
+
+### 워크숍 소스 준비
 
 ⚠️ **주의**
 
@@ -39,11 +81,7 @@ credential helper 또는 `gh auth login`을 사용하세요. PAT를 clone URL에
 
 🟢 **실행**
 
-1. [Azure Portal](https://portal.azure.com)에 로그인합니다.
-2. 상단 `>_` 아이콘을 눌러 **Bash**를 선택합니다.
-3. 지속적인 파일 보관이 필요하면 Cloud Shell 저장소를 연결합니다.
-   임시 세션을 사용한다면 종료 전에 상태 JSON을 다운로드해야 합니다.
-4. 접근 권한이 있는 GitHub 계정으로 다음 저장소를 복제합니다.
+Bash 프롬프트에서 접근 권한이 있는 GitHub 계정으로 다음 저장소를 복제합니다.
 
 ```bash
 # 이 독립 저장소의 루트가 현재 워크숍 경로입니다.
@@ -56,7 +94,9 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 
 📋 **확인**
 
-사용할 Azure 구독의 이름과 UUID가 표시됩니다.
+사용할 Azure 구독의 이름과 UUID가 표시됩니다. Cloud Shell 스토리지 구독을
+선택한 것만으로 CLI의 활성 구독이 반드시 같다고 가정하지 마세요. 3단계에서
+실습용 구독을 명시적으로 선택합니다.
 
 ### AVNM CLI 준비
 
