@@ -182,7 +182,7 @@ inspect_avnm_ready
 방금 만든 Hub AVNM 아래에 `ipam-lzbegin-<실행 ID>`를 만들고 주소 root
 `172.20.0.0/14`를 등록합니다. 기존 운영자 공유 RG나 pool을 사용하지 않습니다.
 재접속했다면 위 공통 준비와 `avnm-ready` 조회를 먼저 재실행하세요.
-pool이 이미 있다면 배포 명령을 반복하지 않고 정확한 ID·구성·준비 상태만 확인합니다.
+pool이 이미 있다면 생성 명령을 반복하지 않고 정확한 ID·구성·준비 상태만 확인합니다.
 `Updating`이면 조회만 다시 수행하고, 다른 pool이나 조회 실패이면 중단합니다.
 
 🟢 **실행**
@@ -191,7 +191,7 @@ pool이 이미 있다면 배포 명령을 반복하지 않고 정확한 ID·구�
 ```bash
 source scripts/workshop-ipam.sh &&
 create_run_ipam_pool() {
-  local manager pools deployment
+  local manager pools
   require_run_schema_four || return 1
   assert_owned_rg "$RG_HUB" || return 1
   manager=$(az network manager show --name "$AVNM" -g "$RG_HUB" \
@@ -210,15 +210,11 @@ create_run_ipam_pool() {
   if jq -e '.value | length == 1' <<< "$pools" >/dev/null; then
     assert_run_ipam_pool
   elif jq -e '.value | length == 0' <<< "$pools" >/dev/null; then
-    deployment=$(az deployment group create -g "$RG_HUB" \
-      --name "ipam-pool-$RUN_ID" --template-file infra/run-ipam-pool.bicep \
-      --parameters "runId=$RUN_ID" "location=$LOCATION" \
-      -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "${IPAM_POOL_ID,,}" '
-      .properties.provisioningState == "Succeeded" and
-      (.properties.outputs.poolId.value | ascii_downcase) == $id
-    ' <<< "$deployment" >/dev/null ||
-      { fail "IPAM pool deployment returned an unexpected ID or state."; return 1; }
+    az network manager ipam-pool create \
+      --name "ipam-lzbegin-$RUN_ID" --network-manager-name "$AVNM" \
+      -g "$RG_HUB" --location "$LOCATION" \
+      --address-prefixes '["172.20.0.0/14"]' \
+      -o json --subscription "$SUBSCRIPTION_ID" || return 1
     assert_run_ipam_pool
   else
     fail "Unexpected pool already exists under the run AVNM; do not overwrite it."
@@ -232,7 +228,7 @@ create_run_ipam_pool
 
 오류 없이 끝나면 `IPAM_POOL_ID`의 마지막 부분은 `ipam-lzbegin-<실행 ID>`입니다.
 pool의 root prefix는 `172.20.0.0/14`, `provisioningState=Succeeded`여야 합니다.
-배포에 실패하면 현재 pool을 조회해 원인을 확인하고 새 실행을 만들지 마세요.
+생성에 실패하면 현재 pool을 조회해 원인을 확인하고 새 실행을 만들지 마세요.
 주소 root가 기존 연결망·온프레미스와 겹치면 진행하지 않습니다.
 
 ### 1-4. Hub NSG

@@ -84,19 +84,28 @@ class SharedPoolTests(unittest.TestCase):
         result = run(SOURCE + 'load_run state.json && ' + block,
                      prefix + [call(listing, {"value": [pool]})] + checks)
         self.assertEqual(result.returncode, 0, result.stderr)
-        deploy = ["deployment", "group", "create", "-g", hub, "--name", "ipam-pool-demo123",
-                  "--template-file", "infra/run-ipam-pool.bicep",
-                  "--parameters", "runId=demo123", "location=koreacentral",
+        create = ["network", "manager", "ipam-pool", "create",
+                  "--name", "ipam-lzbegin-demo123",
+                  "--network-manager-name", "avnm-lzbegin-demo123",
+                  "-g", hub, "--location", "koreacentral",
+                  "--address-prefixes", '["172.20.0.0/14"]',
                   "-o", "json", "--subscription", SUB]
         result = run(SOURCE + 'load_run state.json && ' + block,
                      prefix + [call(listing, {"value": []}),
-                               call(deploy, {"properties": {"provisioningState": "Succeeded",
-                                                            "outputs": {"poolId": {"value": run_pool}}}})] +
+                               call(create, pool)] +
                      checks)
         self.assertEqual(result.returncode, 0, result.stderr)
         result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": []}),
+                               call(create, code=1, stderr="pool creation failed")])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pool creation failed", result.stderr)
+        result = run(SOURCE + 'load_run state.json && ' + block,
                      prefix + [call(listing, {"value": [{"id": "foreign"}]})] +
                      [group("hub"), call(pool_read, code=3, stderr="not found")])
+        self.assertNotEqual(result.returncode, 0)
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": [], "nextLink": "more"})])
         self.assertNotEqual(result.returncode, 0)
 
     def test_new_run_preflight_rejects_feature_conflicts_and_address_overlap(self):

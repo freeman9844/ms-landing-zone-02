@@ -166,7 +166,8 @@ class DocsTests(unittest.TestCase):
 
     def test_module_two_owns_pool_creation(self):
         doc = (ROOT / "docs/02-network-foundation.md").read_text()
-        self.assertIn("--template-file infra/run-ipam-pool.bicep", doc)
+        self.assertIn("az network manager ipam-pool create", doc)
+        self.assertNotIn("--template-file infra/run-ipam-pool.bicep", doc)
         self.assertIn("assert_run_ipam_pool", doc)
         self.assertNotIn("shared-ipam.bicep", doc)
 
