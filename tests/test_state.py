@@ -1,11 +1,29 @@
 import json
 import unittest
-from harness import run, call, account, group, STATE, SUB, POOL_ID
+from harness import run, call, account, group, STATE, SUB, POOL_ID, LEGACY_STATE
 
 SOURCE = 'source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; '
 
 
 class StateTests(unittest.TestCase):
+    def test_new_state_owns_hub_ipam_pool(self):
+        result = run(SOURCE + f'''
+create_run abc123 {SUB} koreacentral >/dev/null &&
+load_run .workshop-state/abc123.json &&
+printf '%s %s\\n' "$RUN_SCHEMA" "$IPAM_POOL_ID"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(),
+                         f"4 /subscriptions/{SUB}/resourceGroups/rg-lzbegin-hub-abc123/"
+                         "providers/Microsoft.Network/networkManagers/avnm-lzbegin-abc123/"
+                         "ipamPools/ipam-lzbegin-abc123")
+
+    def test_old_shared_pool_state_is_cleanup_only(self):
+        result = run(SOURCE + 'load_run state.json && require_run_schema_four',
+                     files={"state.json": json.dumps(LEGACY_STATE)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("schema 4", result.stderr)
+
     def test_state_exports_avnm_names_and_ids(self):
         result = run(SOURCE + r'''
 load_run state.json &&
@@ -27,7 +45,7 @@ printf '%s\n' \
             base + "/connectivityConfigurations/cc-lzbegin-hub-spoke-demo123",
         ])
 
-    def test_schema_three_round_trip_records_and_exports_exact_pool(self):
+    def test_schema_four_round_trip_records_and_exports_exact_pool(self):
         result = run(SOURCE + f'''
 create_run abc123 {SUB.upper()} koreacentral >/dev/null &&
 load_run .workshop-state/abc123.json &&
@@ -35,8 +53,9 @@ printf '%s\\n' "$IPAM_POOL_ID" &&
 jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
 ''')
         self.assertEqual(result.returncode, 0, result.stderr)
+        run_pool = POOL_ID.replace("demo123", "abc123")
         self.assertEqual(result.stdout.splitlines(), [
-            POOL_ID, json.dumps({"schemaVersion": 3, "ipamPoolId": POOL_ID},
+            run_pool, json.dumps({"schemaVersion": 4, "ipamPoolId": run_pool},
                                 separators=(",", ":")),
         ])
 
@@ -49,8 +68,8 @@ jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
 
     def test_pool_id_must_be_exactly_derived_from_state_subscription(self):
         for pool in (None, "", POOL_ID.replace(SUB, "22222222-2222-2222-2222-222222222222"),
-                     POOL_ID.replace("ipam-lzbegin-shared", "another"),
-                     POOL_ID.replace("rg-lzbegin-ipam", "another"), 42):
+                     POOL_ID.replace("ipam-lzbegin-demo123", "another"),
+                     POOL_ID.replace("rg-lzbegin-hub-demo123", "another"), 42):
             with self.subTest(pool=pool):
                 data = dict(STATE)
                 if pool is None:
@@ -87,7 +106,7 @@ jq -c '{{schemaVersion,ipamPoolId}}' .workshop-state/abc123.json
                 self.assertIn("Invalid or unreadable state file", result.stderr)
 
     def test_failed_reload_clears_previous_state_and_zone_targets_without_exiting(self):
-        variables = ("RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB "
+        variables = ("RUN_SCHEMA RUN_ID SUBSCRIPTION_ID LOCATION RG_HUB RG_SPOKEA RG_SPOKEB "
                      "AVNM NETWORK_GROUP CONNECTIVITY_CONFIG AVNM_ID NETWORK_GROUP_ID "
                      "CONNECTIVITY_CONFIG_ID IPAM_POOL_ID HUB_VNET_CIDR SPOKEA_VNET_CIDR "
                      "SPOKEB_VNET_CIDR HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR "
@@ -141,6 +160,10 @@ done
                       {"regex": f"rg-lzbegin-{zone}-[a-f0-9]{{12}}"}, "-o", "tsv"], value)
                 for zone, value in zip(("hub", "spokea", "spokeb"), values)]
 
+    def preflight_calls(self):
+        return [call(["network", "manager", "list", "--subscription", SUB, "-o", "json"], []),
+                call(["network", "vnet", "list", "--subscription", SUB, "-o", "json"], [])]
+
     def test_new_runs_use_distinct_ids_and_valid_recoverable_state(self):
         result = run(SOURCE + f'''
 set -e
@@ -151,7 +174,8 @@ load_run "$first"
 printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
 load_run "$second"
 printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
-''', [account(), *self.new_group_calls(), account(), *self.new_group_calls()])
+''', [account(), *self.preflight_calls(), *self.new_group_calls(),
+      account(), *self.preflight_calls(), *self.new_group_calls()])
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), 2)
@@ -166,7 +190,8 @@ printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
             with self.subTest(zone=index):
                 result = run(SOURCE + f'new_run {SUB} koreacentral; '
                              'rc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
-                             [account(), *self.new_group_calls(["false"] * index + ["true"])])
+                             [account(), *self.preflight_calls(),
+                              *self.new_group_calls(["false"] * index + ["true"])])
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn("already exists", result.stderr)
 
@@ -175,7 +200,8 @@ printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
             with self.subTest(value=value, code=code):
                 calls = self.new_group_calls([value])
                 calls[0]["returncode"] = code
-                result = run(SOURCE + f'new_run {SUB} koreacentral', [account(), *calls])
+                result = run(SOURCE + f'new_run {SUB} koreacentral',
+                             [account(), *self.preflight_calls(), *calls])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Cannot", result.stderr)
 
@@ -213,7 +239,7 @@ printf '%s %s\\n' "$RUN_ID" "$RG_HUB"
         self.assertIn("state", result.stderr)
 
     def test_rejects_unknown_schema_and_shell_injection(self):
-        for field, value in (("schemaVersion", 4), ("runId", "$(touch escaped)"),
+        for field, value in (("schemaVersion", 5), ("runId", "$(touch escaped)"),
                              ("subscriptionId", "not-a-subscription")):
             with self.subTest(field=field):
                 data = dict(STATE, **{field: value})

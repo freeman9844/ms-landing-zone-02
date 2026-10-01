@@ -16,7 +16,7 @@ create_run() (
   [[ "$subscription" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
     { fail "subscriptionId must be a UUID."; return 1; }
   [[ "$location" == "koreacentral" ]] || { fail "Invalid Azure location. Use koreacentral."; return 1; }
-  pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"
+  pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-hub-$run_id/providers/Microsoft.Network/networkManagers/avnm-lzbegin-$run_id/ipamPools/ipam-lzbegin-$run_id"
   # 상태 파일은 본인만 읽고 쓸 수 있게 하며, 기존 파일을 덮어쓰지 않습니다.
   umask 077
   mkdir -p .workshop-state || return 1
@@ -25,7 +25,7 @@ create_run() (
   tmp=$(mktemp .workshop-state/.new.XXXXXX) || return 1
   trap 'rm -f "$tmp"' EXIT
   jq -n --arg id "$run_id" --arg sub "${subscription,,}" --arg loc "$location" --arg pool "$pool_id" '{
-    schemaVersion: 3,
+    schemaVersion: 4,
     topology: "avnm-hub-spoke",
     runId: $id,
     subscriptionId: $sub,
@@ -48,6 +48,8 @@ new_run() (
   local run_id zone rg exists
   SUBSCRIPTION_ID="${1,,}"
   assert_subscription || return 1
+  source "$(dirname "${BASH_SOURCE[0]}")/workshop-ipam.sh" || return 1
+  assert_new_run_subscription || return 1
   run_id=$(python3 -c 'import secrets; print(secrets.token_hex(6))') ||
     { fail "Cannot generate a random run ID."; return 1; }
   # 세 RG 중 하나라도 이미 있으면 태그와 관계없이 거부합니다. 조회 실패도 부재로 취급하지 않습니다.
@@ -65,7 +67,7 @@ new_run() (
 )
 
 clear_run() {
-  unset RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
+  unset RUN_SCHEMA RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
     AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID \
     ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID \
@@ -120,11 +122,15 @@ load_run() {
   data=$(jq -cse '
     if length == 1 then .[0] else empty end
     |
-    select(type == "object" and .schemaVersion == 3 and .topology == "avnm-hub-spoke")
+    select(type == "object" and (.schemaVersion == 3 or .schemaVersion == 4) and .topology == "avnm-hub-spoke")
     | select(.runId | type == "string" and test("^[a-z0-9]{6,12}$"))
     | select(.subscriptionId | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
     | select(.ipamPoolId | type == "string")
-    | select(.ipamPoolId == ("/subscriptions/" + .subscriptionId + "/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"))
+    | select(.ipamPoolId == (if .schemaVersion == 3 then
+        "/subscriptions/" + .subscriptionId + "/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared"
+      else
+        "/subscriptions/" + .subscriptionId + "/resourceGroups/rg-lzbegin-hub-" + .runId + "/providers/Microsoft.Network/networkManagers/avnm-lzbegin-" + .runId + "/ipamPools/ipam-lzbegin-" + .runId
+      end))
     | select(.location == "koreacentral")
     | select((.resourceGroups | keys) == ["hub", "spokea", "spokeb"])
     | select(.resourceGroups.hub == ("rg-lzbegin-hub-" + .runId))
@@ -133,6 +139,7 @@ load_run() {
   ' "${1:-}") || { fail "Invalid or unreadable state file: ${1:-missing}"; return 1; }
   # 검증된 동일 JSON에서 값을 추출합니다. 복구는 환경 변수만 준비하며 Azure 자원을 생성하지 않습니다.
   RUN_ID=$(jq -r .runId <<< "$data")
+  RUN_SCHEMA=$(jq -r .schemaVersion <<< "$data")
   SUBSCRIPTION_ID=$(jq -r .subscriptionId <<< "$data")
   IPAM_POOL_ID=$(jq -r .ipamPoolId <<< "$data")
   LOCATION=$(jq -r .location <<< "$data")
@@ -148,9 +155,14 @@ load_run() {
   ROUTE_GROUP_A_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokea-$RUN_ID"
   ROUTE_GROUP_B_ID="$AVNM_ID/networkGroups/ng-lzbegin-route-spokeb-$RUN_ID"
   # 하위 스크립트도 같은 실습 정보를 사용하도록 환경 변수로 전달합니다.
-  export RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
+  export RUN_SCHEMA RUN_ID SUBSCRIPTION_ID LOCATION IPAM_POOL_ID RG_HUB RG_SPOKEA RG_SPOKEB \
     AVNM NETWORK_GROUP CONNECTIVITY_CONFIG \
     AVNM_ID NETWORK_GROUP_ID CONNECTIVITY_CONFIG_ID ROUTE_GROUP_A_ID ROUTE_GROUP_B_ID
+}
+
+require_run_schema_four() {
+  [[ "${RUN_SCHEMA:-}" == 4 ]] ||
+    { fail "Only schema 4 creates a run-owned pool; use the previous workshop version to resume schema 3."; return 1; }
 }
 
 # 구독을 자동 변경하지 않습니다. 불일치하면 사용자가 올바른 구독을 명시적으로 선택해야 합니다.

@@ -7,11 +7,14 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SUB = "11111111-1111-1111-1111-111111111111"
-POOL_ID = (f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-ipam/providers/"
-           "Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
-           "ipamPools/ipam-lzbegin-shared")
+LEGACY_POOL_ID = (f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-ipam/providers/"
+                  "Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
+                  "ipamPools/ipam-lzbegin-shared")
+POOL_ID = (f"/subscriptions/{SUB}/resourceGroups/rg-lzbegin-hub-demo123/providers/"
+           "Microsoft.Network/networkManagers/avnm-lzbegin-demo123/"
+           "ipamPools/ipam-lzbegin-demo123")
 STATE = {
-    "schemaVersion": 3, "topology": "avnm-hub-spoke", "runId": "demo123",
+    "schemaVersion": 4, "topology": "avnm-hub-spoke", "runId": "demo123",
     "subscriptionId": SUB, "ipamPoolId": POOL_ID,
     "location": "koreacentral",
     "resourceGroups": {
@@ -20,6 +23,7 @@ STATE = {
         "spokeb": "rg-lzbegin-spokeb-demo123",
     },
 }
+LEGACY_STATE = dict(STATE, schemaVersion=3, ipamPoolId=LEGACY_POOL_ID)
 
 
 def vnet_id(zone):

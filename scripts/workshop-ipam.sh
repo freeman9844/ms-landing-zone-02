@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 
 # A failed read must never leave values from an earlier workshop in the caller's shell.
+assert_new_run_subscription() {
+  local managers vnets envelope
+  [[ -n "${SUBSCRIPTION_ID:-}" ]] || { fail "Select a subscription before starting a new run."; return 1; }
+  managers=$(az network manager list --subscription "$SUBSCRIPTION_ID" -o json) ||
+    { fail "Cannot inspect subscription AVNMs."; return 1; }
+  vnets=$(az network vnet list --subscription "$SUBSCRIPTION_ID" -o json) ||
+    { fail "Cannot inspect subscription VNets."; return 1; }
+  envelope=$(jq -cn --arg id "$SUBSCRIPTION_ID" --argjson managers "$managers" --argjson vnets "$vnets" \
+    '{subscriptionId:$id,managers:$managers,vnets:$vnets}') ||
+    { fail "Invalid subscription inventory JSON."; return 1; }
+  python3 "$(dirname "${BASH_SOURCE[0]}")/check-run-preflight.py" <<< "$envelope"
+}
+
 clear_ipam_cidrs() {
   unset HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
     HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR \
@@ -101,7 +114,7 @@ assert_shared_ipam_pool() {
       (.subscriptions | type == "array" and length == 1 and
         (.[0] | type == "string" and ascii_downcase == $scope)) and
       .managementGroups == []) and
-    .properties.networkManagerScopeAccesses == ["Connectivity"]
+    .properties.networkManagerScopeAccesses == []
   ' <<< "$response" >/dev/null 2>&1 ||
-    { fail "Shared IPAM Network Manager does not match the expected ID, region, subscription scope, Connectivity access, or ready state: $manager_id. Ask the operator to inspect it."; return 1; }
+    { fail "Shared IPAM Network Manager does not match the expected ID, region, subscription scope, empty feature access, or ready state: $manager_id. Ask the operator to inspect it."; return 1; }
 }

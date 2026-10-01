@@ -2,7 +2,9 @@ import json
 import re
 import unittest
 
-from harness import POOL_ID, ROOT, SUB, call, run
+from harness import LEGACY_POOL_ID, ROOT, SUB, call, run
+
+POOL_ID = LEGACY_POOL_ID
 
 SOURCE = 'source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; source "$WORKSHOP_ROOT/scripts/workshop-ipam.sh"; '
 REST = ["rest", "--method", "get", "--url", POOL_ID + "?api-version=2024-05-01",
@@ -16,11 +18,33 @@ READY = {"id": POOL_ID, "location": "koreacentral",
 MANAGER_READY = {"id": MANAGER_ID, "location": "koreacentral",
                  "properties": {"networkManagerScopes": {
                      "managementGroups": [], "subscriptions": [f"/subscriptions/{SUB}"]},
-                     "networkManagerScopeAccesses": ["Connectivity"],
+                     "networkManagerScopeAccesses": [],
                      "provisioningState": "Succeeded"}}
 
 
 class SharedPoolTests(unittest.TestCase):
+    def test_new_run_preflight_rejects_feature_conflicts_and_address_overlap(self):
+        manager = {"networkManagerScopeAccesses": ["Connectivity"],
+                   "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"],
+                                            "managementGroups": []}}
+        vnet = {"id": "other", "addressSpace": {"addressPrefixes": ["172.20.0.0/20"]}}
+        manager_call = ["network", "manager", "list", "--subscription", SUB, "-o", "json"]
+        vnet_call = ["network", "vnet", "list", "--subscription", SUB, "-o", "json"]
+        for managers, vnets, expected in (
+            ([], [], True),
+            ([manager], [], False),
+            ([], [vnet], False),
+            ([], [{"addressSpace": {"addressPrefixes": ["10.0.0.0/16"]}}], True),
+            ("not json", [], False),
+        ):
+            with self.subTest(managers=managers, vnets=vnets):
+                result = run(SOURCE + f'SUBSCRIPTION_ID={SUB}; assert_new_run_subscription',
+                             [call(manager_call, managers), call(vnet_call, vnets)])
+                self.assertEqual(result.returncode == 0, expected, result.stderr)
+        result = run(SOURCE + f'SUBSCRIPTION_ID={SUB}; assert_new_run_subscription',
+                     [call(manager_call, code=3, stderr="Forbidden")])
+        self.assertNotEqual(result.returncode, 0)
+
     def test_ready_pool_is_checked_read_only_in_active_subscription(self):
         result = run(SOURCE + f'SUBSCRIPTION_ID={SUB}; assert_shared_ipam_pool',
                      [call(REST, READY), call(MANAGER_REST, MANAGER_READY)])
@@ -47,6 +71,8 @@ class SharedPoolTests(unittest.TestCase):
                         call(MANAGER_REST, dict(MANAGER_READY, properties={
                             **MANAGER_READY["properties"], "networkManagerScopeAccesses": ["Routing"]})),
                         call(MANAGER_REST, dict(MANAGER_READY, properties={
+                            **MANAGER_READY["properties"], "networkManagerScopeAccesses": ["Connectivity"]})),
+                        call(MANAGER_REST, dict(MANAGER_READY, properties={
                             **MANAGER_READY["properties"], "provisioningState": "Failed"}))):
             with self.subTest(manager=manager):
                 result = run(block + '\nrc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
@@ -72,6 +98,7 @@ class SharedPoolTests(unittest.TestCase):
                                 networkManagerScopes={"managementGroups": [],
                                                       "subscriptions": [f"/subscriptions/{SUB}", f"/subscriptions/{SUB}"]})},
             {"properties": dict(MANAGER_READY["properties"], networkManagerScopeAccesses=["Routing"])},
+            {"properties": dict(MANAGER_READY["properties"], networkManagerScopeAccesses=["Connectivity"])},
             {"properties": dict(MANAGER_READY["properties"],
                                 networkManagerScopeAccesses=["Connectivity", "SecurityAdmin"])},
             {"properties": {}},
