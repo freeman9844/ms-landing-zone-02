@@ -58,6 +58,32 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 
 사용할 Azure 구독의 이름과 UUID가 표시됩니다.
 
+### AVNM CLI 준비
+
+👁️ **설명**
+
+새 실행의 구독 충돌 점검에서 `az network manager list`를 사용하므로, 상태 파일을
+만들기 전에 `virtual-network-manager` Azure CLI 확장을 설치합니다.
+정적 Network Group membership은 Azure Policy 정의나 할당 역할이 필요하지 않습니다.
+대신 이 워크숍의 기존 구독 `Contributor` 요구사항은 그대로 유지됩니다.
+`preflight.sh`는 확장을 설치하거나 업데이트하지 않고, 이미 설치되어 있는지만 읽기 전용으로 확인합니다.
+
+🟢 **실행**
+
+<!-- exec:install-avnm-cli -->
+```bash
+az extension add --name virtual-network-manager --upgrade --yes
+```
+
+📋 **확인**
+
+```bash
+az extension show --name virtual-network-manager \
+  --query '{Name:name,Version:version}' -o table
+```
+
+확장 설치나 확인이 실패하면 새 실행을 시작하지 마세요.
+
 ### 이번 실행의 IPAM 직접 생성
 
 운영자가 별도의 공유 RG나 pool을 준비할 필요가 없습니다. 모듈 02에서
@@ -201,29 +227,6 @@ Azure가 관리자 생성·pool 할당을 거부하면 오류를 확인하고 �
 
 Provider는 Azure 서비스의 리소스 종류를 구독에서 사용할 수 있게 하는 등록입니다.
 등록은 구독 수준 변경이므로 조직 정책을 확인하고 실행합니다.
-
-### AVNM CLI 준비
-
-👁️ **설명**
-
-`virtual-network-manager` Azure CLI 확장이 있어야 AVNM 관련 명령을 실행할 수 있습니다.
-정적 Network Group membership은 Azure Policy 정의나 할당 역할이 필요하지 않습니다.
-대신 이 워크숍의 기존 구독 `Contributor` 요구사항은 그대로 유지됩니다.
-`preflight.sh`는 확장을 설치하거나 업데이트하지 않고, 이미 설치되어 있는지만 읽기 전용으로 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:install-avnm-cli -->
-```bash
-az extension add --name virtual-network-manager --upgrade --yes
-```
-
-📋 **확인**
-
-```bash
-az extension show --name virtual-network-manager \
-  --query '{Name:name,Version:version}' -o table
-```
 
 🟢 **실행**
 

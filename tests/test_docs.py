@@ -134,6 +134,13 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)
 
+    def test_avnm_extension_is_installed_before_new_run_inventory(self):
+        text = (ROOT / "docs/01-prerequisites.md").read_text()
+        install = re.search(r"<!-- exec:install-avnm-cli -->\s*```bash\n(.*?)\n```", text, re.S)
+        self.assertIsNotNone(install)
+        self.assertIn("az extension add --name virtual-network-manager", install.group(1))
+        self.assertLess(install.start(), text.index('new_run "$SELECTED_SUBSCRIPTION" koreacentral'))
+
     def test_guidance_identifies_run_owned_pool_and_single_run_scope(self):
         text = (ROOT / "docs/maintainer-validation.md").read_text()
         for phrase in ("schema 4", "ipam-lzbegin-<실행 ID>", "172.20.0.0/14",
