@@ -10,7 +10,7 @@ resource manager 'Microsoft.Network/networkManagers@2024-05-01' = {
       managementGroups: []
       subscriptions: [subscription().id]
     }
-    networkManagerScopeAccesses: ['Connectivity']
+    networkManagerScopeAccesses: []
   }
 }
 

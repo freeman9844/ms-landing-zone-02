@@ -27,7 +27,7 @@ Azure Virtual Network Manager를 사용하는 독립 저장소
 
 ## 무엇을 배우나요?
 
-구독·리소스 그룹·리전을 구분하고, 공유 AVNM IPAM pool에서 겹치지 않는 주소를 할당받습니다.
+구독·리소스 그룹·리전을 구분하고, 실행별 Hub AVNM 아래에 직접 만든 IPAM pool에서 겹치지 않는 주소를 할당받습니다.
 모듈 03에서는 AVNM(Azure Virtual Network Manager)의 세 범위와 Network Group으로
 Hub↔Spoke 연결을 배포합니다. 모듈 04에서는 네 방향 피어링의 전달 허용을 먼저 설정하고
 AVNM 피어링 강제를 배포한 뒤, VM을 만들기 전에 Firewall과 AVNM Routing으로
@@ -96,7 +96,7 @@ Hub NAT는 최종 정리까지 유지됩니다.
 | 항목 | 필요한 준비 |
 |---|---|
 | Azure 계정 | 실습용 구독의 Contributor 또는 운영자가 준비한 동등한 권한 |
-| 공유 IPAM | 운영자가 같은 구독 Korea Central에 `rg-lzbegin-ipam`의 `avnm-lzbegin-ipam/ipam-lzbegin-shared`를 미리 준비; pool 사용 및 Network Manager 읽기 권한 |
+| 실행별 IPAM | 모듈 02에서 이번 Hub AVNM 아래에 pool을 직접 생성; 별도의 운영자 사전 준비 불필요 |
 | 브라우저 | Azure Portal 및 Cloud Shell **Bash** |
 | GitHub | 이 저장소를 clone할 수 있는 권한; 비공개일 때 인증 필요 |
 | 기본 리전 | Korea Central, Standard_B2als_v2 3대에 필요한 총 6 vCPU와 Basv2-family quota |
@@ -104,12 +104,12 @@ Hub NAT는 최종 정리까지 유지됩니다.
 
 Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 조직의 Policy·할당량·
 지역 용량 제한은 참가자 구독에서 별도로 확인합니다.
-새 실행 전 모듈 01의 **읽기 전용 pool 사전 점검**으로 정확한 pool ID·구독·지역·
-`172.20.0.0/14` 범위와 접근 권한을 확인하세요. 실패하면 새 실행을 시작하지 말고
-운영자에게 문의하세요. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Subnet은 `/24`,
+한 구독에서 동시에 한 실행만 진행합니다. 모듈 01에서 기존 AVNM의 같은 기능
+범위와 VNet의 `172.20.0.0/14` 주소 겹침을 읽기 전용으로 확인합니다.
+모듈 02에서 Hub RG의 실행별 AVNM·IPAM pool을 만들고 상태를 확인한 뒤에만
+VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Subnet은 `/24`,
 `AzureFirewallSubnet`은 `/26`으로 pool에서 배정됩니다. 빈 `/14`에서 `/20` 64개를
-나눌 수 있으므로 완전한 3-VNet 실행은 이론상 **21개**까지이며, 예약·기존 할당에
-따라 실제 수용량은 줄어듭니다. 운영자는 pool **외부**의 연결망·온프레미스 주소와의
+나눌 수 있지만, **동시 실행 가능 개수를 뜻하지 않습니다**. pool **외부**의 연결망·온프레미스 주소와의
 충돌도 별도로 확인해야 합니다. IPAM이 외부 충돌까지 막아 주지는 않습니다.
 
 ## 모듈 목차
@@ -153,8 +153,9 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 
 **완료·실패 여부와 관계없이 [cleanup](docs/07-cleanup-production.md)을 실행하세요.**
 대상은 `rg-lzbegin-hub-{runId}`, `rg-lzbegin-spokea-{runId}`, `rg-lzbegin-spokeb-{runId}`입니다.
-운영자 소유 공유 IPAM RG `rg-lzbegin-ipam`/pool, Network Watcher와 Cloud Shell
-저장소는 삭제하지 않습니다. 모듈 02 배포가 일부만 성공하여 CIDR이 아직 없더라도
+이번 실행의 pool은 Hub RG와 함께 삭제됩니다. 기존 운영자 소유 공유 IPAM RG
+`rg-lzbegin-ipam`/pool, Network Watcher와 Cloud Shell 저장소는 삭제하지 않습니다.
+모듈 02 배포가 일부만 성공하여 CIDR이 아직 없더라도
 같은 상태 파일로 모듈 07을 실행할 수 있습니다.
 
 ## 세션이 끊겼을 때
@@ -162,7 +163,7 @@ Owner나 역할 할당 권한은 이 워크숍에서 요구하지 않습니다. 
 Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01-prerequisites.md#세션-재연결-시-변수-복구)로
 `.workshop-state/{runId}.json`을 읽고 **원래 실행 ID**를 사용합니다.
 이 파일과 실습용 키는 Git에서 제외됩니다. 임시 Cloud Shell이면 종료 전에 상태 JSON을 내려받으세요.
-새 실행의 schema 3 JSON은 pool ID와 세 RG만 저장하며 할당 CIDR을 캐시하지 않습니다.
+새 실행의 schema 4 JSON은 실행별 pool ID와 세 RG만 저장하며 할당 CIDR을 캐시하지 않습니다.
 재접속할 때마다 모듈 01에서 상태를 다시 읽고, 모듈 03–06은 실제 Azure 할당을 다시
 조회합니다. 중간 실패 시 모듈 02의 기존 자원을 검사하고 남은 단계만 재개하거나,
 모듈 07에서 **존재하는 실행별 RG만** 정리하세요.
@@ -179,11 +180,9 @@ Azure 자원은 그대로 유지합니다. [기존 실행 복구 절차](docs/07
 - Firewall 규칙의 `AzureCloud:443`은 자사 tenant 전용 허용이 아닙니다.
 - 기본 VM은 관리형 디스크의 플랫폼 암호화를 사용합니다. host encryption·guest ADE와
   VM extension 금지 권고에는 [명시적인 교육용 예외](docs/maintainer-validation.md#보안-검사-예외)가 있습니다.
-- **2026-09-27 리허설은 IPAM 도입 이전 아키텍처의 기록입니다.** 당시 AVNM 연결·
-  Routing·Security Admin·Firewall 허용/차단/복구 및 세 RG 정리를 확인했지만
-  새 IPAM 할당과 **IPAM 동시 실행은 실환경 미검증**입니다. 정적/mock 검사는
-  실제 Azure pool 할당·동시성의 증거가 아닙니다. 운영자 승인 리허설 전까지
-  성공을 주장하지 마세요.
+- **2026-10-01 리허설은 이전 공유 IPAM 방식의 단일 실행 기록입니다.**
+  AVNM 연결·Routing·Security Admin·Firewall 허용/차단/복구와 정리를 확인했지만
+  새 **실행별 pool 방식**의 실환경 배포는 아직 검증하지 않았습니다.
 
 ## 태깅 범례와 트러블슈팅
 

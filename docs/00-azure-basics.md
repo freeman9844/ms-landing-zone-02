@@ -28,7 +28,7 @@ RG 세 개를 만든다고 운영용 다중 구독 Landing Zone이 완성되는 
 
 **VNet**은 Azure 안의 사설 네트워크이고 **Subnet**은 그 안의 주소 구역입니다.
 `172.20.0.0/14`에서 `/14`는 주소 범위의 크기를 나타내는 CIDR 표기입니다.
-운영자가 Korea Central에 미리 마련한 **공유 AVNM IPAM pool**이 세 VNet에
+참가자가 모듈 02에서 Korea Central의 실행별 Hub AVNM 아래 직접 만드는 **AVNM IPAM pool**이 세 VNet에
 서로 다른 `/20` CIDR을 동적으로 배정합니다. `/24`와 `/26`은 각각 해당 VNet
 안에 속하는 더 작은 Subnet입니다. 정확한 주소는 미리 알 수 없으며 모듈 02에서
 배포 결과를 읽어 확인합니다.
@@ -41,8 +41,9 @@ Azure는 Subnet마다 앞의 네 주소와 마지막 주소를 예약하므로 `
 | Spoke B | 별도 pool 할당 `/20` | `snet-workload` `/24` | 두 번째 워크로드 |
 
 겹치지 않는 주소를 쓰면 어느 네트워크로 보내야 하는지 구분할 수 있습니다.
-같은 pool의 할당 중복은 IPAM이 막지만 pool 외부 네트워크와의 충돌은 운영자가
-사전에 조사해야 합니다. 공유 RG와 pool은 참가자의 모듈 07 정리 대상이 아닙니다.
+같은 pool의 할당 중복은 IPAM이 막지만 pool 외부 네트워크와의 충돌은 참가자와 운영자가
+사전에 조사해야 합니다. 구독당 동시에 한 실행만 지원하며, 모듈 07에서
+Spoke 두 RG를 먼저 정리한 후 Hub RG와 그 안의 pool을 함께 삭제합니다.
 이번 실습에서는 참가자가 네 방향 Peering을 직접 만들지 않고,
 **AVNM(Azure Virtual Network Manager)**가 Hub↔Spoke Peering을 중앙에서 관리합니다.
 Hub와 각각 연결해도 Spoke끼리 자동으로 연결되지는 않습니다. 이를

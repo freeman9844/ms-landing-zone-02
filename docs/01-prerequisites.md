@@ -126,7 +126,7 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 | `jq -e`, `<<< "$값"` | JSON의 조건을 검사하고 실패를 종료 코드로 알림 / 변수 내용을 명령의 입력으로 전달합니다. |
 
 `source scripts/workshop-common.sh`는 다음 **교재 전용 함수**를 현재 셸에 읽습니다.
-공유 pool 검사 함수는 `source scripts/workshop-ipam.sh`로 읽습니다.
+구독 충돌·실행별 pool 검사 함수는 `source scripts/workshop-ipam.sh`로 읽습니다.
 이 함수들은 Azure CLI 자체 명령이 아닙니다.
 
 | 함수 | 하는 일 |

@@ -24,6 +24,23 @@ printf '%s %s\\n' "$RUN_SCHEMA" "$IPAM_POOL_ID"
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("schema 4", result.stderr)
 
+    def test_lost_legacy_state_can_be_reconstructed_without_readdressing(self):
+        result = run(SOURCE + f'''
+create_run abc123 {SUB} koreacentral 3 >/dev/null &&
+load_run .workshop-state/abc123.json &&
+printf '%s %s\\n' "$RUN_SCHEMA" "$IPAM_POOL_ID"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(),
+                         f"3 /subscriptions/{SUB}/resourceGroups/rg-lzbegin-ipam/"
+                         "providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
+                         "ipamPools/ipam-lzbegin-shared")
+
+    def test_reconstructing_state_rejects_unknown_schema(self):
+        result = run(SOURCE + f'create_run abc123 {SUB} koreacentral 5')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Only schema 3 legacy recovery or schema 4 new runs", result.stderr)
+
     def test_state_exports_avnm_names_and_ids(self):
         result = run(SOURCE + r'''
 load_run state.json &&

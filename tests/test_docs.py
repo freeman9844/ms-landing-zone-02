@@ -21,23 +21,22 @@ class DocsTests(unittest.TestCase):
             self.assertIn("IPAM", text, name)
             self.assertIn("/20", text, name)
 
-    def test_operator_rehearsal_requires_concurrent_runs_and_preserves_pool(self):
+    def test_operator_rehearsal_requires_single_run_and_cleans_owned_pool(self):
         text = (ROOT / "docs/maintainer-validation.md").read_text()
-        self.assertIn("## IPAM 동시 실행 리허설", text)
-        section = text.split("## IPAM 동시 실행 리허설", 1)[1].split("\n## ", 1)[0]
-        for term in ("승인", "서로 다른", "동시", "CIDR", "Subnet", "03–06",
-                     "Deny", "로그", "07", "rg-lzbegin-ipam", "정적"):
+        section = text.split("## 단일 실행 리허설과 새 구조의 검증 경계", 1)[1].split("\n## ", 1)[0]
+        for term in ("승인", "단일 실행", "pool", "Subnet", "03–06",
+                     "Deny", "로그", "07", "Hub RG", "실환경 미검증"):
             self.assertIn(term, section)
 
     def test_published_rehearsal_status_distinguishes_ipam_from_historical_workshop(self):
         readme = (ROOT / "README.md").read_text()
         maintainer = (ROOT / "docs/maintainer-validation.md").read_text()
-        self.assertIn("2026-09-27", readme)
+        self.assertIn("2026-10-01", readme)
         self.assertIn("2026-09-27", maintainer)
         self.assertIn("edb7827a799c", maintainer)
         self.assertIn("이전 아키텍처의 실제 Azure 리허설 기록", maintainer)
-        self.assertIn("IPAM 동시 실행", readme)
-        self.assertIn("미검증", readme)
+        self.assertIn("실행별 pool 방식", readme)
+        self.assertIn("실환경 배포는 아직 검증하지 않았습니다", readme)
         self.assertIn("미검증", maintainer)
 
     def test_module_navigation_reaches_firewall_routing_and_cleanup_in_order(self):
@@ -135,25 +134,20 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-01.git", text)
         self.assertNotIn("cd ms-landing-zone-01", text)
 
-    def test_operator_guidance_identifies_shared_pool_and_deployment_scope(self):
+    def test_guidance_identifies_run_owned_pool_and_single_run_scope(self):
         text = (ROOT / "docs/maintainer-validation.md").read_text()
-        pool_id = ("/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/"
-                   "providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/"
-                   "ipamPools/ipam-lzbegin-shared")
-        for phrase in (pool_id, "172.20.0.0/14", "az group create",
-                       "az deployment group create", "--template-file infra/shared-ipam.bicep",
-                       '--subscription "$SUBSCRIPTION_ID"', "pool 사용 권한", "온프레미스"):
-            self.assertTrue(phrase in text, f"operator guidance missing: {phrase}")
+        for phrase in ("schema 4", "ipam-lzbegin-<실행 ID>", "172.20.0.0/14",
+                       "Spoke RG를 먼저", "온프레미스", "한 구독에서 동시에 하나의 실행"):
+            self.assertIn(phrase, text)
+        readme = (ROOT / "README.md").read_text()
+        self.assertNotIn("운영자가 같은 구독 Korea Central에", readme)
+        self.assertIn("한 구독에서 동시에 한 실행만", readme)
 
-    def test_operator_deployment_stops_if_subscription_selection_fails(self):
-        text = (ROOT / "docs/maintainer-validation.md").read_text()
-        block = next(block for block in re.findall(r"```bash\n(.*?)\n```", text, re.S)
-                     if "az group create" in block)
-        result = run(block, [call(["account", "set", "--subscription", SUB],
-                                  code=1, stderr="Subscription not found")],
-                     input_text=SUB + "\n")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Subscription not found", result.stderr)
+    def test_module_two_owns_pool_creation(self):
+        doc = (ROOT / "docs/02-network-foundation.md").read_text()
+        self.assertIn("--template-file infra/run-ipam-pool.bicep", doc)
+        self.assertIn("assert_run_ipam_pool", doc)
+        self.assertNotIn("shared-ipam.bicep", doc)
 
     def test_participant_blocks_do_not_provision_shared_pool(self):
         for name in MODULES:

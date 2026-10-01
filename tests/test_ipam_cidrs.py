@@ -107,6 +107,40 @@ class LiveCidrTests(unittest.TestCase):
             self.assertIn(f"{zone.upper()}_SUBNET_CIDR={child}", result.stdout)
         self.assertIn("FIREWALL_SUBNET_CIDR=172.20.1.0/26", result.stdout)
 
+    def test_cli_normalized_allocations_and_null_subnet_prefixes(self):
+        vnets, subnets = fixtures()
+        for vnet in vnets.values():
+            space = vnet["addressSpace"]
+            space["ipamPoolPrefixAllocations"] = [{
+                "id": POOL_ID, "numberOfIpAddresses": "4096",
+                "allocatedAddressPrefixes": space["addressPrefixes"],
+            }]
+        for subnet in subnets.values():
+            prefix = subnet.pop("addressPrefix")
+            subnet["addressPrefix"] = None
+            size = "64" if subnet["name"] == "AzureFirewallSubnet" else "256"
+            subnet["ipamPoolPrefixAllocations"] = [{
+                "id": POOL_ID, "numberOfIpAddresses": size,
+                "allocatedAddressPrefixes": [prefix],
+            }]
+        self.resolve(reads(vnets, subnets), success=True)
+        subnets[("hub", "snet-management")]["ipamPoolPrefixAllocations"][0][
+            "allocatedAddressPrefixes"] = ["172.20.2.0/24", "172.20.3.0/24"]
+        self.resolve(reads(vnets, subnets))
+        subnets[("hub", "snet-management")]["ipamPoolPrefixAllocations"][0][
+            "allocatedAddressPrefixes"] = ["172.20.0.0/24"]
+        vnets["hub"]["addressSpace"]["ipamPoolPrefixAllocations"][0]["id"] = "/subscriptions/other"
+        self.resolve(reads(vnets, subnets))
+
+    def test_rejects_cli_prefix_disagreement(self):
+        vnets, subnets = fixtures()
+        vnets["hub"]["addressSpace"]["ipamPoolPrefixAllocations"][0] = {
+            "id": POOL_ID, "numberOfIpAddresses": "4096",
+            "allocatedAddressPrefixes": ["172.20.48.0/20"],
+        }
+        self.resolve(reads(vnets, subnets))
+
+
     def test_rejects_non_succeeded_vnet_and_subnet_without_stale_exports(self):
         for resource in (("vnet", "hub"), ("vnet", "spokea"), ("vnet", "spokeb"),
                          ("subnet", "hub", "snet-management"),
@@ -300,6 +334,7 @@ class LiveCidrTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Hub VNet 172.20.0.0/20", result.stdout)
         self.assertIn("Spoke B VNet 172.20.32.0/20", result.stdout)
+        self.assertIn("Spoke B VNet 172.20.32.0/20 / 워크로드 172.20.32.0/24", result.stdout)
 
     def test_cleanup_handles_no_created_resources_without_resolving_cidrs(self):
         calls = [account()] + [

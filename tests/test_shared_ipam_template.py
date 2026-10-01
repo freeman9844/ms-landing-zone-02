@@ -28,5 +28,5 @@ class SharedPoolTests(unittest.TestCase):
         self.assertIn("subscriptions: [subscription().id]", template)
         self.assertIn("networkManagerScopeAccesses: []", template)
         self.assertIn("output poolId string = pool.id", template)
-        self.assertIn("실행별 AVNM 두 개 모두 같은 구독", (
+        self.assertIn("한 구독에서 동시에 하나의 실행", (
             ROOT / "docs/maintainer-validation.md").read_text())

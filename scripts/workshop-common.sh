@@ -11,12 +11,16 @@ fail() {
 # 지정한 실행 ID의 로컬 복구 파일만 만듭니다. Azure에 이미 있는 실습의 상태 복구에도 사용합니다.
 # 함수 본문을 별도 셸 (...)로 실행해 파일 권한 설정과 임시 파일 정리 trap을 바깥 셸과 분리합니다.
 create_run() (
-  local run_id="${1:-}" subscription="${2:-}" location="${3:-}" tmp path pool_id
+  local run_id="${1:-}" subscription="${2:-}" location="${3:-}" schema="${4:-4}" tmp path pool_id
   [[ "$run_id" =~ ^[a-z0-9]{6,12}$ ]] || { fail "runId: use 6-12 lowercase letters/digits."; return 1; }
   [[ "$subscription" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
     { fail "subscriptionId must be a UUID."; return 1; }
   [[ "$location" == "koreacentral" ]] || { fail "Invalid Azure location. Use koreacentral."; return 1; }
-  pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-hub-$run_id/providers/Microsoft.Network/networkManagers/avnm-lzbegin-$run_id/ipamPools/ipam-lzbegin-$run_id"
+  case "$schema" in
+    4) pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-hub-$run_id/providers/Microsoft.Network/networkManagers/avnm-lzbegin-$run_id/ipamPools/ipam-lzbegin-$run_id" ;;
+    3) pool_id="/subscriptions/${subscription,,}/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared" ;;
+    *) fail "Only schema 3 legacy recovery or schema 4 new runs are supported."; return 1 ;;
+  esac
   # 상태 파일은 본인만 읽고 쓸 수 있게 하며, 기존 파일을 덮어쓰지 않습니다.
   umask 077
   mkdir -p .workshop-state || return 1
@@ -24,8 +28,8 @@ create_run() (
   [[ ! -e "$path" ]] || { fail "State exists: $path. Restore it; do not overwrite."; return 1; }
   tmp=$(mktemp .workshop-state/.new.XXXXXX) || return 1
   trap 'rm -f "$tmp"' EXIT
-  jq -n --arg id "$run_id" --arg sub "${subscription,,}" --arg loc "$location" --arg pool "$pool_id" '{
-    schemaVersion: 4,
+  jq -n --arg id "$run_id" --arg sub "${subscription,,}" --arg loc "$location" --arg pool "$pool_id" --argjson schema "$schema" '{
+    schemaVersion: $schema,
     topology: "avnm-hub-spoke",
     runId: $id,
     subscriptionId: $sub,

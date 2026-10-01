@@ -128,7 +128,7 @@ RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영
 
 새 ID를 만들지 말고 Portal에서 **원래 실행 ID와 구독**을 확인하세요.
 다른 파일을 지우거나 비슷한 RG를 wildcard로 삭제하지 않습니다.
-**schema 2 실행**이었다면 아래 `create_run`으로 schema 3 JSON을 만들지 말고
+**schema 2 실행**이었다면 아래 `create_run`으로 새 JSON을 만들지 말고
 [고정 버전 절차](#기존-schema-2-실행-복구)를 따릅니다. 실행 시점이나 원본
 교재 버전을 확인할 수 없다면 운영자에게 확인받기 전까지 삭제하지 않습니다.
 
@@ -146,12 +146,15 @@ RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영
 source scripts/workshop-common.sh &&
 read -rp "원래 실행 ID: " ORIGINAL_RUN_ID &&
 read -rp "원래 subscription ID: " ORIGINAL_SUBSCRIPTION &&
-read -rp "원래 리전 (예: koreacentral): " ORIGINAL_LOCATION
+read -rp "원래 리전 (예: koreacentral): " ORIGINAL_LOCATION &&
+read -rp "원래 상태 schema (기존 공유 pool=3, 실행별 pool=4): " ORIGINAL_SCHEMA
 ```
 
 📋 **확인**
 
-세 입력값이 원래 실습과 일치해야 합니다. 다른 참가자의 ID를 추측하지 않습니다.
+네 입력값이 원래 실습과 일치해야 합니다. schema 3은 예전에 운영자가 준비한 공유
+pool을 사용했고, schema 4는 이번 Hub AVNM의 pool을 사용합니다. 출처를 모르면
+복구 파일을 만들지 마세요. 다른 참가자의 ID를 추측하지 않습니다.
 
 ### 복구 2. 원래 구독 선택
 
@@ -182,7 +185,7 @@ az account set --subscription "$ORIGINAL_SUBSCRIPTION"
 
 <!-- exec:recovery-state -->
 ```bash
-create_run "$ORIGINAL_RUN_ID" "$ORIGINAL_SUBSCRIPTION" "$ORIGINAL_LOCATION" &&
+create_run "$ORIGINAL_RUN_ID" "$ORIGINAL_SUBSCRIPTION" "$ORIGINAL_LOCATION" "$ORIGINAL_SCHEMA" &&
 export STATE_FILE=".workshop-state/$ORIGINAL_RUN_ID.json"
 ```
 
@@ -193,11 +196,12 @@ export STATE_FILE=".workshop-state/$ORIGINAL_RUN_ID.json"
 
 기존 파일이 있으면 `create_run`은 덮어쓰지 않습니다. 그 파일부터 복구하세요.
 여기서는 원래 ID로 로컬 JSON만 복구하는 `create_run`을 사용합니다.
-이 절차는 **schema 3으로 처음 시작한 실행에만** 해당합니다. 정확한 원래 구독·
-ID·Korea Central 및 원래 공유 pool ID를 확인한 경우에만 계속하세요. 복구
+이 절차는 **schema 3 또는 4로 처음 시작한 실행에만** 해당합니다. 정확한 원래 구독·
+ID·Korea Central 및 원래 pool 유형을 확인한 경우에만 계속하세요. 복구
 파일에는 CIDR을 기록하지 않습니다. 이후 모듈 03–06 재개 시에는 실제 Azure의
-세 VNet·네 Subnet 할당을 다시 조회하고, 아직 누락된 자원이 있으면 모듈 02부터
-검사해 재개합니다. cleanup은 CIDR 조회 없이 부분 실행을 정리합니다.
+세 VNet·네 Subnet 할당을 다시 조회하고, 아직 누락된 자원이 있으면 원래 사용하던
+교재 버전의 모듈 02부터 검사해 재개합니다. 현재 모듈 02–06은 schema 4만 받습니다.
+cleanup은 CIDR 조회 없이 부분 실행을 정리합니다.
 새 실습 전용 `new_run`은 기존 RG 이름을 재사용하지 않으므로 복구에 사용하지 않습니다.
 cleanup은 실제 Azure 자원의 태그까지 대조하므로 이름만 추측해서는 삭제할 수 없습니다.
 JSON은 감사·복구를 위해 로컬에 유지되며 Git에는 포함되지 않습니다.

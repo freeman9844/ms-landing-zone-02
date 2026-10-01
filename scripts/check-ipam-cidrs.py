@@ -30,10 +30,19 @@ def allocation(value, pool_id, size):
     item = value[0]
     require(isinstance(item, dict), "Invalid IPAM pool allocation")
     pool = item.get("pool")
-    require(isinstance(pool, dict) and isinstance(pool.get("id"), str)
-            and pool["id"].lower() == pool_id.lower(), "IPAM pool ID mismatch")
+    require(not (pool is not None and item.get("id") is not None),
+            "Ambiguous IPAM pool ID")
+    actual_id = pool.get("id") if isinstance(pool, dict) else item.get("id")
+    require(isinstance(actual_id, str) and actual_id.lower() == pool_id.lower(),
+            "IPAM pool ID mismatch")
     require(item.get("numberOfIpAddresses") == str(size),
             f"IPAM allocation size must be {size}")
+    allocated = item.get("allocatedAddressPrefixes")
+    if allocated is not None:
+        require(isinstance(allocated, list) and len(allocated) == 1,
+                "Expected one allocated IPAM prefix")
+        return allocated[0]
+    return None
 
 
 def resource(value, expected_id, name):
@@ -45,7 +54,7 @@ def resource(value, expected_id, name):
             f"Resource not provisioned successfully: {name}")
 
 
-def prefix_from_subnet(value):
+def prefix_from_subnet(value, allocated):
     prefix = value.get("addressPrefix")
     prefixes = value.get("addressPrefixes")
     if prefixes is not None:
@@ -53,7 +62,10 @@ def prefix_from_subnet(value):
                 "Expected exactly one Subnet prefix")
         require(prefix is None or prefix == prefixes[0], "Conflicting Subnet prefixes")
         prefix = prefixes[0]
-    return prefix
+    require(prefix is not None or allocated is not None, "Missing Subnet prefix")
+    require(allocated is None or prefix is None or prefix == allocated,
+            "Subnet prefix differs from IPAM allocation")
+    return prefix if prefix is not None else allocated
 
 
 def validate(payload):
@@ -79,10 +91,12 @@ def validate(payload):
             ("runId", run_id), ("managedBy", "workshop"))), f"Ownership mismatch: {name}")
         space = vnet.get("addressSpace")
         require(isinstance(space, dict), f"Missing VNet address space: {name}")
-        allocation(space.get("ipamPoolPrefixAllocations"), pool_id, 4096)
+        allocated = allocation(space.get("ipamPoolPrefixAllocations"), pool_id, 4096)
         prefixes = space.get("addressPrefixes")
         require(isinstance(prefixes, list) and len(prefixes) == 1,
                 f"Expected exactly one VNet prefix: {name}")
+        require(allocated is None or allocated == prefixes[0],
+                "VNet prefix differs from IPAM allocation")
         parents[zone] = network(prefixes[0], 20)
     for index, zone in enumerate(ZONES):
         require(all(not parents[zone].overlaps(parents[other]) for other in ZONES[index + 1:]),
@@ -91,8 +105,8 @@ def validate(payload):
     for zone, name, length in SUBNETS:
         subnet = subnets[f"{zone}/{name}"]
         resource(subnet, f"{vnets[zone]['id']}/subnets/{name}", name)
-        allocation(subnet.get("ipamPoolPrefixAllocations"), pool_id, 1 << (32 - length))
-        children[(zone, name)] = network(prefix_from_subnet(subnet), length)
+        allocated = allocation(subnet.get("ipamPoolPrefixAllocations"), pool_id, 1 << (32 - length))
+        children[(zone, name)] = network(prefix_from_subnet(subnet, allocated), length)
         require(children[(zone, name)].subnet_of(parents[zone]),
                 f"Subnet outside parent VNet: {zone}/{name}")
     require(not children[("hub", "snet-management")].overlaps(
