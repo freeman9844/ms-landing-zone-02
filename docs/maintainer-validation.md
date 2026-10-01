@@ -229,7 +229,7 @@ VM 보안 설정 및 **Hub NAT 연결만** 별도 단계인 이유를 설명합�
 |---|---|
 | `infra/run-ipam-pool.bicep` | 기존 실행별 Hub AVNM의 `/14` IPAM root pool 참고 템플릿; 모듈 02 신규 생성은 Azure CLI 사용 |
 | `infra/shared-ipam.bicep` | 이전 schema 3 실행의 운영자 공유 pool 템플릿; 신규 배포에는 사용하지 않음 |
-| `infra/workshop-ipam-vnet.bicep` | 새 실행별 VNet `/20`과 네 Subnet `/24`·`/26`의 pool 할당 |
+| `infra/workshop-ipam-vnet.bicep` | Spoke A/B VNet `/20`과 각 Subnet `/24`의 pool 할당; Hub VNet·관리·Firewall Subnet은 모듈 02에서 Azure CLI로 생성 |
 | `infra/lab-support.bicep` | 기존 세 RG에 VM과 Hub NAT만 보조 배포, 구독을 명시한 Subnet ID, 구역별 출력 |
 | `infra/modules/nat.bicep` | Hub 관리 Subnet용 NAT와 고정 Public IP, 참조로 생기는 의존 관계, CLI에서 별도로 수행하는 Hub 연결 |
 | `infra/modules/test-vm.bicep` | 공인 IP 없는 NIC, SSH 공개 키/VM agent, Trusted Launch, VM 삭제 시 디스크·NIC 수명 |

@@ -104,6 +104,26 @@ def foundation_cases():
                 "--template-file", "infra/workshop-ipam-vnet.bicep",
                 "--parameters", "runId=demo123", f"zone={zone}", "location=koreacentral",
                 f"ipamPoolId={POOL_ID}", "-o", "json"])]
+        if zone == "hub":
+            cases["foundation-hub-vnet"] = [
+                cases["foundation-hub-vnet"][0],
+                az(["network", "vnet", "create", "--resource-group", rg("hub"),
+                    "--name", vnet("hub"), "--location", "koreacentral",
+                    "--ipam-allocations", "[0].number-of-ip-addresses=4096",
+                    f"[0].id={POOL_ID}",
+                    *TAGS, "-o", "json"]),
+                az(["network", "vnet", "subnet", "create", "--resource-group", rg("hub"),
+                    "--vnet-name", vnet("hub"), "--name", "snet-management",
+                    "--ipam-allocations", "[0].number-of-ip-addresses=256",
+                    f"[0].id={POOL_ID}",
+                    "--network-security-group", "nsg-lzbegin-hub-demo123",
+                    "--default-outbound-access", "false", "-o", "json"]),
+                az(["network", "vnet", "subnet", "create", "--resource-group", rg("hub"),
+                    "--vnet-name", vnet("hub"), "--name", "AzureFirewallSubnet",
+                    "--ipam-allocations", "[0].number-of-ip-addresses=64",
+                    f"[0].id={POOL_ID}",
+                    "-o", "json"]),
+            ]
         cases[f"foundation-{zone}-rg"] = [
             az(["group", "exists", "--name", rg(zone), "-o", "tsv"], "false"),
             az(["group", "create", "--name", rg(zone), "--location", "koreacentral", *TAGS, "-o", "json"])]
@@ -705,13 +725,20 @@ printf 'SHELL_ALIVE\\n'
         for zone in ("hub", "spokea", "spokeb"):
             self.assertLess(order.index(f"foundation-{zone}-nsg"), order.index(f"foundation-{zone}-vnet"))
             script = steps[f"foundation-{zone}-vnet"]
-            self.assertIn("infra/workshop-ipam-vnet.bicep", script)
-            self.assertIn('"ipamPoolId=$IPAM_POOL_ID"', script)
+            if zone == "hub":
+                self.assertNotIn("infra/workshop-ipam-vnet.bicep", script)
+                self.assertNotIn("az deployment group create", script)
+                self.assertIn("az network vnet create", script)
+                self.assertEqual(script.count("az network vnet subnet create"), 2)
+            else:
+                self.assertIn("infra/workshop-ipam-vnet.bicep", script)
+                self.assertIn('"ipamPoolId=$IPAM_POOL_ID"', script)
             self.assertNotIn("--address-prefixes 10.", script)
             self.assertNotIn("rg-lzbegin-ipam", script)
         self.assertNotIn("network manager list", blocks(DOCS[3])["avnm-ready"])
         self.assertNotIn("avnm-create", blocks(DOCS[3]))
-        self.assertFalse(any("subnet create" in value for value in steps.values()))
+        self.assertFalse(any("subnet create" in value for name, value in steps.items()
+                             if name != "foundation-hub-vnet"))
 
     def test_first_creation_performs_only_one_prewrite_inventory(self):
         for module, preview, creation in (

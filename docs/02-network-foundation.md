@@ -245,9 +245,9 @@ NSG 생성 응답은 `NewNSG` 안에 표시될 수 있습니다. 기본 규칙�
 👁️ **설명**
 
 이번 실행에서 만든 pool ID를 상태 파일에서 가져옵니다. Hub VNet `/20`, 관리
-Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 하나의 배포로 요청합니다.
+Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 순서대로 요청합니다.
 관리 Subnet만 NSG를 연결하고 기본 outbound를 끕니다. 실패·부분 성공 시
-이미 생성된 VNet을 다시 배포하지 말고 조회 블록으로 실제 상태를 확인한 뒤 진행하세요.
+이미 생성된 VNet을 다시 만들지 말고 조회 블록으로 실제 상태를 확인한 뒤 진행하세요.
 Azure VNet 이름은 대소문자를 구분하지 않으므로 기존 이름도 대소문자 구분 없이 검사합니다.
 
 🟢 **실행**
@@ -259,9 +259,19 @@ deploy_hub_vnet() {
   existing=$(az network vnet list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg name "vnet-lzbegin-hub-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Hub VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
-  az deployment group create --resource-group "$RG_HUB" --name "ipam-vnet-hub-$RUN_ID" \
-    --template-file infra/workshop-ipam-vnet.bicep \
-    --parameters "runId=$RUN_ID" zone=hub "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
+  az network vnet create --resource-group "$RG_HUB" --name "vnet-lzbegin-hub-$RUN_ID" \
+    --location "$LOCATION" \
+    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+    -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  az network vnet subnet create --resource-group "$RG_HUB" \
+    --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name snet-management \
+    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+    --network-security-group "nsg-lzbegin-hub-$RUN_ID" \
+    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  az network vnet subnet create --resource-group "$RG_HUB" \
+    --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name AzureFirewallSubnet \
+    --ipam-allocations "[0].number-of-ip-addresses=64" "[0].id=$IPAM_POOL_ID" \
     -o json --subscription "$SUBSCRIPTION_ID"
 }
 deploy_hub_vnet
@@ -269,7 +279,7 @@ deploy_hub_vnet
 
 📋 **확인**
 
-출력의 `vnetPrefixes`, `subnets`에서 `/20`·`/24`·`/26` 실제 할당 주소와 pool 연결,
+각 명령의 출력과 아래 조회 블록에서 `/20`·`/24`·`/26` 실제 할당 주소와 pool 연결,
 관리 Subnet의 `defaultOutboundAccess=false` 및 Hub NSG ID를 확인합니다.
 `AzureFirewallSubnet`에는 NSG가 없어야 합니다. 불일치하면 다음 블록을 실행하지 마세요.
 암묵적 인터넷 출구는 사용하지 않으며 모듈 04에서 NAT를 명시적으로 연결합니다.
