@@ -313,10 +313,11 @@ az network nsg rule create --resource-group "$RG_HUB" --nsg-name "nsg-lzbegin-hu
 규칙의 `priority=4000`, `direction=Inbound`, `access=Deny`를 확인합니다.
 필요한 HTTP 허용은 모듈 04에서 더 작은 우선순위 번호로 추가합니다.
 
-Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → Overview**에서
-생성한 VNet과 NSG를 확인할 수 있습니다. 아래 화면의 실행 ID는 예시이며, 자신의 RG·실행 ID를 사용하세요.
+Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → `nsg-lzbegin-hub-<실행 ID>` → Overview**에서
+`deny-other-vnet-inbound` 규칙의 우선순위 `4000`과 `Deny`를 확인할 수 있습니다.
+아래 화면의 실행 ID는 예시이며, 자신의 실행 ID를 사용하세요.
 
-![Azure Portal의 Hub 리소스 그룹 Overview에 표시된 Hub VNet과 NSG](images/02-hub-resources.png)
+![Azure Portal의 Hub NSG Overview에 표시된 우선순위 4000의 deny-other-vnet-inbound 규칙](images/02-hub-nsg-deny-rule.png)
 
 ## 2. Spoke A 만들기
 
