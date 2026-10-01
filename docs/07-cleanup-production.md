@@ -6,9 +6,10 @@
 ## 목표
 
 정상 완료와 중간 실패 모두에서 AVNM의 세 종류 구성을 먼저 해제한 뒤
-**이번 실행의 정확한 세 RG만** 삭제합니다. 관리형 경로 테이블의 연결이나
-잔존 테이블이 발견되면 중단하고 상태를 확인합니다. 공유 자원과 다른 참가자의
-리소스는 보존합니다.
+**이번 실행의 정확한 세 RG만** 삭제합니다. 실행별 IPAM pool은 Hub RG의 AVNM
+아래에 있으므로 두 Spoke RG의 부재를 확인한 다음 Hub RG와 함께 삭제합니다.
+관리형 경로 테이블의 연결이나 잔존 테이블이 발견되면 중단하고 상태를 확인합니다.
+다른 참가자와 기존 운영자 소유 자원은 보존합니다.
 
 ## 공통 준비
 
@@ -20,6 +21,7 @@
 `예:`의 실제 경로를 참고해 `.workshop-state/<실행 ID>.json` 경로를 입력하세요.
 파일이 여러 개라면 삭제할 실습의 파일을 직접 선택하세요.
 파일을 잃었다면 아래 [상태 파일 복구](#상태파일을잃은경우)를 먼저 수행합니다.
+기존 schema 3 파일은 이전 공유 pool을 대상으로 하지 않는 정리만 지원합니다.
 기존 schema 2 파일이면 이 버전의 cleanup을 실행하지 말고
 [기존 실행 복구](#기존-schema-2-실행-복구)를 따르세요.
 활성 구독이 다르거나 다른 실습/구독으로 전환했다면
@@ -46,7 +48,7 @@ assert_subscription
 👁️ **설명**
 
 리소스 이름뿐 아니라 활성 구독과 네 개의 소유 태그를 검사합니다.
-`IPAM_POOL_ID`는 삭제 대상을 만드는 데 사용하지 않습니다. schema 3의
+`IPAM_POOL_ID`는 삭제 대상을 만드는 데 사용하지 않습니다. schema 4의
 `resourceGroups.hub/spokea/spokeb` 세 이름만 검사하고, 이미 없는 RG는 건너뜁니다.
 모듈 02가 일부만 성공해 VNet이나 Subnet의 CIDR이 모두 배정되지 않아도
 `load_ipam_cidrs` 없이 정리할 수 있습니다. **존재하는 RG의 구독·소유 태그는
@@ -56,7 +58,9 @@ AVNM의 Routing·Security Admin·Connectivity 목표 상태를 리전에서 `Non
 최대 10분씩 기다립니다. 남아 있으면
 Azure Portal에서 배포 상태와 테이블을 확인한 뒤 다시 실행하세요. **관리형 RG를
 수동으로 일괄 삭제하지 마세요.** 삭제 요청 접수는 완료가 아닙니다. 스크립트는
-최대 45분 동안 잔존 여부를 확인합니다.
+단계별 최대 45분 동안 잔존 여부를 확인합니다. 새 schema 4는 Spoke A/B RG
+삭제 완료를 확인한 후 pool을 소유한 Hub RG를 삭제합니다. Spoke가 남아 있으면
+Hub pool은 삭제하지 않습니다.
 모듈 04의 피어링 강제가 활성화된 상태에서 피어링을 수동으로 삭제하지 마세요.
 Connectivity 배포를 먼저 해제하는 아래 스크립트의 순서를 따릅니다.
 **정리라는 한 목적의 안전 스크립트**는 그대로 사용합니다. RG별 raw delete로 쪼개면
@@ -109,10 +113,10 @@ Type exactly: DELETE <실행ID> FROM <실제 구독 UUID>
 `PASS: workshop group deletion complete...` 또는 세 RG가 이미 없다는 메시지가 나와야 합니다.
 Portal에서도 이번 실습의 세 RG가 없어야 합니다.
 구독의 배포 이력 `support-실행ID`가 남더라도 이는 실행 중인 VM/NAT가 아닙니다.
-Cloud Shell 저장소, 공유 Network Watcher와 운영자 소유 공유 IPAM RG
-`rg-lzbegin-ipam`은 삭제 대상이 아닙니다. 공유 pool 삭제는 운영자 별도 작업입니다.
-Portal에서 공유 RG와 `avnm-lzbegin-ipam/ipam-lzbegin-shared`가 그대로
-존재하는지 확인하되, 참가자는 이 자원에 대한 delete 명령을 실행하지 않습니다.
+Cloud Shell 저장소, 공유 Network Watcher와 **기존** 운영자 소유 IPAM RG
+`rg-lzbegin-ipam`은 삭제 대상이 아닙니다. 새 실행의 IPAM pool
+`ipam-lzbegin-<실행 ID>`는 이번 Hub RG 삭제와 함께 없어졌는지 확인하세요.
+기존 schema 3 실행을 정리해도 이전 운영자 공유 pool은 보존됩니다.
 삭제 실패나 시간 초과 후에는 **같은 상태 파일**로 남은 RG를 조회하고 cleanup을 다시 실행할
 수 있습니다. 이미 없는 그룹은 건너뛰지만, 조회 권한 오류나 소유 정보 불일치는 중단합니다.
 RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영될 수 있습니다.

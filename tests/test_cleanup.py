@@ -1,6 +1,6 @@
 import json
 import unittest
-from harness import run, call, account, group, STATE, SUB, POOL_ID
+from harness import run, call, account, group, STATE, SUB, POOL_ID, LEGACY_STATE
 
 
 def inventory(absent=False):
@@ -10,6 +10,19 @@ def inventory(absent=False):
         if not absent:
             calls.append(group(zone))
     return calls
+
+
+def ordered_deletions():
+    result = []
+    for zone in ("spokea", "spokeb"):
+        result.append(call(["group", "delete", "--name", STATE["resourceGroups"][zone],
+                            "--yes", "--no-wait"]))
+    for zone in ("spokea", "spokeb"):
+        result.append(call(["group", "exists", "--name", STATE["resourceGroups"][zone],
+                            "-o", "tsv"], "false"))
+    hub = STATE["resourceGroups"]["hub"]
+    return result + [call(["group", "delete", "--name", hub, "--yes", "--no-wait"]),
+                     call(["group", "exists", "--name", hub, "-o", "tsv"], "false")]
 
 
 def avnm_cleanup(manager=False):
@@ -51,6 +64,29 @@ def avnm_cleanup(manager=False):
 
 
 class CleanupTests(unittest.TestCase):
+    def test_spoke_delete_error_prevents_hub_pool_deletion(self):
+        calls = inventory() + [account()] + [group(zone) for zone in STATE["resourceGroups"]]
+        calls += avnm_cleanup(manager=False)
+        calls.append(call(["group", "delete", "--name", STATE["resourceGroups"]["spokea"],
+                           "--yes", "--no-wait"], code=3, stderr="Spoke delete denied"))
+        result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
+                     input_text=f"DELETE demo123 FROM {SUB}\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Spoke delete denied", result.stderr)
+
+    def test_legacy_schema_three_cleanup_keeps_external_pool(self):
+        calls = inventory() + [account()] + [group(zone) for zone in STATE["resourceGroups"]]
+        calls += avnm_cleanup(manager=False)
+        for name in STATE["resourceGroups"].values():
+            calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
+        for name in STATE["resourceGroups"].values():
+            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"], "false"))
+        result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
+                     files={"state.json": json.dumps(LEGACY_STATE)},
+                     input_text=f"DELETE demo123 FROM {SUB}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("rg-lzbegin-ipam", result.stdout)
+
     def test_partial_run_deletes_only_existing_run_group_without_ipam_allocations(self):
         hub = STATE["resourceGroups"]["hub"]
         calls = [account()]
@@ -98,10 +134,7 @@ class CleanupTests(unittest.TestCase):
         for item in calls:
             if item["argv"][:3] == ["network", "manager", "list-deploy-status"]:
                 item["stdout"] = json.dumps({"skipToken": "", "value": json.loads(item["stdout"])})
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"], "false"))
+        calls += ordered_deletions()
         result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
                      input_text=f"DELETE demo123 FROM {STATE['subscriptionId']}\n")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -154,10 +187,7 @@ class CleanupTests(unittest.TestCase):
             "deploymentStatus": "Deploying", "configurationIds": [],
         }])
         calls.insert(index, pending)
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"], "false"))
+        calls += ordered_deletions()
         result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
                      input_text=f"DELETE demo123 FROM {SUB}\n")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -218,10 +248,7 @@ class CleanupTests(unittest.TestCase):
             vnets(spokeb, []),
             tables([{"id": table}]), tables([]),
         ]
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"], "false"))
+        calls += ordered_deletions()
         result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
                      input_text=f"DELETE demo123 FROM {SUB}\n")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -238,10 +265,7 @@ class CleanupTests(unittest.TestCase):
         before = len(inventory()) + 4
         calls.insert(before + 1, subnet_list)
         calls.insert(before + 5, subnet_list.copy())
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "delete", "--name", name, "--yes", "--no-wait"]))
-        for name in STATE["resourceGroups"].values():
-            calls.append(call(["group", "exists", "--name", name, "-o", "tsv"], "false"))
+        calls += ordered_deletions()
         result = run('bash "$WORKSHOP_ROOT/scripts/cleanup.sh" state.json', calls,
                      input_text=f"DELETE demo123 FROM {SUB}\n")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -159,35 +159,50 @@ if [[ ${#associated_tables[@]} -gt 0 ]]; then
   [[ "$cleared" == true ]] ||
     { fail "Previously associated AVNM route tables still exist. Inspect their managed RG; do not delete it blindly."; exit 1; }
 fi
-# --no-wait는 삭제 요청만 보냅니다. 요청 접수를 완료로 오인하지 않도록 아래에서 실제 부재를 기다립니다.
-# 세 RG 삭제는 하나의 원자적 작업이 아닙니다. 중간 실패 후 재실행하면 남아 있는 그룹부터 다시 확인합니다.
-for rg in "${present[@]}"; do
-  az group delete --name "$rg" --yes --no-wait
-done
-# 최대 45분, 30초 간격으로 남은 그룹만 조회합니다. 개별 API 호출도 남은 대기 시간으로 제한합니다.
-deadline=$((SECONDS + 2700))
-for ((attempt=0; attempt<90; attempt++)); do
-  remaining=()
-  for rg in "${present[@]}"; do
-    seconds_left=$((deadline - SECONDS))
-    (( seconds_left > 0 )) || { fail "Deletion wait timed out; inspect $rg and rerun cleanup."; exit 1; }
-    exists=$(timeout "$seconds_left" az group exists --name "$rg" -o tsv) ||
-      { fail "Cannot verify deletion: $rg"; exit 1; }
-    case "$exists" in
-      true) remaining+=("$rg") ;;
-      false) printf 'Deleted: %s\n' "$rg" ;;
-      *) fail "Cannot verify deletion: $rg"; exit 1 ;;
-    esac
+# --no-wait는 삭제 요청만 보냅니다. 요청 접수를 완료로 오인하지 않도록 실제 부재를 기다립니다.
+delete_workshop_groups() {
+  local rg exists seconds_left deadline attempt
+  local -a targets=("$@") remaining
+  [[ ${#targets[@]} -gt 0 ]] || return 0
+  for rg in "${targets[@]}"; do
+    az group delete --name "$rg" --yes --no-wait || return 1
   done
-  if [[ ${#remaining[@]} == 0 ]]; then
-    printf 'PASS: workshop group deletion complete. Shared resources were not deleted.\n'
-    exit 0
+  deadline=$((SECONDS + 2700))
+  for ((attempt=0; attempt<90; attempt++)); do
+    remaining=()
+    for rg in "${targets[@]}"; do
+      seconds_left=$((deadline - SECONDS))
+      (( seconds_left > 0 )) || { fail "Deletion wait timed out; inspect $rg and rerun cleanup."; return 1; }
+      exists=$(timeout "$seconds_left" az group exists --name "$rg" -o tsv) ||
+        { fail "Cannot verify deletion: $rg"; return 1; }
+      case "$exists" in
+        true) remaining+=("$rg") ;;
+        false) printf 'Deleted: %s\n' "$rg" ;;
+        *) fail "Cannot verify deletion: $rg"; return 1 ;;
+      esac
+    done
+    [[ ${#remaining[@]} -gt 0 ]] || return 0
+    targets=("${remaining[@]}")
+    printf 'Waiting for deletion: %s\n' "${targets[*]}"
+    seconds_left=$((deadline - SECONDS))
+    (( seconds_left > 0 )) || break
+    sleep "$((seconds_left < 30 ? seconds_left : 30))"
+  done
+  fail "Deletion still pending after 45 minutes: ${targets[*]}. Inspect locks/deployments and rerun cleanup."
+}
+if [[ "$RUN_SCHEMA" == 4 ]]; then
+  spoke_targets=()
+  for rg in "$RG_SPOKEA" "$RG_SPOKEB"; do
+    [[ " ${present[*]} " == *" $rg "* ]] && spoke_targets+=("$rg")
+  done
+  delete_workshop_groups "${spoke_targets[@]}"
+  if [[ " ${present[*]} " == *" $RG_HUB "* ]]; then
+    delete_workshop_groups "$RG_HUB"
   fi
-  # 삭제가 확인된 그룹은 다음 반복에서 제외하되, 아직 남은 그룹은 사용자에게 계속 표시합니다.
-  present=("${remaining[@]}")
-  printf 'Waiting for deletion: %s\n' "${present[*]}"
-  seconds_left=$((deadline - SECONDS))
-  (( seconds_left > 0 )) || break
-  sleep "$((seconds_left < 30 ? seconds_left : 30))"
-done
-fail "Deletion still pending after 45 minutes: ${present[*]}. Inspect locks/deployments and rerun cleanup."
+elif [[ "$RUN_SCHEMA" == 3 ]]; then
+  delete_workshop_groups "${present[@]}"
+else
+  fail "Unknown workshop schema: $RUN_SCHEMA"
+  exit 1
+fi
+printf 'PASS: workshop group deletion complete. Shared resources were not deleted.\n'
