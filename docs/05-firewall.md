@@ -104,11 +104,12 @@ Spoke Subnet에 NAT가 없고 Spoke NAT/Public IP도 없습니다.
 
 👁️ **설명**
 
-반복되는 VM·NIC·디스크와 **Hub NAT Gateway·Hub NAT 전용 Public IP 하나씩**은
-[`infra/lab-support.bicep`](../infra/lab-support.bicep)으로 배포합니다.
-세 기존 RG를 대상으로 `az deployment sub`를 사용하며, 기존 VNet·Subnet·NSG는
+반복되는 VM·NIC·디스크와 **Hub NAT Gateway·Hub NAT 전용 Public IP 하나씩**을
+Azure CLI로 순서대로 만듭니다. 세 기존 RG를 대상으로 하며, 기존 VNet·Subnet·NSG는
 만들거나 덮어쓰지 않습니다. VM NIC에는 Public IP가 없습니다.
 Hub NAT를 생성한 뒤 관리 Subnet에 연결하는 일은 별도 단계입니다.
+개별 명령은 원자적 배포가 아닙니다. 중간 실패·시간 초과 시 이미 생성된 자원을
+다시 만들지 말고 Portal에서 실제 상태를 확인한 뒤 남은 단계만 진행하세요.
 
 ### 2-1. 공개 SSH 키 준비
 
@@ -141,7 +142,7 @@ prepare_support_key
 
 새 키 fingerprint가 나오거나 기존 키 쌍이 유지됩니다. 개인 키를 배포 인수에 넣지 않습니다.
 
-### 2-2. 유료 배포 미리 보기
+### 2-2. 유료 자원 생성 전 충돌 확인
 
 🟢 **실행**
 
@@ -151,53 +152,83 @@ preview_support() {
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
   check_vm_network || return 1
-  az deployment sub what-if --name "support-$RUN_ID" --location "$LOCATION" \
-    --template-file infra/lab-support.bicep \
-    --parameters runId="$RUN_ID" location="$LOCATION" \
-      hubResourceGroup="$RG_HUB" spokeaResourceGroup="$RG_SPOKEA" spokebResourceGroup="$RG_SPOKEB" \
-      sshPublicKey="$public_key" --subscription "$SUBSCRIPTION_ID"
+  source scripts/workshop-support.sh || return 1
+  assert_support_slots_empty || return 1
+  printf '예정: Hub NAT·Public IP, Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크\n'
 }
 preview_support
 ```
 
 📋 **확인**
 
-Hub NAT·Hub Public IP **각 1개**, Hub/Spoke A/Spoke B VM·NIC·디스크가 추가됩니다.
-Spoke NAT/Public IP, VNet/Subnet 삭제 또는 다른 실행의 자원 변경이 보이면 배포하지 마세요.
-미리 보기는 자원을 생성하지 않습니다.
+Hub NAT·Hub Public IP **각 1개**, Hub/Spoke A/Spoke B VM·NIC·디스크가 생성될 예정입니다.
+대상 이름의 자원이 이미 있거나 목록 조회가 실패하면 중단합니다.
+이 읽기 전용 충돌 검사는 ARM what-if가 아니므로 용량·할당 성공을 보장하지 않습니다.
+Spoke NAT/Public IP는 만들지 않으며 기존 VNet·Subnet을 변경하지 않습니다.
 
 ### 2-3. 비용 확인 후 배포
 
 👁️ **설명**
 
 유료 VM 3대와 Hub NAT 하나의 배포에 동의할 때만 `CREATE`를 입력합니다.
-45분 timeout은 로컬 대기만 끝냅니다. 시간 초과 시 Azure Portal의 배포 상태를 먼저 확인하세요.
+각 VM 생성의 45분 timeout은 로컬 대기만 끝냅니다. 시간 초과 시 Azure Portal의 VM 상태를 먼저 확인하세요.
 
 🟢 **실행**
 
 <!-- exec:support-deploy -->
 ```bash
 deploy_support() {
-  local public_key confirm
+  local public_key confirm zone rg subnet subnet_id
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
   check_vm_network || return 1
+  source scripts/workshop-support.sh || return 1
+  assert_support_slots_empty || return 1
   read -rp "유료 VM 3대와 Hub NAT 1개를 배포합니다. CREATE 입력: " confirm || return 1
   [[ "$confirm" == CREATE ]] || { fail "Cancelled"; return 1; }
-  timeout 2700 az deployment sub create --name "support-$RUN_ID" --location "$LOCATION" \
-    --template-file infra/lab-support.bicep \
-    --parameters runId="$RUN_ID" location="$LOCATION" \
-      hubResourceGroup="$RG_HUB" spokeaResourceGroup="$RG_SPOKEA" spokebResourceGroup="$RG_SPOKEB" \
-      sshPublicKey="$public_key" -o json --subscription "$SUBSCRIPTION_ID"
+  az network public-ip create -g "$RG_HUB" -n "pip-lzbegin-hub-$RUN_ID" \
+    -l "$LOCATION" --sku Standard --allocation-method Static --version IPv4 \
+    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+    -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  az network nat gateway create -g "$RG_HUB" -n "nat-lzbegin-hub-$RUN_ID" \
+    -l "$LOCATION" --public-ip-addresses "pip-lzbegin-hub-$RUN_ID" \
+    --idle-timeout 4 --sku Standard \
+    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+    -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  for zone in hub spokea spokeb; do
+    case "$zone" in
+      hub) rg=$RG_HUB; subnet=snet-management ;;
+      spokea) rg=$RG_SPOKEA; subnet=snet-workload ;;
+      spokeb) rg=$RG_SPOKEB; subnet=snet-workload ;;
+    esac
+    subnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/$subnet"
+    az network nic create -g "$rg" -n "nic-lzbegin-$zone-$RUN_ID" \
+      -l "$LOCATION" --subnet "$subnet_id" \
+      --ip-forwarding false --public-ip-address "" \
+      --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+      -o json --subscription "$SUBSCRIPTION_ID" || return 1
+    timeout 2700 az vm create -g "$rg" -n "vm-lzbegin-$zone-$RUN_ID" \
+      -l "$LOCATION" --nics "nic-lzbegin-$zone-$RUN_ID" \
+      --image Canonical:ubuntu-24_04-lts:server:latest --size Standard_B2als_v2 \
+      --admin-username workshopadmin --authentication-type ssh --ssh-key-values "$public_key" \
+      --computer-name "$zone-$RUN_ID" --storage-sku StandardSSD_LRS \
+      --os-disk-delete-option Delete --nic-delete-option Delete \
+      --security-type TrustedLaunch --enable-secure-boot true --enable-vtpm true \
+      --enable-agent true \
+      --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+      -o json --subscription "$SUBSCRIPTION_ID" || return 1
+    az vm boot-diagnostics enable -g "$rg" -n "vm-lzbegin-$zone-$RUN_ID" \
+      -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  done
 }
 deploy_support
 ```
 
 📋 **확인**
 
-배포 `provisioningState=Succeeded`. 결과의 `support.hub`에만 `natGatewayId`와
-`publicIpId`가 있습니다. `support.spokea`와 `support.spokeb`에는 VM·NIC·사설 IP만 있습니다.
-NAT는 아직 관리 Subnet에 붙지 않았습니다.
+세 VM의 생성과 관리형 부팅 진단이 성공했는지 확인합니다. Hub에만 NAT Gateway와
+Public IP가 있으며, Spoke에는 사설 NIC·VM·OS 디스크만 있습니다.
+실제 사설 IP는 4절에서 조회합니다. NAT는 아직 관리 Subnet에 붙지 않았습니다.
 
 ### 2-4. Hub 관리 Subnet에 NAT 연결
 

@@ -210,6 +210,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 4 실행별·schema 3 기존 pool ID 검증과 schema 2 거부, 구독·RG 소유 확인 |
 | `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 생성 전 상태·준비 확인 및 실제 VNet·Subnet CIDR 재조회 |
+| `workshop-support.sh` | 모듈 05의 유료 CLI 생성 전 세 RG의 VM·NIC·Hub NAT/Public IP 이름 충돌 검사 |
 | `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 01·05 VM SKU/quota 및 필수 Provider 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
@@ -229,14 +230,16 @@ VM 보안 설정 및 **Hub NAT 연결만** 별도 단계인 이유를 설명합�
 |---|---|
 | `infra/run-ipam-pool.bicep` | 기존 실행별 Hub AVNM의 `/14` IPAM root pool 참고 템플릿; 모듈 02 신규 생성은 Azure CLI 사용 |
 | `infra/shared-ipam.bicep` | 이전 schema 3 실행의 운영자 공유 pool 템플릿; 신규 배포에는 사용하지 않음 |
-| `infra/workshop-ipam-vnet.bicep` | Spoke A/B VNet `/20`과 각 Subnet `/24`의 pool 할당; Hub VNet·관리·Firewall Subnet은 모듈 02에서 Azure CLI로 생성 |
-| `infra/lab-support.bicep` | 기존 세 RG에 VM과 Hub NAT만 보조 배포, 구독을 명시한 Subnet ID, 구역별 출력 |
+| `infra/workshop-ipam-vnet.bicep` | IPAM VNet 구성 참고 템플릿; 모듈 02의 Hub·Spoke A/B VNet과 Subnet은 Azure CLI로 생성 |
+| `infra/lab-support.bicep` | 기존 세 RG에 VM과 Hub NAT만 만드는 참고 템플릿; 모듈 05 참가자 경로는 Azure CLI로 순차 생성 |
 | `infra/modules/nat.bicep` | Hub 관리 Subnet용 NAT와 고정 Public IP, 참조로 생기는 의존 관계, CLI에서 별도로 수행하는 Hub 연결 |
 | `infra/modules/test-vm.bicep` | 공인 IP 없는 NIC, SSH 공개 키/VM agent, Trusted Launch, VM 삭제 시 디스크·NIC 수명 |
 
-이 템플릿은 네트워크 뼈대를 다시 만들지 않습니다. VNet·NSG·Subnet은
+참고 템플릿은 네트워크 뼈대를 다시 만들지 않습니다. VNet·NSG·Subnet은
 모듈 02, AVNM Connectivity는 03, Firewall·AVNM Routing은 04에서 관리합니다.
 보조 템플릿에는 Spoke NAT/PIP와 수동 route table을 추가하지 않습니다.
+모듈 05의 읽기 전용 충돌 검사는 ARM what-if를 대체하지 않으며,
+CLI 명령 중 하나가 실패하면 부분 생성 상태를 조회한 뒤에만 복구합니다.
 
 ## 로컬 검사
 

@@ -377,6 +377,7 @@ NSG 이름은 `nsg-lzbegin-spokea-<실행 ID>`입니다.
 
 A VNet `/20`과 워크로드 Subnet `/24`를 이번 실행의 pool에서 요청합니다.
 실제 할당 주소가 Hub와 겹치면 중단하세요. 인터넷 출구는 모듈 04에서 준비합니다.
+중간에 실패하면 이미 생성된 VNet을 다시 만들지 말고 조회 블록으로 상태를 확인하세요.
 
 🟢 **실행**
 
@@ -387,17 +388,23 @@ deploy_spokea_vnet() {
   existing=$(az network vnet list --resource-group "$RG_SPOKEA" -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg name "vnet-lzbegin-spokea-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Spoke A VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
-  az deployment group create --resource-group "$RG_SPOKEA" --name "ipam-vnet-spokea-$RUN_ID" \
-    --template-file infra/workshop-ipam-vnet.bicep \
-    --parameters "runId=$RUN_ID" zone=spokea "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID"
+  az network vnet create --resource-group "$RG_SPOKEA" --name "vnet-lzbegin-spokea-$RUN_ID" \
+    --location "$LOCATION" \
+    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+    -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  az network vnet subnet create --resource-group "$RG_SPOKEA" \
+    --vnet-name "vnet-lzbegin-spokea-$RUN_ID" --name snet-workload \
+    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+    --network-security-group "nsg-lzbegin-spokea-$RUN_ID" \
+    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
 }
 deploy_spokea_vnet
 ```
 
 📋 **확인**
 
-출력의 `vnetPrefixes`, `subnets`와 실제 VNet을 조회하여 `/20`·`/24` pool
+각 명령의 출력과 실제 VNet을 조회하여 `/20`·`/24` pool
 할당, `defaultOutboundAccess=false`, Spoke A NSG ID를 확인하세요.
 
 ### 2-4. Spoke A의 VNet 내부 인바운드 차단
@@ -486,6 +493,7 @@ NSG 이름은 `nsg-lzbegin-spokeb-<실행 ID>`입니다.
 B VNet `/20`과 `/24` Subnet을 할당하고 B NSG를 연결합니다.
 Hub·A와 겹치지 않는 주소는 서비스가 같은 pool에서 선택합니다.
 A와 Subnet 이름은 같지만 VNet과 주소 범위가 다른 별도 자원입니다.
+중간에 실패하면 이미 생성된 VNet을 다시 만들지 말고 조회 블록으로 상태를 확인하세요.
 
 🟢 **실행**
 
@@ -496,17 +504,23 @@ deploy_spokeb_vnet() {
   existing=$(az network vnet list --resource-group "$RG_SPOKEB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg name "vnet-lzbegin-spokeb-$RUN_ID" 'type == "array" and all(.[]; (.name | ascii_downcase) != ($name | ascii_downcase))' <<<"$existing" >/dev/null ||
     { fail "Spoke B VNet exists or VNet lookup is malformed; inspect it instead of redeploying."; return 1; }
-  az deployment group create --resource-group "$RG_SPOKEB" --name "ipam-vnet-spokeb-$RUN_ID" \
-    --template-file infra/workshop-ipam-vnet.bicep \
-    --parameters "runId=$RUN_ID" zone=spokeb "location=$LOCATION" "ipamPoolId=$IPAM_POOL_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID"
+  az network vnet create --resource-group "$RG_SPOKEB" --name "vnet-lzbegin-spokeb-$RUN_ID" \
+    --location "$LOCATION" \
+    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+    -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  az network vnet subnet create --resource-group "$RG_SPOKEB" \
+    --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" --name snet-workload \
+    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+    --network-security-group "nsg-lzbegin-spokeb-$RUN_ID" \
+    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
 }
 deploy_spokeb_vnet
 ```
 
 📋 **확인**
 
-출력의 `vnetPrefixes`, `subnets`와 실제 VNet을 조회하여 `/20`·`/24` pool
+각 명령의 출력과 실제 VNet을 조회하여 `/20`·`/24` pool
 할당, `defaultOutboundAccess=false`, Spoke B NSG ID를 확인하세요.
 
 ### 3-4. Spoke B의 VNet 내부 인바운드 차단

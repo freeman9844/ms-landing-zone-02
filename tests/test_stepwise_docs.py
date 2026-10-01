@@ -7,22 +7,47 @@ from test_network_docs import blocks, DOCS, az, rg, netid, vnet, subnet_args, ni
 from test_workshop_safety import FW, LAW, FW_IP, ready_calls, effective_admin_call, effective_admin_rule
 
 
-def support_args(verb):
-    return ["deployment", "sub", verb, "--name", "support-demo123", "--location", "koreacentral",
-            "--template-file", "infra/lab-support.bicep", "--parameters", "runId=demo123",
-            "location=koreacentral", "hubResourceGroup=" + rg("hub"),
-            "spokeaResourceGroup=" + rg("spokea"), "spokebResourceGroup=" + rg("spokeb"),
-            "sshPublicKey=fixture-public-key"]
+def support_inventory():
+    return [az(["resource", "list", "--resource-group", rg(zone), "-o", "json"], [])
+            for zone in ("hub", "spokea", "spokeb")]
 
 
 def support_cases():
     cases = {
-        "support-preview": [az(support_args("what-if"))],
-        "support-deploy": [az([*support_args("create"), "-o", "json"])],
+        "support-preview": support_inventory(),
+        "support-deploy": support_inventory() + [
+            az(["network", "public-ip", "create", "-g", rg("hub"), "-n", "pip-lzbegin-hub-demo123",
+                "-l", "koreacentral", "--sku", "Standard", "--allocation-method", "Static",
+                "--version", "IPv4", *TAGS, "-o", "json"]),
+            az(["network", "nat", "gateway", "create", "-g", rg("hub"),
+                "-n", "nat-lzbegin-hub-demo123", "-l", "koreacentral",
+                "--public-ip-addresses", "pip-lzbegin-hub-demo123", "--idle-timeout", "4",
+                "--sku", "Standard", *TAGS, "-o", "json"]),
+        ],
         "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
         "read-vm-ips": [nic("hub", "172.20.0.4"), nic("spokea", "172.20.16.4"), nic("spokeb", "172.20.32.4")],
     }
+    for zone in ("hub", "spokea", "spokeb"):
+        subnet = "snet-management" if zone == "hub" else "snet-workload"
+        name = f"vm-lzbegin-{zone}-demo123"
+        calls = cases["support-deploy"]
+        calls.extend([
+            az(["network", "nic", "create", "-g", rg(zone), "-n", f"nic-lzbegin-{zone}-demo123",
+                "-l", "koreacentral", "--subnet",
+                netid(zone, "virtualNetworks", vnet(zone)) + f"/subnets/{subnet}",
+                "--ip-forwarding", "false", "--public-ip-address", "", *TAGS, "-o", "json"]),
+            az(["vm", "create", "-g", rg(zone), "-n", name, "-l", "koreacentral",
+                "--nics", f"nic-lzbegin-{zone}-demo123",
+                "--image", "Canonical:ubuntu-24_04-lts:server:latest",
+                "--size", "Standard_B2als_v2", "--admin-username", "workshopadmin",
+                "--authentication-type", "ssh", "--ssh-key-values", "fixture-public-key",
+                "--computer-name", f"{zone}-demo123", "--storage-sku", "StandardSSD_LRS",
+                "--os-disk-delete-option", "Delete", "--nic-delete-option", "Delete",
+                "--security-type", "TrustedLaunch", "--enable-secure-boot", "true",
+                "--enable-vtpm", "true", "--enable-agent", "true", *TAGS, "-o", "json"]),
+            az(["vm", "boot-diagnostics", "enable", "-g", rg(zone), "-n", name, "-o", "json"]),
+        ])
     return cases
 
 
@@ -735,6 +760,24 @@ class StepwiseDocsTests(unittest.TestCase):
             result = run(script, preparation_calls(5), files=self.keyfile, input_text="CREATE\n")
             self.assertNotEqual(result.returncode, 0, result.stderr)
 
+    def test_support_preview_rejects_existing_targets_without_mutation(self):
+        for index, name in ((0, "nat-lzbegin-hub-demo123"),
+                            (1, "vm-lzbegin-spokea-demo123"),
+                            (2, "nic-lzbegin-spokeb-demo123"),
+                            (0, "vm-lzbegin-hub-demo123_OsDisk_1_leftover")):
+            with self.subTest(name=name):
+                calls = support_inventory()[:index + 1]
+                calls[index] = dict(calls[index], stdout=json.dumps([{"name": name}]))
+                result = self.execute(5, "support-preview", calls, files=self.keyfile)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+
+    def test_participant_modules_do_not_run_arm_deployments(self):
+        for module, path in DOCS.items():
+            with self.subTest(module=module):
+                for name, script in blocks(path).items():
+                    self.assertNotIn("az deployment", script, name)
+
     def test_effective_admin_checks_require_exact_avnm_rule_and_action(self):
         for step, zone, local, remote, action, rule in (
             ("verify-admin-allow-a", "spokea", "172.20.16.4", "172.20.0.4", "Allow", "hub-to-a"),
@@ -865,7 +908,8 @@ class StepwiseDocsTests(unittest.TestCase):
                 result = self.execute(4, name, firewall_cases()[name], input_text="")
                 self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotEqual(self.execute(5, "support-deploy",
-                                        input_text="NO\n", files=self.keyfile).returncode, 0)
+                                        support_inventory(), input_text="NO\n",
+                                        files=self.keyfile).returncode, 0)
 
     def test_missing_key_stops_preview_and_deploy_without_cloud_mutation(self):
         for name in ("support-preview", "support-deploy"):

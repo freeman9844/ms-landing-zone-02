@@ -97,7 +97,9 @@ class DocsTests(unittest.TestCase):
         self.assertIn("firewall", module04.lower())
         self.assertNotIn("vm-lzbegin-spokea", module04)
         self.assertIn("security-admin-config", module05)
-        self.assertIn("lab-support.bicep", module05)
+        self.assertIn("az network nic create", module05)
+        self.assertIn("az vm create", module05)
+        self.assertNotIn("lab-support.bicep", module05)
         self.assertIn("assert_avnm_routes_ready", module04)
         self.assertIn("assert_no_spoke_nat", module05)
         text = "\n".join((ROOT / relative).read_text() for relative in
