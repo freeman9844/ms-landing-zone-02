@@ -182,6 +182,7 @@ inspect_avnm_ready
 방금 만든 Hub AVNM 아래에 `ipam-lzbegin-<실행 ID>`를 만들고 주소 root
 `172.20.0.0/14`를 등록합니다. 기존 운영자 공유 RG나 pool을 사용하지 않습니다.
 재접속했다면 위 공통 준비와 `avnm-ready` 조회를 먼저 재실행하세요.
+`run_ipam_pool_status`가 Hub RG 소유권·AVNM 준비 상태와 pool 목록을 검사합니다.
 pool이 이미 있다면 생성 명령을 반복하지 않고 정확한 ID·구성·준비 상태만 확인합니다.
 `Updating`이면 조회만 다시 수행하고, 다른 pool이나 조회 실패이면 중단합니다.
 
@@ -190,38 +191,19 @@ pool이 이미 있다면 생성 명령을 반복하지 않고 정확한 ID·구�
 <!-- exec:run-ipam-pool -->
 ```bash
 source scripts/workshop-ipam.sh &&
-create_run_ipam_pool() {
-  local manager pools
-  require_run_schema_four || return 1
-  assert_owned_rg "$RG_HUB" || return 1
-  manager=$(az network manager show --name "$AVNM" -g "$RG_HUB" \
-    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
-  jq -e --arg id "${AVNM_ID,,}" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
-    (.id | ascii_downcase) == $id and .provisioningState == "Succeeded" and
-    (.networkManagerScopes.subscriptions | type == "array" and length == 1 and
-      (.[0] | ascii_downcase) == $scope) and
-    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
-  ' <<< "$manager" >/dev/null ||
-    { fail "Run AVNM is not ready for IPAM pool creation."; return 1; }
-  pools=$(az rest --method get --url "$AVNM_ID/ipamPools?api-version=2024-05-01" \
-    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
-  jq -e 'type == "object" and .nextLink == null and (.value | type == "array")' <<< "$pools" >/dev/null ||
-    { fail "Incomplete or invalid IPAM pool listing."; return 1; }
-  if jq -e '.value | length == 1' <<< "$pools" >/dev/null; then
-    assert_run_ipam_pool
-  elif jq -e '.value | length == 0' <<< "$pools" >/dev/null; then
-    az network manager ipam-pool create \
-      --name "ipam-lzbegin-$RUN_ID" --network-manager-name "$AVNM" \
-      -g "$RG_HUB" --location "$LOCATION" \
-      --address-prefixes '["172.20.0.0/14"]' \
-      -o json --subscription "$SUBSCRIPTION_ID" || return 1
-    assert_run_ipam_pool
-  else
-    fail "Unexpected pool already exists under the run AVNM; do not overwrite it."
-    return 1
-  fi
-}
-create_run_ipam_pool
+pool_status=$(run_ipam_pool_status) &&
+if [[ "$pool_status" == missing ]]; then
+  az network manager ipam-pool create \
+    --name "ipam-lzbegin-$RUN_ID" --network-manager-name "$AVNM" \
+    -g "$RG_HUB" --location "$LOCATION" \
+    --address-prefixes '["172.20.0.0/14"]' \
+    -o json --subscription "$SUBSCRIPTION_ID" &&
+  assert_run_ipam_pool
+elif [[ "$pool_status" == ready ]]; then
+  printf '기존 IPAM pool 준비 확인 완료\n'
+else
+  fail "Unexpected IPAM pool status: $pool_status"
+fi
 ```
 
 📋 **확인**

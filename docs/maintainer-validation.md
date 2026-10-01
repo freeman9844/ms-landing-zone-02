@@ -209,7 +209,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 4 실행별·schema 3 기존 pool ID 검증과 schema 2 거부, 구독·RG 소유 확인 |
-| `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 준비 확인 및 실제 VNet·Subnet CIDR 재조회 |
+| `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 생성 전 상태·준비 확인 및 실제 VNet·Subnet CIDR 재조회 |
 | `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 01·05 VM SKU/quota 및 필수 Provider 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |

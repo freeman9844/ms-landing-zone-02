@@ -58,6 +58,7 @@ class SharedPoolTests(unittest.TestCase):
         from harness import POOL_ID as run_pool
         doc = (ROOT / "docs/02-network-foundation.md").read_text()
         block = re.search(r"<!-- exec:run-ipam-pool -->\s*```bash\n(.*?)\n```", doc, re.S).group(1)
+        self.assertLessEqual(len(block.splitlines()), 18, "Participant pool creation must stay concise")
         manager_id = run_pool.split("/ipamPools/")[0]
         hub = "rg-lzbegin-hub-demo123"
         manager = {"id": manager_id, "location": "koreacentral", "provisioningState": "Succeeded",
@@ -106,6 +107,15 @@ class SharedPoolTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         result = run(SOURCE + 'load_run state.json && ' + block,
                      prefix + [call(listing, {"value": [], "nextLink": "more"})])
+        self.assertNotEqual(result.returncode, 0)
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     [group("hub"), call(manager_show, dict(manager, provisioningState="Updating"))])
+        self.assertNotEqual(result.returncode, 0)
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": [dict(pool, properties=dict(
+                         pool["properties"], provisioningState="Updating"))]})] +
+                     [group("hub"), call(pool_read, dict(pool, properties=dict(
+                         pool["properties"], provisioningState="Updating")))])
         self.assertNotEqual(result.returncode, 0)
 
     def test_new_run_preflight_rejects_feature_conflicts_and_address_overlap(self):

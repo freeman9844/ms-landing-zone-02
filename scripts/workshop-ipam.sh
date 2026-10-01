@@ -44,6 +44,32 @@ assert_run_ipam_pool() {
     { fail "This run's parent AVNM ID, scope or state is not ready: $AVNM_ID"; return 1; }
 }
 
+run_ipam_pool_status() {
+  local manager pools
+  require_run_schema_four || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  manager=$(az network manager show --name "$AVNM" -g "$RG_HUB" \
+    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
+  jq -e --arg id "${AVNM_ID,,}" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    (.id | ascii_downcase) == $id and .provisioningState == "Succeeded" and
+    (.networkManagerScopes.subscriptions | type == "array" and length == 1 and
+      (.[0] | ascii_downcase) == $scope) and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<< "$manager" >/dev/null ||
+    { fail "Run AVNM is not ready for IPAM pool creation."; return 1; }
+  pools=$(az rest --method get --url "$AVNM_ID/ipamPools?api-version=2024-05-01" \
+    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
+  jq -e 'type == "object" and .nextLink == null and
+    (.value | type == "array" and length <= 1)' <<< "$pools" >/dev/null ||
+    { fail "Incomplete or unexpected IPAM pool listing."; return 1; }
+  if jq -e '.value | length == 0' <<< "$pools" >/dev/null; then
+    printf 'missing\n'
+  else
+    assert_run_ipam_pool || return 1
+    printf 'ready\n'
+  fi
+}
+
 clear_ipam_cidrs() {
   unset HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
     HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR \
