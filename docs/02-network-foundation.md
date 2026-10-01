@@ -106,19 +106,9 @@ esac
 다음 단계에서 이 AVNM 아래에 이번 실행의 IPAM pool도 만듭니다.
 같은 구독에서 두 번째 실행별 AVNM을 만들면 기능 범위가 충돌하므로 한 구독에서
 한 번에 한 실습만 진행합니다.
-먼저 목록을 조회해 예상치 못한 자원이 없는지 확인합니다. `Updating` 응답이면
+생성 블록이 직전에 AVNM 목록을 조회해 비어 있을 때만 생성합니다.
+목록 조회에 실패하거나 예상치 못한 자원이 있으면 중단합니다. `Updating` 응답이면
 다시 생성하지 말고 아래 읽기 전용 확인을 재실행하세요.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm -->
-```bash
-az network manager list --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-`[]`여야 새 AVNM을 생성할 수 있습니다. 목록 조회 실패나 다른 자원이 있으면 중단하세요.
 
 🟢 **실행**
 

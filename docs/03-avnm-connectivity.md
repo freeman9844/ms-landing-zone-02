@@ -103,30 +103,12 @@ inspect_avnm_ready
 Network Group에는 **Spoke A와 Spoke B만** 들어갑니다. Hub는 group member가 아니라 이후
 Connectivity Configuration의 hub로 별도 지정합니다. 이 AVNM의 Network Group도 새로 만듭니다.
 
-### 2-1. 현재 Network Group 목록 조회
+### 2-1. Spoke Network Group 최초 생성
 
 👁️ **설명**
 
-이번 AVNM의 group 이름을 확인합니다. Hub를 멤버로 지정하는 단계가 아닙니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-network-groups -->
-```bash
-# AVNM에 속한 기존 Network Group의 이름과 ID를 확인합니다.
-az network manager group list --network-manager-name "$AVNM" \
-  --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-빈 배열 `[]`을 확인하세요. 기존 group이나 조회 오류가 있으면 생성하지 않습니다.
-
-### 2-2. Spoke Network Group 최초 생성
-
-👁️ **설명**
-
-현재 목록이 비어 있을 때만 Group을 새로 만듭니다.
+생성 직전에 AVNM의 Group 목록을 한 번 조회합니다. 비어 있을 때만 Group을
+새로 만들고, 기존 group이나 조회 오류가 있으면 중단합니다.
 
 🟢 **실행**
 
@@ -162,31 +144,12 @@ Spoke용 Group이 생성됩니다. Hub를 정적 멤버로 추가하지 않습�
 이 워크숍은 동적 멤버십을 쓰지 않습니다. 처음에는 정적 멤버가 없으며
 Spoke A VNet부터 등록합니다.
 
-### 3-1. 현재 정적 멤버 조회
+### 3-1. Spoke A 정적 멤버 최초 생성
 
 👁️ **설명**
 
-Spoke A를 추가하기 전 Network Group에 이미 들어 있는 VNet을 살펴봅니다.
-동적 멤버십을 만드는 명령이 아닙니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-members-before-spokea -->
-```bash
-# group의 기존 정적 멤버와 각각의 resourceId를 읽습니다.
-az network manager group static-member list --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-처음 실행이면 빈 배열입니다. 다른 VNet이 이미 있으면 추가 작업을 멈추고 원인을 확인하세요.
-
-### 3-2. Spoke A 정적 멤버 최초 생성
-
-👁️ **설명**
-
-생성 직전에 Group이 비어 있는지 확인하고 Spoke A VNet의 전체 ID로 등록합니다.
+생성 직전에 정적 멤버 목록이 비어 있는지 확인하고 Spoke A VNet의 전체 ID로
+등록합니다. 기존 멤버나 조회 오류가 있으면 중단합니다.
 
 🟢 **실행**
 
@@ -224,32 +187,12 @@ Spoke A VNet만 group member여야 합니다. Hub나 다른 VNet이 대신 들�
 
 B도 새 정적 멤버로 추가합니다. 앞에서 만든 A만 있는 상태여야 합니다.
 
-### 4-1. A 등록 후 정적 멤버 조회
+### 4-1. Spoke B 정적 멤버 최초 생성
 
 👁️ **설명**
 
-A 등록 결과를 별도로 조회합니다. 목록 전파가 늦을 수 있으며 구성 생성 전
-5-1에서 A/B 모두 반영됐는지 다시 기다립니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-members-before-spokeb -->
-```bash
-# B를 추가하기 전에 A가 group에 표시되는지 확인합니다.
-az network manager group static-member list --network-group "$NETWORK_GROUP" \
-  --network-manager "$AVNM" --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID"
-```
-
-📋 **확인**
-
-`spokea`의 `resourceId`가 A VNet을 가리켜야 합니다. 오류라면 B 추가를 진행하지 않습니다.
-
-### 4-2. Spoke B 정적 멤버 최초 생성
-
-👁️ **설명**
-
-B 생성 직전 A만 등록돼 있는지 확인합니다. B가 이미 있거나 다른 VNet이
-섞여 있다면 덮어쓰지 않고 중단합니다.
+B 생성 직전 A만 등록돼 있는지 한 번 조회합니다. B가 이미 있거나 다른 VNet이
+섞여 있다면 덮어쓰지 않고 중단합니다. 목록 조회가 실패해도 생성하지 않습니다.
 
 🟢 **실행**
 

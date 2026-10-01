@@ -70,8 +70,9 @@ IPAM 조회 응답은 요청 본문의 `pool.id` 대신 `id`와
 
 VNet·Subnet·NSG는 모듈 02, AVNM Connectivity·Routing 대상 Group은 모듈 03,
 Firewall과 중앙 경로는 모듈 04, VM·Hub NAT·Security Admin은 모듈 05에서 다룹니다.
-참가자가 구독·RG·전체 자원 ID·Group 범위·주소를 비교할 수 있도록 각 생성/배포와
-읽기 전용 확인을 분리합니다. 특히 **Routing 적용 전 Firewall이 준비**돼야 하고,
+참가자가 구독·RG·전체 자원 ID·Group 범위·주소를 비교할 수 있도록
+생성 직전의 목록 조회는 생성 블록 안에서 한 번만 수행하고, 배포 후 상태·적용 결과
+확인은 별도로 유지합니다. 특히 **Routing 적용 전 Firewall이 준비**돼야 하고,
 **VM 생성 전 두 Spoke의 AVNM 경로와 `/0` 출구**가 준비돼야 합니다.
 대상별 실습 동작을 숨기지 않되, 안전 함수·검증기의 내부 반복은 유지합니다.
 

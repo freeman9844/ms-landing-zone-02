@@ -85,7 +85,6 @@ def foundation_cases():
     cases = {}
     cases["avnm-create"] = avnm_cases()["avnm-create"]
     cases["avnm-ready"] = avnm_cases()["avnm-ready"]
-    cases["inspect-avnm"] = avnm_cases()["avnm-create"][:1]
     for zone in ("hub", "spokea", "spokeb"):
         nsg = f"nsg-lzbegin-{zone}-demo123"
         for kind, args in (
@@ -714,6 +713,18 @@ printf 'SHELL_ALIVE\\n'
         self.assertNotIn("avnm-create", blocks(DOCS[3]))
         self.assertFalse(any("subnet create" in value for value in steps.values()))
 
+    def test_first_creation_performs_only_one_prewrite_inventory(self):
+        for module, preview, creation in (
+            (2, "inspect-avnm", "avnm-create"),
+            (3, "inspect-network-groups", "network-group-create"),
+            (3, "inspect-members-before-spokea", "member-spokea"),
+            (3, "inspect-members-before-spokeb", "member-spokeb"),
+        ):
+            with self.subTest(action=creation):
+                self.assertNotIn(preview, blocks(DOCS[module]))
+                result = self.execute(module, creation, avnm_cases()[creation])
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_pool_deployment_rejects_existing_vnet_or_malformed_discovery_without_writing(self):
         for zone in ("hub", "spokea", "spokeb"):
             lookup = foundation_cases()[f"foundation-{zone}-vnet"][0]
@@ -750,20 +761,6 @@ printf 'SHELL_ALIVE\\n'
                 result = self.execute(2, f"foundation-{zone}-vnet", [response])
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("VNet exists or VNet lookup is malformed", result.stderr)
-
-    def test_avnm_inspection_blocks_are_read_only_and_show_cli_output(self):
-        for name, calls in (
-            ("inspect-avnm", avnm_cases()["avnm-create"][:1]),
-            ("inspect-network-groups", avnm_cases()["network-group-create"][:1]),
-            ("inspect-members-before-spokea", avnm_cases()["member-spokea"][:1]),
-            ("inspect-members-before-spokeb", avnm_cases()["member-spokeb"][:1]),
-        ):
-            with self.subTest(step=name):
-                steps = blocks(DOCS[2 if name == "inspect-avnm" else 3])
-                self.assertNotIn(" create ", steps[name])
-                result = self.execute(2 if name == "inspect-avnm" else 3, name, calls)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(calls[0]["stdout"], result.stdout)
 
     def test_hub_effective_configuration_accepts_only_empty_or_approved_configuration(self):
         expected_call = avnm_cases()["effective-hub"][0]
