@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import unittest
 import test_network_docs
 from harness import run, account, group, call, ROOT, SUB
@@ -34,23 +35,24 @@ def support_resource(kind, zone):
             "subnet": {"id": netid(zone, "virtualNetworks", vnet(zone)) + f"/subnets/{subnet}"},
             "publicIPAddress": None}])
     if kind == "vm":
+        disk_name = name + "_disk1_2628fd89665b46e5a3110aef30244cdf"
         obj.update(
             hardwareProfile={"vmSize": "Standard_B2als_v2"},
             securityProfile={"securityType": "TrustedLaunch",
                              "uefiSettings": {"secureBootEnabled": True, "vTpmEnabled": True}},
             storageProfile={"imageReference": {"publisher": "Canonical", "offer": "ubuntu-24_04-lts",
                                                "sku": "server"},
-                            "osDisk": {"name": name + "_OsDisk_1",
+                            "osDisk": {"name": disk_name,
                                        "managedDisk": {"storageAccountType": "StandardSSD_LRS",
                                                        "id": (f"/subscriptions/{SUB}/resourceGroups/{rg(zone)}"
-                                                              f"/providers/Microsoft.Compute/disks/{name}_OsDisk_1")},
+                                                             f"/providers/Microsoft.Compute/disks/{disk_name}")},
                                        "deleteOption": "Delete"}},
             osProfile={"adminUsername": "workshopadmin", "computerName": f"{zone}-demo123",
                        "linuxConfiguration": {"disablePasswordAuthentication": True,
                                               "provisionVMAgent": True,
                                               "ssh": {"publicKeys": [{"keyData": "fixture-public-key"}]}}},
             networkProfile={"networkInterfaces": [{"id": support_resource("nic", zone)["id"],
-                                                    "properties": {"deleteOption": "Delete"}}]},
+                                                    "deleteOption": "Delete"}]},
             diagnosticsProfile={"bootDiagnostics": {"enabled": True}})
     return obj
 
@@ -68,7 +70,7 @@ def support_verification_calls():
     for zone, kinds in (("hub", ("pip", "nat", "nic", "vm")),
                         ("spokea", ("nic", "vm")), ("spokeb", ("nic", "vm"))):
         inventory = [support_resource(kind, zone) for kind in kinds]
-        inventory.append({"name": f"vm-lzbegin-{zone}-demo123_OsDisk_1",
+        inventory.append({"name": support_resource("vm", zone)["storageProfile"]["osDisk"]["name"],
                           "type": "Microsoft.Compute/disks"})
         for kind in kinds:
             calls.append(az(["resource", "list", "--resource-group", rg(zone), "-o", "json"], inventory))
@@ -100,7 +102,7 @@ def support_cases():
             az(["network", "nic", "create", "-g", rg(zone), "-n", f"nic-lzbegin-{zone}-demo123",
                 "-l", "koreacentral", "--subnet",
                 netid(zone, "virtualNetworks", vnet(zone)) + f"/subnets/{subnet}",
-                "--ip-forwarding", "false", "--public-ip-address", "", *TAGS, "-o", "json"]),
+                "--ip-forwarding", "false", *TAGS, "-o", "json"]),
             az(["vm", "create", "-g", rg(zone), "-n", name, "-l", "koreacentral",
                 "--nics", f"nic-lzbegin-{zone}-demo123",
                 "--image", "Canonical:ubuntu-24_04-lts:server:latest",
@@ -828,7 +830,8 @@ class StepwiseDocsTests(unittest.TestCase):
         for index, name in ((0, "nat-lzbegin-hub-demo123"),
                             (1, "vm-lzbegin-spokea-demo123"),
                             (2, "nic-lzbegin-spokeb-demo123"),
-                            (0, "vm-lzbegin-hub-demo123_OsDisk_1_leftover")):
+                            (0, "vm-lzbegin-hub-demo123_OsDisk_1_leftover"),
+                            (0, "vm-lzbegin-hub-demo123_disk1_2628fd89665b46e5a3110aef30244cdf")):
             with self.subTest(name=name):
                 calls = support_inventory()[:index + 1]
                 calls[index] = dict(calls[index], stdout=json.dumps([{"name": name}]))
@@ -840,6 +843,8 @@ class StepwiseDocsTests(unittest.TestCase):
         steps = blocks(DOCS[5])
         self.assertIn("support-recovery", steps)
         self.assertIn("verify-support", steps)
+        for name in ("support-deploy", "support-recovery"):
+            self.assertIsNone(re.search(r"--public-ip-address(?:\s|$)", steps[name]))
         self.assertIn("recover_support", steps["support-recovery"])
         self.assertIn("az vm create", steps["support-recovery"])
         self.assertIn("CREATE", steps["support-recovery"])
@@ -901,7 +906,7 @@ class StepwiseDocsTests(unittest.TestCase):
         script = ('export STATE_FILE=state.json\n' + blocks(DOCS[5])["prepare-05"] +
                   '\nsource scripts/workshop-support.sh\nrequire_support_missing vm hub')
         resource = support_resource("vm", "hub")
-        disk = {"name": "vm-lzbegin-hub-demo123_OsDisk_1",
+        disk = {"name": "vm-lzbegin-hub-demo123_disk1_2628fd89665b46e5a3110aef30244cdf",
                 "type": "Microsoft.Compute/disks", "tags": resource["tags"]}
         for inventory in ([dict(resource, tags={"runId": "other"})], [disk],
                           [{"name": resource["name"]}], {"value": []}):

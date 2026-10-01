@@ -205,7 +205,7 @@ deploy_support() {
     subnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/$subnet"
     az network nic create -g "$rg" -n "nic-lzbegin-$zone-$RUN_ID" \
       -l "$LOCATION" --subnet "$subnet_id" \
-      --ip-forwarding false --public-ip-address "" \
+      --ip-forwarding false \
       --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
       -o json --subscription "$SUBSCRIPTION_ID" || return 1
     timeout 2700 az vm create -g "$rg" -n "vm-lzbegin-$zone-$RUN_ID" \
@@ -293,7 +293,7 @@ recover_support() {
       subnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/$subnet"
       az network nic create -g "$rg" -n "nic-lzbegin-$zone-$RUN_ID" \
         -l "$LOCATION" --subnet "$subnet_id" \
-        --ip-forwarding false --public-ip-address "" \
+        --ip-forwarding false \
         --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
         -o json --subscription "$SUBSCRIPTION_ID" || return 1
       ;;

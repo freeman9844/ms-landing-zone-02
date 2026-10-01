@@ -14,7 +14,9 @@ assert_support_slots_empty() {
       --arg nat "nat-lzbegin-hub-$RUN_ID" --arg zone "$zone" '
       type == "array" and all(.[]; (.name | type == "string") and
         ((.name | ascii_downcase) as $name |
-          $name != $vm and ($name | startswith($vm + "_osdisk") | not) and
+          $name != $vm and
+          ($name | startswith($vm + "_osdisk") | not) and
+          ($name | startswith($vm + "_disk1_") | not) and
           $name != $nic and
           ($zone != "hub" or ($name != $pip and $name != $nat))))
     ' <<< "$inventory" >/dev/null ||
@@ -68,7 +70,9 @@ support_slot_exists() {
     return 0
   fi
   if [[ "$kind" == vm ]] && jq -e --arg name "$SUPPORT_NAME" '
-    any(.[]; .name | ascii_downcase | startswith(($name + "_osdisk") | ascii_downcase))
+    any(.[]; .name | ascii_downcase |
+      startswith(($name + "_osdisk") | ascii_downcase) or
+      startswith(($name + "_disk1_") | ascii_downcase))
   ' <<<"$inventory" >/dev/null; then
     fail "VM absent but OS disk slot occupied: $SUPPORT_NAME"
     return 1
@@ -124,7 +128,9 @@ verify_support_resource() {
        .storageProfile.imageReference.sku == "server" and
        .storageProfile.osDisk.managedDisk.storageAccountType == "StandardSSD_LRS" and
        (.storageProfile.osDisk.name | type == "string" and
-        (ascii_downcase | startswith(("vm-lzbegin-" + $zone + "-" + $run + "_osdisk") | ascii_downcase))) and
+        (ascii_downcase |
+         startswith(("vm-lzbegin-" + $zone + "-" + $run + "_osdisk") | ascii_downcase) or
+         startswith(("vm-lzbegin-" + $zone + "-" + $run + "_disk1_") | ascii_downcase))) and
        same(.storageProfile.osDisk.managedDisk.id;
          ("/subscriptions/" + $sub + "/resourceGroups/" + $rg +
           "/providers/Microsoft.Compute/disks/" + .storageProfile.osDisk.name)) and
@@ -139,7 +145,7 @@ verify_support_resource() {
        (.osProfile.linuxConfiguration.ssh.publicKeys | type == "array" and length == 1) and
        .osProfile.linuxConfiguration.ssh.publicKeys[0].keyData == $public_key and
        (.networkProfile.networkInterfaces | type == "array" and length == 1) and
-       .networkProfile.networkInterfaces[0].properties.deleteOption == "Delete" and
+       .networkProfile.networkInterfaces[0].deleteOption == "Delete" and
        same(.networkProfile.networkInterfaces[0].id;
          ("/subscriptions/" + $sub + "/resourceGroups/" + $rg +
           "/providers/Microsoft.Network/networkInterfaces/nic-lzbegin-" + $zone + "-" + $run)) and
