@@ -284,6 +284,12 @@ deploy_hub_vnet
 `AzureFirewallSubnet`에는 NSG가 없어야 합니다. 불일치하면 다음 블록을 실행하지 마세요.
 암묵적 인터넷 출구는 사용하지 않으며 모듈 04에서 NAT를 명시적으로 연결합니다.
 
+Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → IPAM pool → Allocations**에서
+Hub VNet `/20`과 두 Subnet `/24`·`/26`의 할당을 확인할 수 있습니다.
+아래 화면의 주소와 실행 ID는 예시이며, 자신의 할당 결과를 확인하세요.
+
+![Azure Portal의 IPAM pool Allocations에 표시된 Hub VNet과 관리·Firewall Subnet 할당](images/02-hub-ipam-allocations.png)
+
 ### 1-6. Hub의 기본 VNet 내부 허용보다 앞서는 차단
 
 👁️ **설명**
