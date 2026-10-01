@@ -109,7 +109,8 @@ Azure CLI로 순서대로 만듭니다. 세 기존 RG를 대상으로 하며, �
 만들거나 덮어쓰지 않습니다. VM NIC에는 Public IP가 없습니다.
 Hub NAT를 생성한 뒤 관리 Subnet에 연결하는 일은 별도 단계입니다.
 개별 명령은 원자적 배포가 아닙니다. 중간 실패·시간 초과 시 이미 생성된 자원을
-다시 만들지 말고 Portal에서 실제 상태를 확인한 뒤 남은 단계만 진행하세요.
+다시 만들지 마세요. 아래 **2-3a 단계별 복구**에서 현재 상태를 읽고, 없는 명령만
+하나씩 실행합니다. 상태 확인 실패·설정 불일치는 새 자원을 만들 수 있다는 증거가 아닙니다.
 
 ### 2-1. 공개 SSH 키 준비
 
@@ -226,9 +227,124 @@ deploy_support
 
 📋 **확인**
 
-세 VM의 생성과 관리형 부팅 진단이 성공했는지 확인합니다. Hub에만 NAT Gateway와
+**2-3b 검증에 성공하기 전에는 2-4로 진행하지 않습니다.** Hub에만 NAT Gateway와
 Public IP가 있으며, Spoke에는 사설 NIC·VM·OS 디스크만 있습니다.
 실제 사설 IP는 4절에서 조회합니다. NAT는 아직 관리 Subnet에 붙지 않았습니다.
+
+### 2-3a. 중간 실패 시 단계별 복구 (자동 재개 아님)
+
+👁️ **설명**
+
+2-3이 중단되면 **2-2와 2-3 전체를 다시 실행하지 않습니다.** 재접속 시 공통 준비,
+2-1 키, 1-2 경로 검사 블록을 다시 실행합니다. 아래 블록은 먼저 세 RG의 대상
+PIP·NAT·NIC·VM 이름·ID·유형·태그와 실제 설정을 읽어 `PASS` 또는 `MISSING`을 표시합니다.
+조회 실패, 잘못된 태그/ID/설정, VM 없는 OS 디스크 충돌은 **중단**이며 없는 것으로
+간주하지 않습니다. 상태가 불명확하면 운영자에게 문의하고 변경하지 마세요.
+`MISSING`인 항목만 **순서대로 하나씩** `recover_support pip hub`,
+`recover_support nat hub`, 각 영역별 `recover_support nic hub` →
+`recover_support vm hub` → `recover_support boot hub` (spokea, spokeb도 동일)로
+실행합니다. 이미 존재하는 VM에서 부팅 진단만 꺼져 있다면 상태 검사가 멈춥니다.
+그 경우 `BOOT_PENDING`으로 표시됩니다. VM의 나머지 속성에 불일치가 있다면
+중단하고 운영자에게 문의하세요. 이 절은 VM을 다시 만들거나 설정을 덮어쓰지 않습니다.
+한 명령 뒤 다시 `inspect_support_slots`를 호출해 결과를 확인하세요. 이후 다음
+`MISSING` 항목을 선택합니다. NIC/VM이 이미 있으면 생성하지 않고 검증만 합니다.
+매 VM 생성마다 `CREATE`를 다시 입력해야 합니다. 45분 시간 초과 후에도 먼저
+조회하여 실제 생성 상태를 판단하세요.
+
+🟢 **실행**
+
+<!-- exec:support-recovery -->
+```bash
+source scripts/workshop-support.sh
+recover_support() {
+  local kind=$1 zone=${2:-hub} rg subnet subnet_id public_key confirm
+  check_vm_network || return 1
+  source scripts/workshop-support.sh || return 1
+  if [[ "$kind" == boot ]]; then
+    require_support_present nic "$zone" || return 1
+    support_slot_exists vm "$zone" || { fail "VM missing or unsafe"; return 1; }
+    verify_support_resource vm "$zone" pending || return 1
+    support_target vm "$zone" || return 1
+    az vm boot-diagnostics enable -g "$SUPPORT_RG" -n "$SUPPORT_NAME" \
+      -o json --subscription "$SUBSCRIPTION_ID" || return 1
+    return 0
+  fi
+  support_target "$kind" "$zone" || return 1
+  rg=$SUPPORT_RG
+  require_support_missing "$kind" "$zone" || return 1
+  case "$kind" in
+    pip)
+      az network public-ip create -g "$rg" -n "pip-lzbegin-hub-$RUN_ID" \
+        -l "$LOCATION" --sku Standard --allocation-method Static --version IPv4 \
+        --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+        -o json --subscription "$SUBSCRIPTION_ID" || return 1
+      ;;
+    nat)
+      require_support_present pip hub || return 1
+      az network nat gateway create -g "$rg" -n "nat-lzbegin-hub-$RUN_ID" \
+        -l "$LOCATION" --public-ip-addresses "pip-lzbegin-hub-$RUN_ID" \
+        --idle-timeout 4 --sku Standard \
+        --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+        -o json --subscription "$SUBSCRIPTION_ID" || return 1
+      ;;
+    nic)
+      subnet=snet-workload
+      if [[ "$zone" == hub ]]; then subnet=snet-management; fi
+      subnet_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$rg/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID/subnets/$subnet"
+      az network nic create -g "$rg" -n "nic-lzbegin-$zone-$RUN_ID" \
+        -l "$LOCATION" --subnet "$subnet_id" \
+        --ip-forwarding false --public-ip-address "" \
+        --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+        -o json --subscription "$SUBSCRIPTION_ID" || return 1
+      ;;
+    vm)
+      require_support_present nic "$zone" || return 1
+      public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
+      [[ -n "$public_key" ]] || return 1
+      read -rp "유료 VM $zone 생성: CREATE 입력: " confirm || return 1
+      [[ "$confirm" == CREATE ]] || { fail "Cancelled"; return 1; }
+      timeout 2700 az vm create -g "$rg" -n "vm-lzbegin-$zone-$RUN_ID" \
+        -l "$LOCATION" --nics "nic-lzbegin-$zone-$RUN_ID" \
+        --image Canonical:ubuntu-24_04-lts:server:latest --size Standard_B2als_v2 \
+        --admin-username workshopadmin --authentication-type ssh --ssh-key-values "$public_key" \
+        --computer-name "$zone-$RUN_ID" --storage-sku StandardSSD_LRS \
+        --os-disk-delete-option Delete --nic-delete-option Delete \
+        --security-type TrustedLaunch --enable-secure-boot true --enable-vtpm true \
+        --enable-agent true \
+        --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+        -o json --subscription "$SUBSCRIPTION_ID" || return 1
+      ;;
+    *) fail "Unknown recovery command"; return 1 ;;
+  esac
+}
+inspect_support_slots
+```
+
+📋 **확인**
+
+`inspect_support_slots`가 실패하면 복구 명령을 실행하지 않습니다. 위 명령 정의 후
+**`MISSING`이라고 표시된 항목만** `recover_support pip hub`처럼 한 줄씩
+직접 실행합니다. `BOOT_PENDING`은 해당 영역의 `recover_support boot hub`처럼
+실행합니다. VM을 새로 만든 후에도 먼저 상태를 다시 읽고, `BOOT_PENDING`을
+확인한 뒤 부팅 진단 명령을 실행합니다.
+성공 여부는 반드시 다음 읽기 전용 검사로 확인합니다.
+
+### 2-3b. 실제 생성 결과 확인 (필수)
+
+🟢 **실행**
+
+<!-- exec:verify-support -->
+```bash
+source scripts/workshop-support.sh
+verify_support_all
+```
+
+📋 **확인**
+
+Hub PIP·NAT의 실제 구성과 세 NIC의 정확한 Subnet·IP forwarding 비활성·Public IP 부재,
+세 VM의 NIC·이미지·SKU·SSH 전용/암호 인증 비활성·Trusted Launch/Secure Boot/vTPM·
+Agent·삭제 옵션·관리형 부팅 진단까지 모두 `PASS`여야 합니다. 조회 실패나 하나라도
+불일치하면 2-4로 진행하지 마세요. 재접속 후 2-4를 진행할 때도 이 블록을 재실행합니다.
 
 ### 2-4. Hub 관리 Subnet에 NAT 연결
 
@@ -236,8 +352,13 @@ Public IP가 있으며, Spoke에는 사설 NIC·VM·OS 디스크만 있습니다
 
 <!-- exec:attach-nat-hub -->
 ```bash
-az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
-  --nat-gateway "nat-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
+attach_verified_nat() {
+  source scripts/workshop-support.sh || return 1
+  verify_support_all || return 1
+  az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
+    --nat-gateway "nat-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
+}
+attach_verified_nat
 ```
 
 📋 **확인**

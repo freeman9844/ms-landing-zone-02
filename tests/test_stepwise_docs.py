@@ -12,6 +12,70 @@ def support_inventory():
             for zone in ("hub", "spokea", "spokeb")]
 
 
+def support_resource(kind, zone):
+    name = f"{kind}-lzbegin-{zone}-demo123"
+    types = {"pip": "publicIPAddresses", "nat": "natGateways",
+             "nic": "networkInterfaces", "vm": "virtualMachines"}
+    provider = "Microsoft.Compute" if kind == "vm" else "Microsoft.Network"
+    rid = f"/subscriptions/{SUB}/resourceGroups/{rg(zone)}/providers/{provider}/{types[kind]}/{name}"
+    tags = {"runId": "demo123", "workshop": "lz-beginner",
+            "environment": "lab", "managedBy": "workshop"}
+    obj = {"id": rid, "name": name, "type": f"{provider}/{types[kind]}",
+           "tags": tags, "location": "koreacentral", "provisioningState": "Succeeded"}
+    if kind == "pip":
+        obj.update(sku={"name": "Standard"}, publicIPAllocationMethod="Static",
+                   publicIPAddressVersion="IPv4")
+    if kind == "nat":
+        obj.update(sku={"name": "Standard"}, idleTimeoutInMinutes=4,
+                   publicIpAddresses=[{"id": support_resource("pip", "hub")["id"]}])
+    if kind == "nic":
+        subnet = "snet-management" if zone == "hub" else "snet-workload"
+        obj.update(enableIPForwarding=False, ipConfigurations=[{
+            "subnet": {"id": netid(zone, "virtualNetworks", vnet(zone)) + f"/subnets/{subnet}"},
+            "publicIPAddress": None}])
+    if kind == "vm":
+        obj.update(
+            hardwareProfile={"vmSize": "Standard_B2als_v2"},
+            securityProfile={"securityType": "TrustedLaunch",
+                             "uefiSettings": {"secureBootEnabled": True, "vTpmEnabled": True}},
+            storageProfile={"imageReference": {"publisher": "Canonical", "offer": "ubuntu-24_04-lts",
+                                               "sku": "server"},
+                            "osDisk": {"name": name + "_OsDisk_1",
+                                       "managedDisk": {"storageAccountType": "StandardSSD_LRS",
+                                                       "id": (f"/subscriptions/{SUB}/resourceGroups/{rg(zone)}"
+                                                              f"/providers/Microsoft.Compute/disks/{name}_OsDisk_1")},
+                                       "deleteOption": "Delete"}},
+            osProfile={"adminUsername": "workshopadmin", "computerName": f"{zone}-demo123",
+                       "linuxConfiguration": {"disablePasswordAuthentication": True,
+                                              "provisionVMAgent": True,
+                                              "ssh": {"publicKeys": [{"keyData": "fixture-public-key"}]}}},
+            networkProfile={"networkInterfaces": [{"id": support_resource("nic", zone)["id"],
+                                                    "properties": {"deleteOption": "Delete"}}]},
+            diagnosticsProfile={"bootDiagnostics": {"enabled": True}})
+    return obj
+
+
+def support_read(kind, zone, data=None):
+    commands = {"pip": ["network", "public-ip"], "nat": ["network", "nat", "gateway"],
+                "nic": ["network", "nic"], "vm": ["vm"]}
+    return az([*commands[kind], "show", "-g", rg(zone),
+               "-n", f"{kind}-lzbegin-{zone}-demo123", "-o", "json"],
+              support_resource(kind, zone) if data is None else data)
+
+
+def support_verification_calls():
+    calls = []
+    for zone, kinds in (("hub", ("pip", "nat", "nic", "vm")),
+                        ("spokea", ("nic", "vm")), ("spokeb", ("nic", "vm"))):
+        inventory = [support_resource(kind, zone) for kind in kinds]
+        inventory.append({"name": f"vm-lzbegin-{zone}-demo123_OsDisk_1",
+                          "type": "Microsoft.Compute/disks"})
+        for kind in kinds:
+            calls.append(az(["resource", "list", "--resource-group", rg(zone), "-o", "json"], inventory))
+            calls.append(support_read(kind, zone))
+    return calls
+
+
 def support_cases():
     cases = {
         "support-preview": support_inventory(),
@@ -24,7 +88,7 @@ def support_cases():
                 "--public-ip-addresses", "pip-lzbegin-hub-demo123", "--idle-timeout", "4",
                 "--sku", "Standard", *TAGS, "-o", "json"]),
         ],
-        "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
+        "attach-nat-hub": support_verification_calls() + [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
         "read-vm-ips": [nic("hub", "172.20.0.4"), nic("spokea", "172.20.16.4"), nic("spokeb", "172.20.32.4")],
     }
@@ -771,6 +835,137 @@ class StepwiseDocsTests(unittest.TestCase):
                 result = self.execute(5, "support-preview", calls, files=self.keyfile)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
+
+    def test_support_recovery_and_post_create_gate_are_executable(self):
+        steps = blocks(DOCS[5])
+        self.assertIn("support-recovery", steps)
+        self.assertIn("verify-support", steps)
+        self.assertIn("recover_support", steps["support-recovery"])
+        self.assertIn("az vm create", steps["support-recovery"])
+        self.assertIn("CREATE", steps["support-recovery"])
+        self.assertIn("verify_support_all", steps["verify-support"])
+        self.assertLess(DOCS[5].read_text().index("<!-- exec:verify-support -->"),
+                        DOCS[5].read_text().index("<!-- exec:attach-nat-hub -->"))
+
+    def test_support_recovery_rejects_inventory_failure_without_create(self):
+        steps = blocks(DOCS[5])
+        calls = support_inventory()
+        calls[0].update(returncode=1, stderr="Forbidden")
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
+                  '\n' + steps["support-recovery"])
+        result = run(script, preparation_calls(5) + calls[:1], files=self.keyfile)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_support_verifier_can_check_pip_with_nounset(self):
+        steps = blocks(DOCS[5])
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
+                  '\nset -u\nsource scripts/workshop-support.sh\nverify_support_resource pip hub')
+        result = run(script, preparation_calls(5) + [support_read("pip", "hub")],
+                     files=self.keyfile)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_support_verification_accepts_exact_configuration_and_rejects_drift(self):
+        calls = support_verification_calls()
+        script = ('export STATE_FILE=state.json\n' + blocks(DOCS[5])["prepare-05"] +
+                  '\n' + blocks(DOCS[5])["verify-support"])
+        result = run(script, preparation_calls(5) + calls, files=self.keyfile)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for index, key, value in (
+            (1, "sku", {"name": "Basic"}),
+            (3, "publicIpAddresses", []),
+            (5, "enableIPForwarding", True),
+            (7, "securityProfile", {"securityType": "Standard"}),
+            (7, "diagnosticsProfile", {"bootDiagnostics": {"enabled": False}}),
+        ):
+            with self.subTest(index=index, key=key):
+                bad = copy.deepcopy(calls[:index + 1])
+                payload = json.loads(bad[-1]["stdout"])
+                payload[key] = value
+                bad[-1]["stdout"] = json.dumps(payload)
+                self.assertNotEqual(run(script, preparation_calls(5) + bad, files=self.keyfile).returncode, 0)
+
+    def test_support_recovery_creates_only_proven_missing_pip(self):
+        steps = blocks(DOCS[5])
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
+                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
+                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
+                  '\nrecover_support pip hub')
+        calls = [support_inventory()[0],
+                 support_cases()["support-deploy"][3]]
+        self.assertEqual(run(script, preparation_calls(5) + calls, files=self.keyfile).returncode, 0)
+        bad = copy.deepcopy(calls[:1])
+        bad[0]["stdout"] = json.dumps([support_resource("pip", "hub")])
+        self.assertNotEqual(run(script, preparation_calls(5) + bad, files=self.keyfile).returncode, 0)
+
+    def test_support_recovery_refuses_foreign_malformed_and_disk_collisions(self):
+        script = ('export STATE_FILE=state.json\n' + blocks(DOCS[5])["prepare-05"] +
+                  '\nsource scripts/workshop-support.sh\nrequire_support_missing vm hub')
+        resource = support_resource("vm", "hub")
+        disk = {"name": "vm-lzbegin-hub-demo123_OsDisk_1",
+                "type": "Microsoft.Compute/disks", "tags": resource["tags"]}
+        for inventory in ([dict(resource, tags={"runId": "other"})], [disk],
+                          [{"name": resource["name"]}], {"value": []}):
+            with self.subTest(inventory=inventory):
+                calls = [az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], inventory)]
+                self.assertNotEqual(run(script, preparation_calls(5) + calls,
+                                        files=self.keyfile).returncode, 0)
+
+    def test_support_recovery_enables_boot_diagnostics_only_on_matching_vm(self):
+        steps = blocks(DOCS[5])
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
+                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
+                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
+                  '\nrecover_support boot hub')
+        nic_obj = support_resource("nic", "hub")
+        vm_obj = support_resource("vm", "hub")
+        vm_obj["diagnosticsProfile"]["bootDiagnostics"]["enabled"] = False
+        calls = [
+            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj, vm_obj]),
+            support_read("nic", "hub"),
+            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj, vm_obj]),
+            support_read("vm", "hub", vm_obj),
+            az(["vm", "boot-diagnostics", "enable", "-g", rg("hub"),
+                "-n", "vm-lzbegin-hub-demo123", "-o", "json"]),
+        ]
+        self.assertEqual(run(script, preparation_calls(5) + calls,
+                             files=self.keyfile).returncode, 0)
+        no_diagnostics = copy.deepcopy(calls)
+        vm_without_diagnostics = json.loads(no_diagnostics[3]["stdout"])
+        vm_without_diagnostics["diagnosticsProfile"] = None
+        no_diagnostics[3]["stdout"] = json.dumps(vm_without_diagnostics)
+        self.assertEqual(run(script, preparation_calls(5) + no_diagnostics,
+                             files=self.keyfile).returncode, 0)
+        bad = copy.deepcopy(calls[:4])
+        broken = json.loads(bad[-1]["stdout"])
+        broken["securityProfile"]["uefiSettings"]["secureBootEnabled"] = False
+        bad[-1]["stdout"] = json.dumps(broken)
+        self.assertNotEqual(run(script, preparation_calls(5) + bad,
+                                files=self.keyfile).returncode, 0)
+
+    def test_support_recovery_requires_fresh_create_consent_for_each_vm(self):
+        steps = blocks(DOCS[5])
+        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
+                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
+                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
+                  '\nrecover_support vm hub')
+        nic_obj = support_resource("nic", "hub")
+        calls = [
+            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], []),
+            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj]),
+            support_read("nic", "hub"),
+        ]
+        self.assertNotEqual(run(script, preparation_calls(5) + calls,
+                                files=self.keyfile, input_text="NO\n").returncode, 0)
+        approved = calls + [support_cases()["support-deploy"][6]]
+        self.assertEqual(run(script, preparation_calls(5) + approved,
+                             files=self.keyfile, input_text="CREATE\n").returncode, 0)
+
+    def test_attach_nat_is_blocked_by_failed_post_creation_verification(self):
+        calls = support_verification_calls()
+        calls[3]["stdout"] = json.dumps(dict(support_resource("nat", "hub"),
+                                                idleTimeoutInMinutes=5))
+        result = self.execute(5, "attach-nat-hub", calls[:4], files=self.keyfile)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_participant_modules_do_not_run_arm_deployments(self):
         for module, path in DOCS.items():

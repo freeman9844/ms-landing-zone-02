@@ -85,8 +85,12 @@ def foundation_cases():
     cases = {}
     cases["avnm-create"] = avnm_cases()["avnm-create"]
     cases["avnm-ready"] = avnm_cases()["avnm-ready"]
+    live_vnets, _ = ipam_fixtures()
     for zone in ("hub", "spokea", "spokeb"):
         nsg = f"nsg-lzbegin-{zone}-demo123"
+        live_vnet = dict(live_vnets[zone], location="koreacentral")
+        vnet_lookup = az(["network", "vnet", "list", "--resource-group", rg(zone), "-o", "json"], [])
+        ready_vnet_lookup = dict(vnet_lookup, stdout=json.dumps([live_vnet]))
         for kind, args in (
             ("nsg", ["network", "nsg", "create", "--resource-group", rg(zone), "--name", nsg,
                      "--location", "koreacentral", *TAGS, "-o", "json"]),
@@ -97,46 +101,26 @@ def foundation_cases():
                       "--destination-port-ranges", "*", "-o", "json"]),
         ):
             cases[f"foundation-{zone}-{kind}"] = [az(args)]
-        cases[f"foundation-{zone}-vnet"] = [
-            az(["network", "vnet", "list", "--resource-group", rg(zone), "-o", "json"], []),
-            az(["deployment", "group", "create", "--resource-group", rg(zone),
-                "--name", f"ipam-vnet-{zone}-demo123",
-                "--template-file", "infra/workshop-ipam-vnet.bicep",
-                "--parameters", "runId=demo123", f"zone={zone}", "location=koreacentral",
-                f"ipamPoolId={POOL_ID}", "-o", "json"])]
-        if zone == "hub":
-            cases["foundation-hub-vnet"] = [
-                cases["foundation-hub-vnet"][0],
-                az(["network", "vnet", "create", "--resource-group", rg("hub"),
-                    "--name", vnet("hub"), "--location", "koreacentral",
-                    "--ipam-allocations", "[0].number-of-ip-addresses=4096",
-                    f"[0].id={POOL_ID}",
-                    *TAGS, "-o", "json"]),
-                az(["network", "vnet", "subnet", "create", "--resource-group", rg("hub"),
-                    "--vnet-name", vnet("hub"), "--name", "snet-management",
-                    "--ipam-allocations", "[0].number-of-ip-addresses=256",
-                    f"[0].id={POOL_ID}",
-                    "--network-security-group", "nsg-lzbegin-hub-demo123",
-                    "--default-outbound-access", "false", "-o", "json"]),
-                az(["network", "vnet", "subnet", "create", "--resource-group", rg("hub"),
-                    "--vnet-name", vnet("hub"), "--name", "AzureFirewallSubnet",
-                    "--ipam-allocations", "[0].number-of-ip-addresses=64",
-                    f"[0].id={POOL_ID}",
-                    "-o", "json"]),
-            ]
-        else:
-            cases[f"foundation-{zone}-vnet"] = [
-                cases[f"foundation-{zone}-vnet"][0],
-                az(["network", "vnet", "create", "--resource-group", rg(zone),
-                    "--name", vnet(zone), "--location", "koreacentral",
-                    "--ipam-allocations", "[0].number-of-ip-addresses=4096",
-                    f"[0].id={POOL_ID}", *TAGS, "-o", "json"]),
-                az(["network", "vnet", "subnet", "create", "--resource-group", rg(zone),
-                    "--vnet-name", vnet(zone), "--name", "snet-workload",
-                    "--ipam-allocations", "[0].number-of-ip-addresses=256",
-                    f"[0].id={POOL_ID}", "--network-security-group", nsg,
-                    "--default-outbound-access", "false", "-o", "json"]),
-            ]
+        cases[f"foundation-{zone}-vnet"] = [vnet_lookup]
+        cases[f"foundation-{zone}-vnet"].append(
+            az(["network", "vnet", "create", "--resource-group", rg(zone),
+                "--name", vnet(zone), "--location", "koreacentral",
+                "--ipam-allocations", "[0].number-of-ip-addresses=4096",
+                f"[0].id={POOL_ID}", *TAGS, "-o", "json"]))
+        for subnet in (("snet-management", "AzureFirewallSubnet") if zone == "hub"
+                       else ("snet-workload",)):
+            size = 64 if subnet == "AzureFirewallSubnet" else 256
+            cmd = ["network", "vnet", "subnet", "create", "--resource-group", rg(zone),
+                   "--vnet-name", vnet(zone), "--name", subnet,
+                   "--ipam-allocations", f"[0].number-of-ip-addresses={size}",
+                   f"[0].id={POOL_ID}"]
+            if size == 256:
+                cmd.extend(["--network-security-group", nsg, "--default-outbound-access", "false"])
+            cmd.extend(["-o", "json"])
+            subnet_lookup = az(["network", "vnet", "subnet", "list", "--resource-group",
+                                rg(zone), "--vnet-name", vnet(zone), "-o", "json"], [])
+            cases[f"foundation-{zone}-{subnet.lower()}"] = [
+                ready_vnet_lookup, subnet_lookup, az(cmd)]
         cases[f"foundation-{zone}-rg"] = [
             az(["group", "exists", "--name", rg(zone), "-o", "tsv"], "false"),
             az(["group", "create", "--name", rg(zone), "--location", "koreacentral", *TAGS, "-o", "json"])]
@@ -529,6 +513,72 @@ def preparation_calls(module, state=STATE):
 
 
 class NetworkDocsTests(unittest.TestCase):
+    def test_module_02_partial_creation_has_separate_guarded_resume_steps(self):
+        steps = blocks(DOCS[2])
+        for zone, subnet_names in (("hub", ("snet-management", "AzureFirewallSubnet")),
+                                   ("spokea", ("snet-workload",)),
+                                   ("spokeb", ("snet-workload",))):
+            with self.subTest(zone=zone):
+                vnet_step = f"foundation-{zone}-vnet"
+                self.assertIn(vnet_step, steps)
+                self.assertEqual(steps[vnet_step].count("az network vnet create"), 1)
+                self.assertNotIn("az network vnet subnet create", steps[vnet_step])
+                for subnet in subnet_names:
+                    step = f"foundation-{zone}-{subnet.lower()}"
+                    self.assertIn(step, steps)
+                    self.assertEqual(steps[step].count("az network vnet subnet create"), 1)
+                    self.assertNotIn("az network vnet create", steps[step])
+                    self.assertLess(list(steps).index(vnet_step), list(steps).index(step))
+
+    def test_module_02_resume_verifies_existing_resources_without_creating(self):
+        vnets, subnets = ipam_fixtures()
+        for zone, names in (("hub", ("snet-management", "AzureFirewallSubnet")),
+                            ("spokea", ("snet-workload",)), ("spokeb", ("snet-workload",))):
+            vnet = dict(vnets[zone], location="koreacentral")
+            inventory = foundation_cases()[f"foundation-{zone}-vnet"][0]
+            with self.subTest(zone=zone, resource="vnet"):
+                result = self.execute(2, f"foundation-{zone}-vnet",
+                                      [dict(inventory, stdout=json.dumps([vnet]))])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("기존", result.stdout)
+            for name in names:
+                with self.subTest(zone=zone, resource=name):
+                    subnet = copy.deepcopy(subnets[(zone, name)])
+                    if name != "AzureFirewallSubnet":
+                        subnet["defaultOutboundAccess"] = False
+                        subnet["networkSecurityGroup"] = {
+                            "id": netid(zone, "networkSecurityGroups", f"nsg-lzbegin-{zone}-demo123")}
+                    calls = foundation_cases()[f"foundation-{zone}-{name.lower()}"]
+                    existing = [calls[0], dict(calls[1], stdout=json.dumps([subnet]))]
+                    result = self.execute(2, f"foundation-{zone}-{name.lower()}", existing)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("기존", result.stdout)
+                    for change in (
+                        {"ipamPoolPrefixAllocations": [{"numberOfIpAddresses": "256",
+                                                        "pool": {"id": "foreign"}}]},
+                        {"defaultOutboundAccess": True} if name != "AzureFirewallSubnet"
+                        else {"networkSecurityGroup": {"id": "unexpected"}},
+                    ):
+                        altered = dict(subnet, **change)
+                        result = self.execute(2, f"foundation-{zone}-{name.lower()}",
+                                              [calls[0], dict(calls[1], stdout=json.dumps([altered]))])
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("do not overwrite", result.stderr)
+
+    def test_module_02_subnet_read_failure_or_absent_parent_never_creates(self):
+        for zone, name in (("hub", "snet-management"), ("hub", "AzureFirewallSubnet"),
+                           ("spokea", "snet-workload"), ("spokeb", "snet-workload")):
+            calls = foundation_cases()[f"foundation-{zone}-{name.lower()}"]
+            with self.subTest(zone=zone, resource=name):
+                for attempted in (
+                    [dict(calls[0], stdout="[]")],
+                    [calls[0], dict(calls[1], stdout="", returncode=1)],
+                    [calls[0], dict(calls[1], stdout='{"unexpected":true}')],
+                ):
+                    result = self.execute(2, f"foundation-{zone}-{name.lower()}", attempted)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("ERROR:", result.stderr)
+
     def test_firewall_rules_and_routing_use_allocated_ipam_prefixes(self):
         actions = blocks(DOCS[4])
         for name in ("firewall-management-rule", "firewall-egress-rule"):
@@ -741,7 +791,7 @@ printf 'SHELL_ALIVE\\n'
             self.assertNotIn("infra/workshop-ipam-vnet.bicep", script)
             self.assertNotIn("az deployment group create", script)
             self.assertIn("az network vnet create", script)
-            self.assertEqual(script.count("az network vnet subnet create"), 2 if zone == "hub" else 1)
+            self.assertNotIn("az network vnet subnet create", script)
             self.assertNotIn("--address-prefixes 10.", script)
             self.assertNotIn("rg-lzbegin-ipam", script)
         self.assertNotIn("network manager list", blocks(DOCS[3])["avnm-ready"])
@@ -759,7 +809,7 @@ printf 'SHELL_ALIVE\\n'
                 result = self.execute(module, creation, avnm_cases()[creation])
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_pool_deployment_rejects_existing_vnet_or_malformed_discovery_without_writing(self):
+    def test_pool_deployment_rejects_malformed_discovery_without_writing(self):
         for zone in ("hub", "spokea", "spokeb"):
             lookup = foundation_cases()[f"foundation-{zone}-vnet"][0]
             for payload in ([{"name": vnet(zone)}], {"unexpected": True}):
@@ -794,7 +844,7 @@ printf 'SHELL_ALIVE\\n'
                 ]))
                 result = self.execute(2, f"foundation-{zone}-vnet", [response])
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("VNet exists or VNet lookup is malformed", result.stderr)
+                self.assertIn("Existing VNet", result.stderr)
 
     def test_hub_effective_configuration_accepts_only_empty_or_approved_configuration(self):
         expected_call = avnm_cases()["effective-hub"][0]
