@@ -850,6 +850,8 @@ printf 'SHELL_ALIVE\\n'
                         expected = ["assert_owned_rg"] * 3
                     else:
                         expected = {
+                            (2, "run-ipam-pool"): ["assert_owned_rg", "assert_run_ipam_pool",
+                                                   "assert_run_ipam_pool"],
                             (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
                             (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
                             (4, "enforce-peering"): ["assert_forwarded_peerings",

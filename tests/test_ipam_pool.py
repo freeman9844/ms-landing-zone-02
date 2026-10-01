@@ -2,7 +2,7 @@ import json
 import re
 import unittest
 
-from harness import LEGACY_POOL_ID, ROOT, SUB, call, run
+from harness import LEGACY_POOL_ID, POOL_ID as RUN_POOL_ID, ROOT, SUB, call, group, run
 
 POOL_ID = LEGACY_POOL_ID
 
@@ -23,6 +23,82 @@ MANAGER_READY = {"id": MANAGER_ID, "location": "koreacentral",
 
 
 class SharedPoolTests(unittest.TestCase):
+    def test_run_pool_and_parent_must_match_state(self):
+        manager_id = RUN_POOL_ID.split("/ipamPools/")[0]
+        pool_rest = ["rest", "--method", "get", "--url", RUN_POOL_ID + "?api-version=2024-05-01",
+                     "--subscription", SUB, "-o", "json"]
+        manager_rest = ["rest", "--method", "get", "--url", manager_id + "?api-version=2024-05-01",
+                        "--subscription", SUB, "-o", "json"]
+        pool = {"id": RUN_POOL_ID, "location": "koreacentral",
+                "properties": {"addressPrefixes": ["172.20.0.0/14"],
+                               "provisioningState": "Succeeded"}}
+        manager = {"id": manager_id, "location": "koreacentral",
+                   "properties": {"provisioningState": "Succeeded",
+                                  "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"],
+                                                           "managementGroups": []},
+                                  "networkManagerScopeAccesses":
+                                      ["Connectivity", "SecurityAdmin", "Routing"]}}
+        script = SOURCE + 'load_run state.json && assert_run_ipam_pool'
+        self.assertEqual(run(script, [group("hub"), call(pool_rest, pool),
+                                      call(manager_rest, manager)]).returncode, 0)
+        for wrong_pool in (dict(pool, id="foreign"), dict(pool, properties={
+            "addressPrefixes": ["172.20.0.0/15"], "provisioningState": "Succeeded"}),
+                           dict(pool, properties={
+                               "addressPrefixes": ["172.20.0.0/14"], "provisioningState": "Updating"})):
+            with self.subTest(pool=wrong_pool):
+                self.assertNotEqual(run(script, [group("hub"), call(pool_rest, wrong_pool)]).returncode, 0)
+        wrong_manager = dict(manager, properties=dict(manager["properties"],
+                              networkManagerScopeAccesses=["Connectivity"]))
+        self.assertNotEqual(run(script, [group("hub"), call(pool_rest, pool),
+                                         call(manager_rest, wrong_manager)]).returncode, 0)
+        self.assertNotEqual(run(script, [group("hub"),
+                                         call(pool_rest, code=3, stderr="Forbidden")]).returncode, 0)
+
+    def test_module_two_creates_only_missing_run_pool(self):
+        from harness import POOL_ID as run_pool
+        doc = (ROOT / "docs/02-network-foundation.md").read_text()
+        block = re.search(r"<!-- exec:run-ipam-pool -->\s*```bash\n(.*?)\n```", doc, re.S).group(1)
+        manager_id = run_pool.split("/ipamPools/")[0]
+        hub = "rg-lzbegin-hub-demo123"
+        manager = {"id": manager_id, "location": "koreacentral", "provisioningState": "Succeeded",
+                   "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"]},
+                   "networkManagerScopeAccesses": ["Connectivity", "SecurityAdmin", "Routing"]}
+        parent = {"id": manager_id, "location": "koreacentral", "properties": {
+            "provisioningState": "Succeeded", "networkManagerScopes": {
+                "subscriptions": [f"/subscriptions/{SUB}"], "managementGroups": []},
+            "networkManagerScopeAccesses": manager["networkManagerScopeAccesses"]}}
+        pool = {"id": run_pool, "location": "koreacentral", "properties": {
+            "addressPrefixes": ["172.20.0.0/14"], "provisioningState": "Succeeded"}}
+        listing = ["rest", "--method", "get", "--url",
+                   manager_id + "/ipamPools?api-version=2024-05-01",
+                   "--subscription", SUB, "-o", "json"]
+        manager_show = ["network", "manager", "show", "--name", "avnm-lzbegin-demo123",
+                        "-g", hub, "--subscription", SUB, "-o", "json"]
+        pool_read = ["rest", "--method", "get", "--url",
+                     run_pool + "?api-version=2024-05-01", "--subscription", SUB, "-o", "json"]
+        parent_read = ["rest", "--method", "get", "--url",
+                       manager_id + "?api-version=2024-05-01",
+                       "--subscription", SUB, "-o", "json"]
+        prefix = [group("hub"), call(manager_show, manager)]
+        checks = [group("hub"), call(pool_read, pool), call(parent_read, parent)]
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": [pool]})] + checks)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        deploy = ["deployment", "group", "create", "-g", hub, "--name", "ipam-pool-demo123",
+                  "--template-file", "infra/run-ipam-pool.bicep",
+                  "--parameters", "runId=demo123", "location=koreacentral",
+                  "-o", "json", "--subscription", SUB]
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": []}),
+                               call(deploy, {"properties": {"provisioningState": "Succeeded",
+                                                            "outputs": {"poolId": {"value": run_pool}}}})] +
+                     checks)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = run(SOURCE + 'load_run state.json && ' + block,
+                     prefix + [call(listing, {"value": [{"id": "foreign"}]})] +
+                     [group("hub"), call(pool_read, code=3, stderr="not found")])
+        self.assertNotEqual(result.returncode, 0)
+
     def test_new_run_preflight_rejects_feature_conflicts_and_address_overlap(self):
         manager = {"networkManagerScopeAccesses": ["Connectivity"],
                    "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"],
@@ -50,37 +126,24 @@ class SharedPoolTests(unittest.TestCase):
                      [call(REST, READY), call(MANAGER_REST, MANAGER_READY)])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_module_one_does_not_create_state_when_pool_or_manager_is_invalid(self):
+    def test_module_one_does_not_create_state_when_subscription_preflight_fails(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         block = next(block for block in re.findall(r"```bash\n(.*?)\n```", text, re.S)
                      if 'STATE_FILE=$(new_run ' in block)
-        for response in (call(REST, code=3, stderr="pool not found"),
-                         call(REST, dict(READY, location="eastus"))):
-            with self.subTest(response=response):
+        manager = ["network", "manager", "list", "--subscription", SUB, "-o", "json"]
+        vnet = ["network", "vnet", "list", "--subscription", SUB, "-o", "json"]
+        for calls in ([call(manager, code=3, stderr="Forbidden")],
+                      [call(manager, []), call(vnet, [
+                          {"addressSpace": {"addressPrefixes": ["172.20.0.0/20"]}}])]):
+            with self.subTest(calls=calls):
                 result = run(block + '\nrc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
                              [call(["account", "set", "--subscription", SUB]),
                               call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
-                              response], input_text=SUB + "\n")
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("pool", result.stderr.lower())
-        for manager in (call(MANAGER_REST, code=3, stderr="manager not found"),
-                        call(MANAGER_REST, dict(MANAGER_READY, location="eastus")),
-                        call(MANAGER_REST, dict(MANAGER_READY, properties={
-                            **MANAGER_READY["properties"], "networkManagerScopes": {
-                                "managementGroups": [], "subscriptions": []}})),
-                        call(MANAGER_REST, dict(MANAGER_READY, properties={
-                            **MANAGER_READY["properties"], "networkManagerScopeAccesses": ["Routing"]})),
-                        call(MANAGER_REST, dict(MANAGER_READY, properties={
-                            **MANAGER_READY["properties"], "networkManagerScopeAccesses": ["Connectivity"]})),
-                        call(MANAGER_REST, dict(MANAGER_READY, properties={
-                            **MANAGER_READY["properties"], "provisioningState": "Failed"}))):
-            with self.subTest(manager=manager):
-                result = run(block + '\nrc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
-                             [call(["account", "set", "--subscription", SUB]),
                               call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
-                              call(REST, READY), manager], input_text=SUB + "\n")
+                              *calls], input_text=SUB + "\n")
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("manager", result.stderr.lower())
+                self.assertIn("preflight" if len(calls) == 2 else "Cannot inspect subscription",
+                              result.stderr)
 
     def test_wrong_manager_properties_fail_closed(self):
         cases = [
@@ -118,7 +181,7 @@ class SharedPoolTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("manager", result.stderr.lower())
 
-    def test_module_one_clears_previous_run_context_before_new_pool_check(self):
+    def test_module_one_clears_previous_run_context_before_new_subscription_check(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         block = next(block for block in re.findall(r"```bash\n(.*?)\n```", text, re.S)
                      if 'STATE_FILE=$(new_run ' in block)
@@ -126,7 +189,9 @@ class SharedPoolTests(unittest.TestCase):
                      block + '\n[[ ! -v STATE_FILE && ! -v IPAM_POOL_ID ]]',
                      [call(["account", "set", "--subscription", SUB]),
                       call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
-                      call(REST, code=3, stderr="pool not found")],
+                      call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
+                      call(["network", "manager", "list", "--subscription", SUB, "-o", "json"],
+                           code=3, stderr="Forbidden")],
                      input_text=SUB + "\n")
         self.assertEqual(result.returncode, 0, result.stderr)
 

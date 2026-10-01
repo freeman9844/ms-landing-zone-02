@@ -34,6 +34,7 @@ prepare_vm_session() {
   source scripts/verify-common.sh || return 1
   ensure_state_file || return 1
   load_run "$STATE_FILE" || return 1
+  require_run_schema_four || return 1
   assert_subscription || return 1
   assert_owned_rg "$RG_HUB" || return 1
   assert_owned_rg "$RG_SPOKEA" || return 1

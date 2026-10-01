@@ -28,7 +28,7 @@ RG 생성 단계에서 같은 이름의 기존 RG를 재사용할 때만 소유�
 재접속, `STATE_FILE` 변경, 다른 실습/구독으로 전환했다면 **공통 준비를 다시 실행**하세요.
 모듈 02를 이어서 진행할 때는 작업할 RG의 생성 단계(1-1·2-1·3-1)도 다시 실행하여 소유권을 확인하세요.
 명령의 `--subscription`은 상태 파일의 구독을 명시합니다.
-앞 작업의 임시 변수에 의존하지 않지만, **Hub RG → 실행별 AVNM → 각 RG·NSG → IPAM VNet·Subnet** 순서를 지켜야 합니다.
+앞 작업의 임시 변수에 의존하지 않지만, **Hub RG → 실행별 AVNM → 실행별 IPAM pool → 각 RG·NSG → IPAM VNet·Subnet** 순서를 지켜야 합니다.
 pool 할당을 위한 VNet과 그 Subnet은 한 번의 선언형 배포로 원자적으로 요청하므로
 한 자원당 한 블록 원칙의 유일한 예외입니다.
 JSON 출력의 속성 순서는 달라도 되며, 각 단계 아래의 **확인** 항목을 비교하세요.
@@ -50,6 +50,7 @@ JSON 출력의 속성 순서는 달라도 되며, 각 단계 아래의 **확인*
 source scripts/workshop-common.sh &&
 ensure_state_file &&
 load_run "$STATE_FILE" &&
+require_run_schema_four &&
 assert_subscription
 ```
 
@@ -67,7 +68,7 @@ assert_subscription
 
 👁️ **설명**
 
-Hub는 중앙 관리용 네트워크입니다. 공유 pool에서 VNet `/20`, 관리 Subnet `/24`,
+Hub는 중앙 관리용 네트워크입니다. 이번 실행의 pool에서 VNet `/20`, 관리 Subnet `/24`,
 Firewall 전용 Subnet `/26`을 할당받습니다.
 
 ### 1-1. Hub 리소스 그룹
@@ -101,8 +102,10 @@ esac
 
 👁️ **설명**
 
-운영자가 준비한 공유 pool의 AVNM과는 별도로 이번 실행의 Connectivity·SecurityAdmin·Routing
-AVNM을 Hub RG에 만듭니다. 이 관리자와 공유 pool을 혼동하지 마세요.
+이번 실행의 Connectivity·SecurityAdmin·Routing AVNM을 Hub RG에 만듭니다.
+다음 단계에서 이 AVNM 아래에 이번 실행의 IPAM pool도 만듭니다.
+같은 구독에서 두 번째 실행별 AVNM을 만들면 기능 범위가 충돌하므로 한 구독에서
+한 번에 한 실습만 진행합니다.
 먼저 목록을 조회해 예상치 못한 자원이 없는지 확인합니다. `Updating` 응답이면
 다시 생성하지 말고 아래 읽기 전용 확인을 재실행하세요.
 
@@ -182,7 +185,67 @@ inspect_avnm_ready
 
 `provisioningState=Succeeded`가 될 때까지 이 조회만 반복하세요. 범위가 다르면 중단합니다.
 
-### 1-3. Hub NSG
+### 1-3. 이번 실행의 IPAM pool 만들기
+
+👁️ **설명**
+
+방금 만든 Hub AVNM 아래에 `ipam-lzbegin-<실행 ID>`를 만들고 주소 root
+`172.20.0.0/14`를 등록합니다. 기존 운영자 공유 RG나 pool을 사용하지 않습니다.
+재접속했다면 위 공통 준비와 `avnm-ready` 조회를 먼저 재실행하세요.
+pool이 이미 있다면 배포 명령을 반복하지 않고 정확한 ID·구성·준비 상태만 확인합니다.
+`Updating`이면 조회만 다시 수행하고, 다른 pool이나 조회 실패이면 중단합니다.
+
+🟢 **실행**
+
+<!-- exec:run-ipam-pool -->
+```bash
+source scripts/workshop-ipam.sh &&
+create_run_ipam_pool() {
+  local manager pools deployment
+  require_run_schema_four || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  manager=$(az network manager show --name "$AVNM" -g "$RG_HUB" \
+    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
+  jq -e --arg id "${AVNM_ID,,}" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    (.id | ascii_downcase) == $id and .provisioningState == "Succeeded" and
+    (.networkManagerScopes.subscriptions | type == "array" and length == 1 and
+      (.[0] | ascii_downcase) == $scope) and
+    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<< "$manager" >/dev/null ||
+    { fail "Run AVNM is not ready for IPAM pool creation."; return 1; }
+  pools=$(az rest --method get --url "$AVNM_ID/ipamPools?api-version=2024-05-01" \
+    --subscription "$SUBSCRIPTION_ID" -o json) || return 1
+  jq -e 'type == "object" and .nextLink == null and (.value | type == "array")' <<< "$pools" >/dev/null ||
+    { fail "Incomplete or invalid IPAM pool listing."; return 1; }
+  if jq -e '.value | length == 1' <<< "$pools" >/dev/null; then
+    assert_run_ipam_pool
+  elif jq -e '.value | length == 0' <<< "$pools" >/dev/null; then
+    deployment=$(az deployment group create -g "$RG_HUB" \
+      --name "ipam-pool-$RUN_ID" --template-file infra/run-ipam-pool.bicep \
+      --parameters "runId=$RUN_ID" "location=$LOCATION" \
+      -o json --subscription "$SUBSCRIPTION_ID") || return 1
+    jq -e --arg id "${IPAM_POOL_ID,,}" '
+      .properties.provisioningState == "Succeeded" and
+      (.properties.outputs.poolId.value | ascii_downcase) == $id
+    ' <<< "$deployment" >/dev/null ||
+      { fail "IPAM pool deployment returned an unexpected ID or state."; return 1; }
+    assert_run_ipam_pool
+  else
+    fail "Unexpected pool already exists under the run AVNM; do not overwrite it."
+    return 1
+  fi
+}
+create_run_ipam_pool
+```
+
+📋 **확인**
+
+오류 없이 끝나면 `IPAM_POOL_ID`의 마지막 부분은 `ipam-lzbegin-<실행 ID>`입니다.
+pool의 root prefix는 `172.20.0.0/14`, `provisioningState=Succeeded`여야 합니다.
+배포에 실패하면 현재 pool을 조회해 원인을 확인하고 새 실행을 만들지 마세요.
+주소 root가 기존 연결망·온프레미스와 겹치면 진행하지 않습니다.
+
+### 1-4. Hub NSG
 
 👁️ **설명**
 
@@ -203,7 +266,7 @@ az network nsg create --resource-group "$RG_HUB" --name "nsg-lzbegin-hub-$RUN_ID
 응답의 NSG 이름이 `nsg-lzbegin-hub-<실행 ID>`입니다.
 NSG 생성 응답은 `NewNSG` 안에 표시될 수 있습니다. 기본 규칙과 직접 추가하는 규칙을 구분합니다.
 
-### 1-4. Hub VNet·관리·Firewall Subnet을 pool에서 할당
+### 1-5. Hub VNet·관리·Firewall Subnet을 pool에서 할당
 
 👁️ **설명**
 
@@ -237,7 +300,7 @@ deploy_hub_vnet
 `AzureFirewallSubnet`에는 NSG가 없어야 합니다. 불일치하면 다음 블록을 실행하지 마세요.
 암묵적 인터넷 출구는 사용하지 않으며 모듈 04에서 NAT를 명시적으로 연결합니다.
 
-### 1-5. Hub의 기본 VNet 내부 허용보다 앞서는 차단
+### 1-6. Hub의 기본 VNet 내부 허용보다 앞서는 차단
 
 👁️ **설명**
 
@@ -581,7 +644,7 @@ assert_owned_rg "$RG_SPOKEB" &&
 load_ipam_cidrs &&
 printf 'Hub VNet %s / 관리 %s / Firewall %s\nSpoke A VNet %s / 워크로드 %s\nSpoke B VNet %s / 워크로드 %s\n' \
   "$HUB_VNET_CIDR" "$HUB_SUBNET_CIDR" "$FIREWALL_SUBNET_CIDR" \
-  "$SPOKEA_VNET_CIDR" "$SPOKEA_SUBNET_CIDR" "$SPOKEB_VNET_CIDR"
+  "$SPOKEA_VNET_CIDR" "$SPOKEA_SUBNET_CIDR" "$SPOKEB_VNET_CIDR" "$SPOKEB_SUBNET_CIDR"
 ```
 
 📋 **확인**

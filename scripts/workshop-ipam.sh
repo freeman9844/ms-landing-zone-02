@@ -14,6 +14,36 @@ assert_new_run_subscription() {
   python3 "$(dirname "${BASH_SOURCE[0]}")/check-run-preflight.py" <<< "$envelope"
 }
 
+assert_run_ipam_pool() {
+  require_run_schema_four || return 1
+  assert_owned_rg "$RG_HUB" || return 1
+  local response
+  response=$(az rest --method get --url "$IPAM_POOL_ID?api-version=2024-05-01" \
+    --subscription "$SUBSCRIPTION_ID" -o json) ||
+    { fail "Cannot read this run's IPAM pool: $IPAM_POOL_ID"; return 1; }
+  jq -e --arg id "${IPAM_POOL_ID,,}" '
+    type == "object" and (.id | type == "string" and ascii_downcase == $id) and
+    (.location | type == "string" and ascii_downcase == "koreacentral") and
+    .properties.addressPrefixes == ["172.20.0.0/14"] and
+    .properties.provisioningState == "Succeeded"
+  ' <<< "$response" >/dev/null ||
+    { fail "This run's IPAM pool ID, location, prefix or state is not ready: $IPAM_POOL_ID"; return 1; }
+  response=$(az rest --method get --url "$AVNM_ID?api-version=2024-05-01" \
+    --subscription "$SUBSCRIPTION_ID" -o json) ||
+    { fail "Cannot read this run's parent AVNM: $AVNM_ID"; return 1; }
+  jq -e --arg id "${AVNM_ID,,}" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
+    type == "object" and (.id | type == "string" and ascii_downcase == $id) and
+    (.location | type == "string" and ascii_downcase == "koreacentral") and
+    .properties.provisioningState == "Succeeded" and
+    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1 and
+      (.[0] | type == "string" and ascii_downcase == $scope)) and
+    (.properties.networkManagerScopes.managementGroups // []) == [] and
+    (.properties.networkManagerScopeAccesses | sort) ==
+      (["Connectivity","SecurityAdmin","Routing"] | sort)
+  ' <<< "$response" >/dev/null ||
+    { fail "This run's parent AVNM ID, scope or state is not ready: $AVNM_ID"; return 1; }
+}
+
 clear_ipam_cidrs() {
   unset HUB_VNET_CIDR SPOKEA_VNET_CIDR SPOKEB_VNET_CIDR \
     HUB_SUBNET_CIDR SPOKEA_SUBNET_CIDR SPOKEB_SUBNET_CIDR FIREWALL_SUBNET_CIDR \

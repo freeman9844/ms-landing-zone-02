@@ -58,19 +58,21 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 
 사용할 Azure 구독의 이름과 UUID가 표시됩니다.
 
-### 새 실행의 공유 IPAM 사전 준비
+### 이번 실행의 IPAM 직접 생성
 
-새 실행은 운영자가 **별도로 준비한** Korea Central 공유 RG
-`rg-lzbegin-ipam`의 AVNM `avnm-lzbegin-ipam`과 pool
-`ipam-lzbegin-shared`를 사용합니다. 공유 pool의 단일 root prefix는
-`172.20.0.0/14`이며 전체 ID는
-`/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-lzbegin-ipam/providers/Microsoft.Network/networkManagers/avnm-lzbegin-ipam/ipamPools/ipam-lzbegin-shared`
-입니다. `$SUBSCRIPTION_ID`는 실습 구독 UUID로 대체됩니다. 구독이 다르거나
-pool에 접근할 수 없다면 새 실행을 시작하지 말고 운영자에게 문의하세요.
-참가자 명령으로 공유 RG/pool을 생성하거나 변경하지 않습니다. 공유 pool의
-사용 권한(**IPAM Pool User** 역할 또는 동등한 pool 사용 권한)과 Network Manager
-읽기 권한은 운영자와 확인하세요. 읽기 전용 사전 점검은 실제 주소 할당 권한을
-증명하지 못합니다. 권한이 부족하면 모듈 02의 실제 배포에서 할당 오류가 발생합니다.
+운영자가 별도의 공유 RG나 pool을 준비할 필요가 없습니다. 모듈 02에서
+이번 실행의 Hub RG에 `avnm-lzbegin-<실행 ID>`를 만들고 그 아래에
+`ipam-lzbegin-<실행 ID>` pool(root `172.20.0.0/14`)을 직접 생성합니다.
+세 VNet과 네 Subnet은 해당 pool에서 주소를 할당받고, 모듈 07에서
+Spoke RG를 먼저 정리한 후 Hub RG와 함께 pool을 삭제합니다.
+구독 Contributor 또는 동등한 관리자·pool 생성/할당 권한이 필요합니다.
+조회 성공만으로 실제 할당 권한은 증명되지 않습니다.
+
+**같은 구독에서 한 번에 한 실행만 지원합니다.** 실행별 AVNM의 구독 범위 기능이
+서로 충돌하고, 실행별 pool은 서로 간 주소 중복을 조율하지 않습니다. 새 실행
+전에 기존 AVNM과 VNet 주소 범위를 읽기 전용으로 확인하며, 구독 밖 연결망과
+온프레미스의 `172.20.0.0/14` 충돌 여부도 확인하세요. 이미 존재하는 운영자 공유
+`rg-lzbegin-ipam`은 신규 실습에서 사용하거나 삭제하지 않습니다.
 
 기존 실행을 재개한다면 현재 상태 JSON을 그대로 보관하고 운영자가 게시한
 `workshop-pre-ipam-8d4781f` 태그(`8d4781f`)의 교재·스크립트를 **별도 clone**에서
@@ -132,7 +134,8 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 | `new_run` | 새 난수 ID와 로컬 상태 JSON을 준비합니다. Azure RG 이름 충돌을 조회하지만 RG를 만들지는 않습니다. |
 | `load_run` | 이전 실습·구역 변수를 비운 뒤 JSON을 검증하고 `RUN_ID`, `LOCATION`, 세 RG 이름 등을 복구합니다. 실패하면 대상 변수는 미설정 상태입니다. |
 | `assert_subscription` | 활성 구독과 상태 파일의 구독이 같은지 확인합니다. 임의로 구독을 바꾸지 않습니다. |
-| `assert_shared_ipam_pool` | 공유 pool의 ID·리전·prefix·준비 상태와 부모 Network Manager의 ID·구독 범위·Connectivity 접근·준비 상태를 읽기 전용으로 검증합니다. 할당 권한은 증명하지 못합니다. |
+| `assert_new_run_subscription` | 새 실행 전에 현재 구독의 다른 AVNM 기능 범위와 VNet 주소가 충돌하는지 읽기 전용으로 확인합니다. 조회 실패는 성공으로 처리하지 않습니다. |
+| `assert_run_ipam_pool` | 모듈 02에서 만든 이번 실행의 pool·부모 AVNM ID, prefix, 상태와 범위를 확인합니다. |
 | `assert_owned_rg` | 정확한 RG 이름·구독·네 가지 소유 태그를 확인합니다. 태그는 실수 방지 장치이지 RBAC 권한 경계가 아닙니다. |
 
 `zone_context`는 내부 검증 스크립트에서 구역별 이름을 선택할 때만 사용합니다.
@@ -160,12 +163,12 @@ source scripts/workshop-ipam.sh &&
 clear_run &&
 unset STATE_FILE &&
 read -rp "실습 Azure subscription ID: " SELECTED_SUBSCRIPTION &&
-# 선택 구독과 공유 pool을 읽기 전용으로 확인한 뒤에만 새 실습 JSON을 만듭니다.
+# 선택 구독의 기존 AVNM·VNet 충돌을 읽기 전용으로 확인한 뒤 새 실습 JSON을 만듭니다.
 az account set --subscription "$SELECTED_SUBSCRIPTION" &&
   SUBSCRIPTION_ID="${SELECTED_SUBSCRIPTION,,}" &&
   assert_subscription &&
-  assert_shared_ipam_pool &&
-  STATE_FILE=$(new_run "$SELECTED_SUBSCRIPTION" koreacentral) &&
+  { STATE_FILE=$(new_run "$SELECTED_SUBSCRIPTION" koreacentral) ||
+      { unset STATE_FILE; fail "New run could not be created."; }; } &&
   export STATE_FILE &&
   load_run "$STATE_FILE" &&
   assert_subscription &&
@@ -181,16 +184,15 @@ az account set --subscription "$SELECTED_SUBSCRIPTION" &&
 태그가 같아도 새 실습 생성을 거부하며, 상태 파일을 만들지 않습니다.
 충돌 오류이면 이 블록을 다시 실행해 새 ID를 받으세요.
 로컬 상태 파일도 덮어쓰지 않습니다. **기존 실습 재개에는 아래 상태 복구만 사용**하세요.
-공유 pool 검사에서 실패하면 새 상태 파일을 만들지 마세요. `az account show --query id -o tsv`로
-활성 구독을 확인하고 운영자에게 `rg-lzbegin-ipam`의 pool 존재 여부, Network Manager
-읽기·pool 사용 권한, 관리자 구독 범위·Connectivity 접근·준비 상태,
-Korea Central 및 `172.20.0.0/14` 구성을 문의하세요. 조회 성공만으로 실제
-할당 권한은 증명되지 않으므로 모듈 02에서 권한 오류가 나면 운영자에게 문의하세요.
-조회가 실패하거나 다른 pool을 반환하면 임의 pool 또는 고정 CIDR로 대신하지 마세요.
+AVNM·VNet 사전 점검이 실패하면 새 상태 파일을 만들지 않습니다.
+`az account show --query id -o tsv`로 구독을 확인하고 기존 기능 범위 또는
+`172.20.0.0/14` 주소 충돌을 해결하세요. 상위 관리 그룹 범위의 AVNM이나
+동시에 생성되는 자원은 사전 조회만으로 배제할 수 없습니다. 모듈 02에서
+Azure가 관리자 생성·pool 할당을 거부하면 오류를 확인하고 중단하세요.
 
 ⚠️ **주의**
 
-상태 JSON(schema 3)에는 구독, 리전, 실행 ID, RG 이름과 정확한 공유 pool ID만 저장합니다.
+상태 JSON(schema 4)에는 구독, 리전, 실행 ID, RG 이름과 정확한 실행별 pool ID만 저장합니다.
 토큰·비밀번호·SSH 개인 키를 추가하지 마세요.
 
 ## 4. Provider와 용량 확인
