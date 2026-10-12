@@ -232,6 +232,8 @@ timeout 2700 az network firewall ip-config create -g "$RG_HUB" \
 
 IP는 Hub의 할당된 `AzureFirewallSubnet`(`/26`) 안이어야 합니다. 상태/정책/전체 ID가 다른 경우
 규칙이나 경로 배포를 시작하지 마세요.
+새 Bash 세션에서는 모듈 상단의 **공통 준비**를 다시 실행해야 아래
+`assert_ipv4_in_subnet` 검사 함수를 사용할 수 있습니다. Firewall 생성 단계는 다시 실행하지 마세요.
 
 🟢 **실행**
 
@@ -239,6 +241,8 @@ IP는 Hub의 할당된 `AzureFirewallSubnet`(`/26`) 안이어야 합니다. 상�
 ```bash
 inspect_firewall_before_rules() {
   local fw ip
+  declare -F assert_ipv4_in_subnet >/dev/null ||
+    { printf 'ERROR: 모듈 04 공통 준비를 같은 Bash 세션에서 먼저 실행하세요.\n' >&2; return 1; }
   fw=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
   jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/azureFirewalls/fw-lzbegin-$RUN_ID" \

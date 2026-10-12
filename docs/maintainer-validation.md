@@ -215,7 +215,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 4 실행별·schema 3 기존 pool ID 검증과 schema 2 거부, 구독·RG 소유 확인 |
 | `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 상태 확인 및 실제 VNet·Subnet CIDR 재조회 |
 | `workshop-foundation.sh` | 모듈 02 부분 생성 복구 시 기존 IPAM VNet·Subnet 할당과 설정을 읽기 전용으로 확인 |
-| `workshop-support.sh` | 모듈 05 부분 생성 복구와 실제 Hub NAT·NIC·VM 설정 확인; 정상 최초 생성 흐름에서는 이름 목록 조회 안 함 |
+| `workshop-support.sh` | 모듈 05 실제 Hub NAT·NIC·VM 설정 확인; 불완전한 생성은 재실행하지 않고 모듈 07에서 정리 |
 | `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 05 VM SKU/quota 및 필수 Provider 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |

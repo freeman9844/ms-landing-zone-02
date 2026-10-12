@@ -706,6 +706,11 @@ printf 'SHELL_ALIVE\\n'
             self.assertIn(f"forward-{direction}", routing)
         self.assertIn("assert_enforced_connectivity", routing["inspect-enforced-connectivity"])
 
+    def test_firewall_inspection_explains_missing_common_preparation(self):
+        result = run(blocks(DOCS[4])["inspect-firewall"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("모듈 04 공통 준비", result.stderr)
+
     def test_prerequisite_lookup_failures_stop_before_mutation(self):
         for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):
             for name, calls in cases.items():
@@ -756,7 +761,7 @@ printf 'SHELL_ALIVE\\n'
                         expected = ["assert_owned_rg"] * 3
                     else:
                         expected = {
-                            (4, "inspect-firewall"): ["assert_ipv4_in_subnet"],
+                            (4, "inspect-firewall"): ["assert_ipv4_in_subnet"] * 2,
                             (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
                             (4, "enforce-peering"): ["assert_forwarded_peerings",
                                                     "assert_connectivity_config_ready",

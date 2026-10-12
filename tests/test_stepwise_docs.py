@@ -8,11 +8,6 @@ from test_network_docs import blocks, DOCS, az, rg, netid, vnet, subnet_args, ni
 from test_workshop_safety import FW, LAW, FW_IP, ready_calls, effective_admin_call, effective_admin_rule
 
 
-def support_inventory():
-    return [az(["resource", "list", "--resource-group", rg(zone), "-o", "json"], [])
-            for zone in ("hub", "spokea", "spokeb")]
-
-
 def support_resource(kind, zone):
     name = f"{kind}-lzbegin-{zone}-demo123"
     types = {"pip": "publicIPAddresses", "nat": "natGateways",
@@ -828,15 +823,11 @@ class StepwiseDocsTests(unittest.TestCase):
             result = run(script, preparation_calls(5), files=self.keyfile, input_text="CREATE\n")
             self.assertNotEqual(result.returncode, 0, result.stderr)
 
-    def test_support_recovery_and_post_create_gate_are_executable(self):
+    def test_support_post_create_gate_remains_required_without_recovery_step(self):
         steps = blocks(DOCS[5])
-        self.assertIn("support-recovery", steps)
+        self.assertNotIn("support-recovery", steps)
         self.assertIn("verify-support", steps)
-        for name in ("support-deploy", "support-recovery"):
-            self.assertIsNone(re.search(r"--public-ip-address(?:\s|$)", steps[name]))
-        self.assertIn("recover_support", steps["support-recovery"])
-        self.assertIn("az vm create", steps["support-recovery"])
-        self.assertIn("CREATE", steps["support-recovery"])
+        self.assertIsNone(re.search(r"--public-ip-address(?:\s|$)", steps["support-deploy"]))
         self.assertIn("verify_support_all", steps["verify-support"])
         self.assertLess(DOCS[5].read_text().index("<!-- exec:verify-support -->"),
                         DOCS[5].read_text().index("<!-- exec:attach-nat-hub -->"))
@@ -846,15 +837,6 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertEqual(self.execute(
             5, "support-deploy", support_cases()["support-deploy"],
             files=self.keyfile, input_text="CREATE\n").returncode, 0)
-
-    def test_support_recovery_rejects_inventory_failure_without_create(self):
-        steps = blocks(DOCS[5])
-        calls = support_inventory()
-        calls[0].update(returncode=1, stderr="Forbidden")
-        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
-                  '\n' + steps["support-recovery"])
-        result = run(script, preparation_calls(5) + calls[:1], files=self.keyfile)
-        self.assertNotEqual(result.returncode, 0)
 
     def test_support_verifier_can_check_pip_with_nounset(self):
         steps = blocks(DOCS[5])
@@ -884,19 +866,6 @@ class StepwiseDocsTests(unittest.TestCase):
                 bad[-1]["stdout"] = json.dumps(payload)
                 self.assertNotEqual(run(script, preparation_calls(5) + bad, files=self.keyfile).returncode, 0)
 
-    def test_support_recovery_creates_only_proven_missing_pip(self):
-        steps = blocks(DOCS[5])
-        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
-                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
-                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
-                  '\nrecover_support pip hub')
-        calls = [support_inventory()[0],
-                 support_cases()["support-deploy"][0]]
-        self.assertEqual(run(script, preparation_calls(5) + calls, files=self.keyfile).returncode, 0)
-        bad = copy.deepcopy(calls[:1])
-        bad[0]["stdout"] = json.dumps([support_resource("pip", "hub")])
-        self.assertNotEqual(run(script, preparation_calls(5) + bad, files=self.keyfile).returncode, 0)
-
     def test_support_recovery_refuses_foreign_malformed_and_disk_collisions(self):
         script = ('export STATE_FILE=state.json\n' + blocks(DOCS[5])["prepare-05"] +
                   '\nsource scripts/workshop-support.sh\nrequire_support_missing vm hub')
@@ -909,56 +878,6 @@ class StepwiseDocsTests(unittest.TestCase):
                 calls = [az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], inventory)]
                 self.assertNotEqual(run(script, preparation_calls(5) + calls,
                                         files=self.keyfile).returncode, 0)
-
-    def test_support_recovery_enables_boot_diagnostics_only_on_matching_vm(self):
-        steps = blocks(DOCS[5])
-        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
-                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
-                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
-                  '\nrecover_support boot hub')
-        nic_obj = support_resource("nic", "hub")
-        vm_obj = support_resource("vm", "hub")
-        vm_obj["diagnosticsProfile"]["bootDiagnostics"]["enabled"] = False
-        calls = [
-            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj, vm_obj]),
-            support_read("nic", "hub"),
-            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj, vm_obj]),
-            support_read("vm", "hub", vm_obj),
-            az(["vm", "boot-diagnostics", "enable", "-g", rg("hub"),
-                "-n", "vm-lzbegin-hub-demo123", "-o", "json"]),
-        ]
-        self.assertEqual(run(script, preparation_calls(5) + calls,
-                             files=self.keyfile).returncode, 0)
-        no_diagnostics = copy.deepcopy(calls)
-        vm_without_diagnostics = json.loads(no_diagnostics[3]["stdout"])
-        vm_without_diagnostics["diagnosticsProfile"] = None
-        no_diagnostics[3]["stdout"] = json.dumps(vm_without_diagnostics)
-        self.assertEqual(run(script, preparation_calls(5) + no_diagnostics,
-                             files=self.keyfile).returncode, 0)
-        bad = copy.deepcopy(calls[:4])
-        broken = json.loads(bad[-1]["stdout"])
-        broken["securityProfile"]["uefiSettings"]["secureBootEnabled"] = False
-        bad[-1]["stdout"] = json.dumps(broken)
-        self.assertNotEqual(run(script, preparation_calls(5) + bad,
-                                files=self.keyfile).returncode, 0)
-
-    def test_support_recovery_requires_fresh_create_consent_for_each_vm(self):
-        steps = blocks(DOCS[5])
-        script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
-                  '\ncheck_vm_network() { :; }\nsource scripts/workshop-support.sh\n' +
-                  'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
-                  '\nrecover_support vm hub')
-        nic_obj = support_resource("nic", "hub")
-        calls = [
-            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], []),
-            az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], [nic_obj]),
-            support_read("nic", "hub"),
-        ]
-        self.assertNotEqual(run(script, preparation_calls(5) + calls,
-                                files=self.keyfile, input_text="NO\n").returncode, 0)
-        approved = calls + [support_cases()["support-deploy"][3]]
-        self.assertEqual(run(script, preparation_calls(5) + approved,
-                             files=self.keyfile, input_text="CREATE\n").returncode, 0)
 
     def test_attach_nat_is_blocked_by_failed_post_creation_verification(self):
         calls = support_verification_calls()
