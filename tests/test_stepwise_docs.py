@@ -590,7 +590,7 @@ class StepwiseDocsTests(unittest.TestCase):
         for module, names in (
             (3, ("avnm-ready", "network-group-create", "member-spokea",
                  "member-spokeb", "connectivity-config-create",
-                 "connectivity-commit", "effective-hub")),
+                 "connectivity-commit", "inspect-avnm-peerings-hub")),
             (4, ("firewall-workspace", "firewall-public-ip", "firewall-http-rule")),
             (5, ("attach-nat-hub", "security-config", "security-collection")),
             (6, ()),

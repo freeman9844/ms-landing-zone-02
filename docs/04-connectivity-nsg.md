@@ -260,6 +260,12 @@ inspect_firewall_before_rules
 
 `PASS`와 실제 사설 IP가 나옵니다. 아직 VM이 없어 NIC 유효 경로는 확인할 수 없습니다.
 
+생성된 Firewall은 Azure Portal의 **Network security → Azure Firewalls → 이번 실행의 Firewall**
+화면에서도 확인할 수 있습니다. 아래 이미지는 생성 중인 예시로 `Updating`과 사설 IP `-`가
+표시됩니다. 다음 단계로 진행하려면 위 CLI 검사에서 `Succeeded`와 실제 사설 IP를 확인하세요.
+
+![Azure Portal의 Azure Firewalls 목록과 이번 실행의 Firewall Overview에 표시된 Policy, VNet, Subnet 및 생성 중 상태](images/04-firewall-resource-overview.png)
+
 ### 2-7. Policy collection group
 
 👁️ **설명**

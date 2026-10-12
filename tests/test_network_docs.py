@@ -376,42 +376,12 @@ def avnm_cases():
             "--resource-group", rg("hub"),
             "-o", "json",
         ])],
-        "effective-hub": [az([
-            "network", "manager", "list-effective-connectivity-config",
-            "--resource-group", rg("hub"),
-            "--virtual-network-name", vnet("hub"),
-            "-o", "json",
-        ], {"value": []})],
-        "effective-spokea": [az([
-            "network", "manager", "list-effective-connectivity-config",
-            "--resource-group", rg("spokea"),
-            "--virtual-network-name", vnet("spokea"),
-            "-o", "json",
-        ], effective_configuration("spokea"))],
-        "effective-spokeb": [az([
-            "network", "manager", "list-effective-connectivity-config",
-            "--resource-group", rg("spokeb"),
-            "--virtual-network-name", vnet("spokeb"),
-            "-o", "json",
-        ], effective_configuration("spokeb"))],
         "inspect-avnm-peerings-hub": [az([
             "network", "vnet", "peering", "list",
             "-g", rg("hub"),
             "--vnet-name", vnet("hub"),
             "-o", "json",
         ], avnm_peerings("hub"))],
-        "inspect-avnm-peerings-spokea": [az([
-            "network", "vnet", "peering", "list",
-            "-g", rg("spokea"),
-            "--vnet-name", vnet("spokea"),
-            "-o", "json",
-        ], avnm_peerings("spokea"))],
-        "inspect-avnm-peerings-spokeb": [az([
-            "network", "vnet", "peering", "list",
-            "-g", rg("spokeb"),
-            "--vnet-name", vnet("spokeb"),
-            "-o", "json",
-        ], avnm_peerings("spokeb"))],
     }
 
 
@@ -725,40 +695,16 @@ printf 'SHELL_ALIVE\\n'
                 result = self.execute(module, creation, avnm_cases()[creation])
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_hub_effective_configuration_accepts_only_empty_or_approved_configuration(self):
-        expected_call = avnm_cases()["effective-hub"][0]
-        for value, accepted in (
-            ({"value": []}, True),
-            (effective_configuration("hub"), True),
-            ({"value": [connectivity_config()]}, True),
-            ({"value": [dict(connectivity_config(), id="unexpected")]}, False),
-            ({"value": [dict(connectivity_config(), targetVirtualNetwork={"id": "unexpected"})]}, False),
-            ({"value": [connectivity_config(), connectivity_config()]}, False),
-            ({"value": {}}, False),
-        ):
-            with self.subTest(value=value):
-                result = self.execute(3, "effective-hub", [dict(expected_call, stdout=json.dumps(value))])
-                self.assertEqual(result.returncode == 0, accepted, result.stderr)
-
-    def test_spoke_effective_checks_preserve_exact_ids_and_status(self):
-        for zone in ("spokea", "spokeb"):
-            expected_call = avnm_cases()[f"effective-{zone}"][0]
-            valid = effective_configuration(zone)
-            variants = [
-                (valid, True),
-                ({"value": [dict(valid["value"][0], deleteExistingPeering=False, isGlobal=False)]}, True),
-                ({"value": []}, False),
-                ({"value": {}}, False),
-                ({"value": [dict(valid["value"][0], id="unexpected")]}, False),
-                ({"value": [dict(valid["value"][0], provisioningState="Updating")]}, False),
-                ({"value": [dict(valid["value"][0], hubs=[{"resourceId": "unexpected"}])]}, False),
-                ({"value": [dict(valid["value"][0], appliesToGroups=[{"networkGroupId": "unexpected"}])]}, False),
-            ]
-            for response, accepted in variants:
-                with self.subTest(zone=zone, response=response):
-                    result = self.execute(3, f"effective-{zone}",
-                                          [dict(expected_call, stdout=json.dumps(response))])
-                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+    def test_module_03_checks_hub_peerings_and_defers_spoke_validation_to_module_04(self):
+        steps = blocks(DOCS[3])
+        self.assertIn("inspect-avnm-peerings-hub", steps)
+        for old in ("effective-hub", "effective-spokea", "effective-spokeb",
+                    "inspect-avnm-peerings-spokea", "inspect-avnm-peerings-spokeb"):
+            self.assertNotIn(old, steps)
+        routing = blocks(DOCS[4])
+        for direction in ("hub-to-spokea", "spokea-to-hub", "hub-to-spokeb", "spokeb-to-hub"):
+            self.assertIn(f"forward-{direction}", routing)
+        self.assertIn("assert_enforced_connectivity", routing["inspect-enforced-connectivity"])
 
     def test_prerequisite_lookup_failures_stop_before_mutation(self):
         for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):

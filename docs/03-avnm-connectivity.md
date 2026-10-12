@@ -399,10 +399,11 @@ az network manager connect-config create \
 
 `HubAndSpoke`, `deleteExistingPeering=False`, `isGlobal=False`, Hub VNet ID, Network Group ID가 모두
 의도한 값이어야 합니다. Hub gateway, global mesh, destructive overwrite는 사용하지 않습니다.
-생성된 구성은 Azure Portal의 **Virtual Network Manager → Configurations → 해당 Connectivity Configuration**
-화면에서도 확인할 수 있습니다. 화면의 `Not deployed`는 아직 다음 단계에서 배포(commit)하지 않은 상태입니다.
+생성된 구성은 Azure Portal의 **Virtual Network Manager → Network groups → 이번 Spoke Group → Connectivity**
+탭에서도 확인할 수 있습니다. 아래 화면에는 멤버 수 2개, `HubAndSpoke` 구성과
+Hub VNet이 표시됩니다. `Not deployed`는 아직 다음 단계에서 배포(commit)하지 않은 상태입니다.
 
-![Azure Portal에서 생성된 Hub-and-Spoke Connectivity Configuration의 Hub 및 두 Spoke와 배포 전 상태](images/03-connectivity-config-before-deploy.png)
+![Azure Portal의 Spoke Network Group Connectivity 탭에 표시된 HubAndSpoke 구성과 Hub VNet 및 Not deployed 상태](images/03-connectivity-config-before-deploy.png)
 
 ## 6. koreacentral에 Connectivity 배포(commit)
 
@@ -430,194 +431,11 @@ az network manager post-commit \
 
 📋 **확인**
 
-commit 요청이 성공하면 다음 단계에서 각 VNet의 effective configuration과 실제 Peering을 확인합니다.
+commit 요청이 성공하면 Hub에 생긴 Peering 두 개를 확인합니다. 모듈 04에서는
+네 방향 Peering을 전달 허용·강제 설정 전에 검사하고, 양쪽 Spoke의 effective
+구성은 피어링 강제 배포 후 확인합니다.
 
-## 7. Hub의 effective connectivity 응답 확인
-
-👁️ **설명**
-
-Hub는 정적 Spoke Network Group의 멤버가 아니라 별도로 지정한 대상입니다. Hub의
-effective 목록은 비어 있거나, 의도한 configuration 하나를 반환할 수 있습니다. 배포 상태와
-실제 Hub Peering 두 개를 뒤의 블록에서 확인하고, Spoke A/B의 effective configuration과 함께 판정합니다.
-
-🟢 **실행**
-
-<!-- exec:effective-hub -->
-```bash
-# Hub는 그룹 밖이므로 빈 목록 또는 이번 구성 하나만 허용합니다.
-inspect_effective_hub() {
-  local effective hub_id
-  effective=$(az network manager list-effective-connectivity-config \
-    --resource-group "$RG_HUB" \
-    --virtual-network-name "vnet-lzbegin-hub-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$hub_id" --arg group "$NETWORK_GROUP_ID" '
-    def falsey: . == false or . == "False";
-    (.value | type == "array" and length <= 1) and
-    all(.value[];
-      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
-      .connectivityTopology == "HubAndSpoke" and
-      .provisioningState == "Succeeded" and
-      (.deleteExistingPeering | falsey) and
-      (.isGlobal | falsey) and
-      (.hubs | length == 1) and
-      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
-      (.targetVirtualNetwork.id == null or
-        ((.targetVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase))) and
-      (.appliesToGroups | length == 1) and
-      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase)) and
-      .appliesToGroups[0].groupConnectivity == "None" and
-      (.appliesToGroups[0].isGlobal | falsey) and
-      (.appliesToGroups[0].useHubGateway | falsey)
-    )
-' <<<"$effective" >/dev/null ||
-    { fail "Unexpected Hub effective connectivity."; return 1; }
-  printf '%s\n' "$effective"
-}
-inspect_effective_hub
-```
-
-📋 **확인**
-
-Hub는 group member가 아니므로 `value: []`도 정상입니다. `all(.value[]; ...)`은
-빈 목록이면 통과하고, 구성이 하나 반환되면 해당 구성의 ID·Hub·Group·설정을 검사합니다.
-배포 성공 여부는 두 Spoke의 effective configuration과 뒤의 양방향
-Peering 검사로 판단합니다.
-
-## 8. Spoke A의 effective connectivity 확인
-
-👁️ **설명**
-
-Spoke A도 같은 configuration을 받아야 합니다. Hub에만 적용되고 Spoke에 보이지 않으면 commit이 아직 완전히 반영되지 않은 상태입니다.
-
-🟢 **실행**
-
-<!-- exec:effective-spokea -->
-```bash
-# A의 effective 구성이 이번 Hub와 Network Group을 가리키는지 검사합니다.
-inspect_effective_spokea() {
-  local effective expected_hub_id
-  effective=$(az network manager list-effective-connectivity-config \
-    --resource-group "$RG_SPOKEA" \
-    --virtual-network-name "vnet-lzbegin-spokea-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-    def falsey: . == false or . == "False";
-    (.value | type == "array" and length == 1) and
-    all(.value[];
-      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
-      .connectivityTopology == "HubAndSpoke" and
-      .provisioningState == "Succeeded" and
-      (.deleteExistingPeering | falsey) and
-      (.isGlobal | falsey) and
-      (.hubs | length == 1) and
-      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
-      (.appliesToGroups | length == 1) and
-      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase))
-    )
-' <<<"$effective" >/dev/null ||
-    { fail "Unexpected Spoke A effective connectivity."; return 1; }
-  printf '%s\n' "$effective"
-}
-inspect_effective_spokea
-```
-
-📋 **확인**
-
-아래는 Spoke A에서 확인한 결과를 바탕으로 한 **출력 예시**입니다.
-`<구독 ID>`와 `<실행 ID>`는 자신의 값으로 바꿔 비교하세요.
-
-```json
-{
-  "skipToken": "",
-  "value": [
-    {
-      "appliesToGroups": [
-        {
-          "groupConnectivity": "None",
-          "isGlobal": "False",
-          "networkGroupId": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/networkGroups/ng-lzbegin-spokes-<실행 ID>",
-          "useHubGateway": "False"
-        }
-      ],
-      "configurationGroups": [
-        {
-          "description": "Workshop spoke virtual networks",
-          "id": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/networkGroups/ng-lzbegin-spokes-<실행 ID>",
-          "provisioningState": "Succeeded",
-          "resourceGroup": "rg-lzbegin-hub-<실행 ID>"
-        }
-      ],
-      "connectivityTopology": "HubAndSpoke",
-      "deleteExistingPeering": "False",
-      "description": "AVNM managed beginner hub and spoke",
-      "hubs": [
-        {
-          "resourceId": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-<실행 ID>",
-          "resourceType": "Microsoft.Network/virtualNetworks"
-        }
-      ],
-      "id": "/subscriptions/<구독 ID>/resourceGroups/rg-lzbegin-hub-<실행 ID>/providers/Microsoft.Network/networkManagers/avnm-lzbegin-<실행 ID>/connectivityConfigurations/cc-lzbegin-hub-spoke-<실행 ID>",
-      "isGlobal": "False",
-      "provisioningState": "Succeeded",
-      "resourceGroup": "rg-lzbegin-hub-<실행 ID>"
-    }
-  ]
-}
-```
-
-`value`에 이번 구성 하나만 있고 `id`는 `$CONNECTIVITY_CONFIG_ID`,
-`hubs[0].resourceId`는 이번 Hub VNet ID, `appliesToGroups[0].networkGroupId`는
-`$NETWORK_GROUP_ID`와 각각 전체 ID가 일치해야 합니다. `connectivityTopology`는
-`HubAndSpoke`, `provisioningState`는 `Succeeded`인지 확인하세요. 예시의
-`"False"`는 실제 Azure CLI 응답의 문자열 표현이며, 검사 명령은 boolean `false`도 허용합니다.
-
-## 9. Spoke B의 effective connectivity 확인
-
-👁️ **설명**
-
-Spoke B도 동일하게 확인합니다. 두 Spoke 모두 같은 configuration을 읽을 수 있어야 AVNM이 의도한 범위에 배포된 것입니다.
-
-🟢 **실행**
-
-<!-- exec:effective-spokeb -->
-```bash
-# B도 A와 같은 구성 ID 및 Hub 대상을 사용해야 합니다.
-inspect_effective_spokeb() {
-  local effective expected_hub_id
-  effective=$(az network manager list-effective-connectivity-config \
-    --resource-group "$RG_SPOKEB" \
-    --virtual-network-name "vnet-lzbegin-spokeb-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  jq -e --arg config "$CONNECTIVITY_CONFIG_ID" --arg hub "$expected_hub_id" --arg group "$NETWORK_GROUP_ID" '
-    def falsey: . == false or . == "False";
-    (.value | type == "array" and length == 1) and
-    all(.value[];
-      ((.id | ascii_downcase) == ($config | ascii_downcase)) and
-      .connectivityTopology == "HubAndSpoke" and
-      .provisioningState == "Succeeded" and
-      (.deleteExistingPeering | falsey) and
-      (.isGlobal | falsey) and
-      (.hubs | length == 1) and
-      ((.hubs[0].resourceId | ascii_downcase) == ($hub | ascii_downcase)) and
-      (.appliesToGroups | length == 1) and
-      ((.appliesToGroups[0].networkGroupId | ascii_downcase) == ($group | ascii_downcase))
-    )
-' <<<"$effective" >/dev/null ||
-    { fail "Unexpected Spoke B effective connectivity."; return 1; }
-  printf '%s\n' "$effective"
-}
-inspect_effective_spokeb
-```
-
-📋 **확인**
-
-Spoke B도 같은 configuration ID와 `HubAndSpoke` topology를 보여야 합니다.
-
-## 10. Hub에서 AVNM이 만든 Peering 확인
+## 7. Hub에서 AVNM이 만든 Peering 확인
 
 👁️ **설명**
 
@@ -672,71 +490,7 @@ Hub에는 Spoke A와 Spoke B를 향한 두 개의 `Connected` Peering이 보여�
 ]
 ```
 
-## 11. Spoke A에서 AVNM Peering 확인
-
-👁️ **설명**
-
-Spoke A는 Hub 하나만 remote로 가져야 합니다. B와 직접 연결이 생기면 이 워크숍의 비전이성 학습 조건이 달라집니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm-peerings-spokea -->
-```bash
-# A에서 Hub 방향 Peering만 Connected인지 조회합니다.
-inspect_spokea_peerings() {
-  local peerings hub_id
-  peerings=$(az network vnet peering list -g "$RG_SPOKEA" \
-    --vnet-name "vnet-lzbegin-spokea-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  jq -e --arg hub "$hub_id" '
-    type == "array" and length == 1 and
-    ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
-    .[0].peeringState == "Connected"
-' <<<"$peerings" >/dev/null ||
-    { fail "Unexpected Spoke A peerings."; return 1; }
-  jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
-}
-inspect_spokea_peerings
-```
-
-📋 **확인**
-
-Spoke A에서는 Hub 하나만 `Connected`여야 하며, generated peering name은 안정적인 계약이 아닙니다.
-
-## 12. Spoke B에서 AVNM Peering 확인
-
-👁️ **설명**
-
-Spoke B도 같은 방식으로 Hub 하나만 확인합니다. Hub 쪽 결과만 보고 전체 구성이 맞다고 판단하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm-peerings-spokeb -->
-```bash
-# B에서도 Hub 방향 Peering만 Connected인지 별도로 조회합니다.
-inspect_spokeb_peerings() {
-  local peerings hub_id
-  peerings=$(az network vnet peering list -g "$RG_SPOKEB" \
-    --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  jq -e --arg hub "$hub_id" '
-    type == "array" and length == 1 and
-    ((.[0].remoteVirtualNetwork.id | ascii_downcase) == ($hub | ascii_downcase)) and
-    .[0].peeringState == "Connected"
-' <<<"$peerings" >/dev/null ||
-    { fail "Unexpected Spoke B peerings."; return 1; }
-  jq '[.[] | {Name:.name,State:.peeringState,Remote:.remoteVirtualNetwork.id}]' <<<"$peerings"
-}
-inspect_spokeb_peerings
-```
-
-📋 **확인**
-
-Spoke B에서도 Hub 하나만 `Connected`여야 합니다.
-
-## 13. 연결되지 않은 경로 예상하기
+## 8. 연결되지 않은 경로 예상하기
 
 👁️ **설명**
 
@@ -757,30 +511,32 @@ AVNM이 Hub↔Spoke Peering을 자동으로 만들었더라도 Spoke A의 패킷
 👁️ **설명**
 
 AVNM은 중앙 관리 계층이고, 실제 Peering은 각 VNet의 Peerings 화면에도 반영됩니다.
-Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합니다.
+여기서는 Hub의 두 Peering만 확인합니다. 두 Spoke 방향은 모듈 04에서
+전달 허용 전에 검사하고, effective 구성은 피어링 강제 배포 후 확인합니다.
 
 🟢 **실행**
 
-각 **Virtual Network Manager**, **Network Group**, **Connectivity configurations**, 그리고 각 **VNet → Peerings** 화면을 확인합니다.
+**Virtual Network Manager → Network Group / Connectivity configurations**와
+**Hub VNet → Peerings** 화면을 확인합니다.
 
 📋 **확인**
 
 - AVNM은 Connectivity·SecurityAdmin·Routing 범위입니다.
 - Network Group에는 Spoke A와 Spoke B만 있습니다.
 - Connectivity Configuration은 `HubAndSpoke`, `deleteExistingPeering=False`, `isGlobal=False`입니다.
-- Hub에는 두 개, 각 Spoke에는 하나의 `Connected` Peering이 있습니다.
-- Spoke A↔B 직접 Peering은 없습니다.
+- Hub에는 서로 다른 Spoke를 향한 두 개의 `Connected` Peering이 있습니다.
+- Spoke의 역방향 Peering과 직접 A↔B Peering 부재는 모듈 04에서 확인합니다.
 
 아래는 **Hub VNet → Peerings** 관리 콘솔 화면의 예시입니다. Hub의 두 Peering이
 `Connected`이고 동기화 상태가 `Fully Synchronized`인지 확인하세요. 화면의
 구독·실행 ID와 AVNM이 생성한 Peering 이름은 자신의 실습 값과 다를 수 있습니다.
-각 Spoke의 Hub 방향 Peering과 A↔B 직접 Peering 부재는 해당 Spoke 화면에서 별도로 확인합니다.
+이 화면만으로 Spoke의 역방향 Peering까지 확인한 것으로 간주하지 마세요.
 
 ![Azure Portal Hub VNet Peerings 화면에서 AVNM이 생성한 두 Peering의 Connected 및 Fully Synchronized 상태](images/03-hub-avnm-peerings.png)
 
 | 증상 | 조치 |
 |---|---|
-| commit은 성공했지만 effective configuration이 안 보임 | 잠시 기다린 뒤 effective 블록을 다시 실행 |
+| commit은 성공했지만 Hub Peering이 안 보임 | 잠시 기다린 뒤 Hub Peering 조회만 다시 실행; 계속 없으면 AVNM 배포 상태 확인 |
 | 생성 시 이미 자원이 있음 | 생성 블록을 재실행하지 말고 소유권·대상·상태를 확인; 타인 자원이면 중단하고 남은 단계로 진행하지 않기 |
 | Hub가 group member로 들어감 | Hub를 member에서 제거하고 hub 필드로만 지정 |
 | Connected인데 통신 불가 | 모듈 04의 AVNM Routing·Firewall과 모듈 05의 Security Admin·VM 서비스를 각각 확인 |
@@ -789,8 +545,8 @@ Hub와 두 Spoke의 화면을 각각 열어 remote VNet과 상태를 확인합�
 ## 완료 체크
 
 - AVNM, Network Group, 정적 멤버, Connectivity Configuration, commit을 모두 확인했습니다.
-- Hub에는 두 개, 각 Spoke에는 하나의 `Connected` Peering이 있습니다.
-- Spoke A↔B 직접 연결이 없고, 비전이성을 설명할 수 있습니다.
+- Hub에는 각 Spoke를 향한 `Connected` Peering 두 개가 있습니다.
+- Spoke의 역방향 상태는 모듈 04에서 확인하며, Peering만으로 A↔B 통신이 중계되지 않는 이유를 설명할 수 있습니다.
 
 ## 다음 단계
 
