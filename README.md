@@ -180,17 +180,6 @@ Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01
 별도 clone에서 원래 상태 파일로 복구·정리하세요. 기존 Cloud Shell checkout과
 Azure 자원은 그대로 유지합니다. [기존 실행 복구 절차](docs/07-cleanup-production.md#기존-schema-2-실행-복구)를 참고하세요.
 
-## 진행 전 알아둘 한계
-
-- 사설 HTTP는 전송 암호화와 인증이 아닙니다. 비민감 응답만 사용합니다.
-- Run Command는 높은 관리 권한입니다. 신뢰할 수 없는 스크립트를 실행하지 않습니다.
-- Firewall 규칙의 `AzureCloud:443`은 자사 tenant 전용 허용이 아닙니다.
-- 기본 VM은 관리형 디스크의 플랫폼 암호화를 사용합니다. host encryption·guest ADE와
-  VM extension 금지 권고에는 [명시적인 교육용 예외](docs/maintainer-validation.md#보안-검사-예외)가 있습니다.
-- **2026-10-01 리허설은 이전 공유 IPAM 방식의 단일 실행 기록입니다.**
-  AVNM 연결·Routing·Security Admin·Firewall 허용/차단/복구와 정리를 확인했지만
-  새 **실행별 pool 방식**의 실환경 배포는 아직 검증하지 않았습니다.
-
 ## 태깅 범례와 트러블슈팅
 
 | 표시 | 읽는 방법 |
