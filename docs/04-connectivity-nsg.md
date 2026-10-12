@@ -24,9 +24,8 @@ ID에 해당하는 경로를 선택하세요. `.workshop-state/<실행 ID>.json`
 마세요**. 함수는 실패를 반환하지만 Cloud Shell 전체를 종료하지 않습니다.
 공통 준비에서 안전 검사 함수도 함께 불러옵니다. 재접속하면 준비 블록만 다시
 실행한 뒤 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
-2-13과 5절에서 이전 **읽기 전용 검사 함수**가 재접속으로 없어졌다면
-각각 2-11과 4-9의 검사 블록을 다시 실행하세요. 생성 블록을
-재실행해서 함수를 복구하지 마세요.
+5절에서 이전 **읽기 전용 검사 함수**가 재접속으로 없어졌다면
+4-9의 검사 블록을 다시 실행하세요. 생성 블록을 재실행해서 함수를 복구하지 마세요.
 
 🟢 **실행**
 
@@ -367,71 +366,29 @@ az network firewall policy rule-collection-group collection add-filter-collectio
 세 collection은 독립적입니다. 앞선 Policy 변경이 실패했다면 다음
 `add-filter-collection`을 실행하지 마세요. 이미 저장된 내용부터 확인합니다.
 
-### 2-11. 저장된 Policy 규칙 조회
+생성된 규칙은 Azure Portal의 **Network security → Azure Firewall Policies →
+이번 실행의 Policy → Rule collections**에서도 확인할 수 있습니다. 아래 화면처럼
+`workshop` group 아래 `management`·`lab-http`·`egress-check`가 100/200/300
+우선순위로 표시됩니다. 실제 규칙의 주소·포트·FQDN은 아래 최종 검사에서 확인합니다.
 
-🟢 **실행**
+![Azure Portal Firewall Policy의 Rule collections 화면에 표시된 workshop group과 세 collection 및 우선순위](images/04-firewall-policy-collections.png)
 
-<!-- exec:inspect-firewall-rules -->
-```bash
-check_firewall_policy_rules() {
-  local group
-  group=$(az network firewall policy rule-collection-group show -g "$RG_HUB" \
-    --policy-name "fwpol-lzbegin-$RUN_ID" -n workshop \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID/ruleCollectionGroups/workshop" \
-    --arg a "$SPOKEA_SUBNET_CIDR" --arg b "$SPOKEB_SUBNET_CIDR" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and .priority == 200 and
-    (.ruleCollections | type == "array" and length == 3) and
-    ([.ruleCollections[].name] | sort) == (["management","lab-http","egress-check"] | sort) and
-    all(.ruleCollections[]; .action.type == "Allow") and
-    ([.ruleCollections[] | select(.name == "management")] |
-      length == 1 and .[0].priority == 100 and
-      (.[0].rules | type == "array" and length == 1) and
-      (.[0].rules[0] |
-        .name == "azure-management" and .ruleType == "NetworkRule" and
-        .ipProtocols == ["TCP"] and
-        (.sourceAddresses | type == "array" and length == 2 and sort == ([$a, $b] | sort)) and
-        .destinationAddresses == ["AzureCloud"] and .destinationPorts == ["443"])) and
-    ([.ruleCollections[] | select(.name == "lab-http")] |
-      length == 1 and .[0].priority == 200 and
-      (.[0].rules | type == "array" and length == 1) and
-      (.[0].rules[0] |
-        .name == "spokea-to-spokeb" and .ruleType == "NetworkRule" and
-        .sourceAddresses == [$a] and
-        .destinationAddresses == [$b] and
-        .destinationPorts == ["8080"] and .ipProtocols == ["TCP"])) and
-    ([.ruleCollections[] | select(.name == "egress-check")] |
-      length == 1 and .[0].priority == 300 and
-      (.[0].rules | type == "array" and length == 1) and
-      (.[0].rules[0] |
-        .name == "public-ip-check" and .ruleType == "ApplicationRule" and
-        (.sourceAddresses | type == "array" and length == 2 and sort == ([$a, $b] | sort)) and
-        .targetFqdns == ["api.ipify.org"]))
-  ' <<< "$group" >/dev/null || { fail "Policy collections or HTTP/FQDN rules are incomplete."; return 1; }
-  printf 'PASS: Policy workshop group and three Allow collections\n'
-}
-check_firewall_policy_rules
-```
-
-📋 **확인**
-
-group 우선순위 200, `management`·`lab-http`·`egress-check` 각각
-100/200/300·Allow, 위 주소·포트·FQDN이 저장돼 있어야 합니다.
-오류 후 `already exists`면 이름만 보고 다시 추가하지 말고 실제 규칙을 비교하세요.
-
-### 2-12. 전용 Firewall 진단 활성화
+### 2-11. 전용 Firewall 진단 활성화
 
 👁️ **설명**
 
 `AZFWNetworkRule`과 `AZFWApplicationRule` category를 확인한 뒤 이번
 workspace로 전송합니다. `Dedicated`는 `AzureDiagnostics` 대신 전용
 로그 테이블을 사용하는 옵션입니다.
+`assert_resource_id`를 찾을 수 없다면 먼저 모듈 상단의 **공통 준비**를
+같은 Bash 세션에서 다시 실행하세요. 앞서 만든 자원은 재생성하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:firewall-diagnostics -->
 ```bash
+declare -F assert_resource_id >/dev/null ||
+  { printf 'ERROR: 모듈 04 공통 준비를 같은 Bash 세션에서 먼저 실행하세요.\n' >&2; false; } &&
 fw_id=$(az network firewall show -g "$RG_HUB" -n "fw-lzbegin-$RUN_ID" \
   --query id -o tsv --subscription "$SUBSCRIPTION_ID") &&
 law_id=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
@@ -455,51 +412,6 @@ az monitor diagnostic-settings create --name workshop --resource "$fw_id" \
 
 두 category가 활성화됩니다. 설정 성공은 아직 실제 패킷/로그의 증거가 아닙니다.
 
-### 2-13. 경로 배포 전 Firewall 최종 검사
-
-👁️ **설명**
-
-읽기 전용 안전 함수가 Firewall의 전체 ID, 완료 상태, Policy, 사설 IP,
-이번 workspace와 전용 진단, 세 Allow collection과 관리 규칙을 다시 검사합니다.
-
-🟢 **실행**
-
-<!-- exec:firewall-ready -->
-```bash
-check_firewall_ready() {
-  local fw_ip policy workspace public_ip base
-  base="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers"
-  policy=$(az network firewall policy show -g "$RG_HUB" -n "fwpol-lzbegin-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$base/Microsoft.Network/firewallPolicies/fwpol-lzbegin-$RUN_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded"
-  ' <<< "$policy" >/dev/null || { fail "Firewall Policy ID/state not ready."; return 1; }
-  workspace=$(az monitor log-analytics workspace show -g "$RG_HUB" -n "log-lzbegin-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$base/Microsoft.OperationalInsights/workspaces/log-lzbegin-$RUN_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and .location == "koreacentral"
-  ' <<< "$workspace" >/dev/null || { fail "Log workspace ID/state not ready."; return 1; }
-  public_ip=$(az network public-ip show -g "$RG_HUB" -n "pip-lzbegin-fw-$RUN_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$base/Microsoft.Network/publicIPAddresses/pip-lzbegin-fw-$RUN_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and .publicIPAllocationMethod == "Static" and
-    .sku.name == "Standard"
-  ' <<< "$public_ip" >/dev/null || { fail "Firewall Public IP ID/state not ready."; return 1; }
-  check_firewall_policy_rules || return 1
-  fw_ip=$(firewall_ready_ip) || return 1
-  printf 'PASS: Firewall Policy, diagnostics, private IP %s\n' "$fw_ip"
-}
-check_firewall_ready
-```
-
-📋 **확인**
-
-`PASS`가 아니면 Peering·Routing을 변경하지 마세요. 특히 `Updating`/
-`FirewallPolicyUpdateFailed`는 규칙 저장 상태와 Activity Log를 확인한 뒤 복구합니다.
-
 ## 3. 네 방향 Hub↔Spoke Peering 전달 허용
 
 👁️ **설명**
@@ -508,7 +420,9 @@ AVNM은 Connectivity Peering을 만들지만 Firewall로 들어온 패킷을
 다른 VNet으로 전달하려면 **기존 네 방향**의 `allowForwardedTraffic`도
 켜야 합니다. AVNM 이름을 추측하지 않고 **remote VNet의 전체 ID**로 정확히
 한 Peering을 찾습니다. 직접 A↔B Peering, Gateway 공유 및 새 Peering은
-만들지 않습니다. 이 설정만으로 경로나 Firewall Allow가 생기지 않습니다.
+만들지 않습니다. 첫 변경 전에 `firewall_ready_ip`가 Policy·사설 IP·진단·
+필수 규칙을 검사합니다. 실패하면 Peering을 변경하지 마세요.
+이 설정만으로 경로나 Firewall Allow가 생기지 않습니다.
 
 ### 3-1. Hub → Spoke A
 
@@ -516,6 +430,7 @@ AVNM은 Connectivity Peering을 만들지만 Firewall로 들어온 패킷을
 
 <!-- exec:forward-hub-to-spokea -->
 ```bash
+fw_ip=$(firewall_ready_ip) &&
 peering_name=$(peering_for_forwarding "$RG_HUB" "vnet-lzbegin-hub-$RUN_ID" \
   "$RG_SPOKEA" "vnet-lzbegin-spokea-$RUN_ID") &&
 az network vnet peering update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" \

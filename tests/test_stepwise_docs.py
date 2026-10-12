@@ -171,7 +171,6 @@ def firewall_cases():
                                                    "--rule-type", "ApplicationRule", "--source-addresses",
                                                    "172.20.16.0/24", "172.20.32.0/24", "--protocols", "Https=443",
                                                    "--target-fqdns", "api.ipify.org", "-o", "json"])],
-        "inspect-firewall-rules": [ready_calls()[-1]],
         "firewall-diagnostics": [
             *diagnostic_ids(),
             az(["monitor", "diagnostic-settings", "categories", "list", "--resource", FW, "-o", "json"],
@@ -205,6 +204,7 @@ def routing_cases():
         remote_id = netid(remote, "virtualNetworks", vnet(remote))
         generated = f"avnm-{local}-{remote}"
         cases[f"forward-{local}-to-{remote}"] = [
+            *(ready_calls() if (local, remote) == ("hub", "spokea") else []),
             az(["network", "vnet", "show", "-g", rg(remote), "-n", vnet(remote), "--query", "id", "-o", "tsv"],
                remote_id),
             az(["network", "vnet", "peering", "list", "-g", rg(local), "--vnet-name", vnet(local), "-o", "json"], [{
@@ -649,7 +649,7 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertNotEqual(self.execute(4, "firewall-diagnostics", calls[:2]).returncode, 0)
 
     def cases(self):
-        return ((4, {k: v for k, v in firewall_cases().items() if k != "inspect-firewall-rules"}
+        return ((4, firewall_cases()
                  | {k: v for k, v in routing_cases().items() if k.startswith("forward-")
                     or k.startswith("routing-collection-") or k.startswith("routing-rule-")
                     or k.startswith("routing-deploy-status")}

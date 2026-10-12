@@ -471,8 +471,12 @@ class NetworkDocsTests(unittest.TestCase):
         http = actions["firewall-http-rule"]
         self.assertIn('--source-addresses "$SPOKEA_SUBNET_CIDR"', http)
         self.assertIn('--destination-addresses "$SPOKEB_SUBNET_CIDR"', http)
-        self.assertIn('--arg a "$SPOKEA_SUBNET_CIDR"', actions["inspect-firewall-rules"])
-        self.assertIn('--arg b "$SPOKEB_SUBNET_CIDR"', actions["inspect-firewall-rules"])
+        self.assertNotIn("inspect-firewall-rules", actions)
+        self.assertNotIn("firewall-ready", actions)
+        self.assertIn("firewall_ready_ip", actions["forward-hub-to-spokea"])
+        safety = (ROOT / "scripts/workshop-safety.sh").read_text()
+        self.assertIn('--arg a "$SPOKEA_SUBNET_CIDR"', safety)
+        self.assertIn('--arg b "$SPOKEB_SUBNET_CIDR"', safety)
         for zone, remote in (("spokea", "SPOKEB"), ("spokeb", "SPOKEA")):
             with self.subTest(zone=zone):
                 rule = actions[f"routing-rule-{zone}-other"]
@@ -711,6 +715,11 @@ printf 'SHELL_ALIVE\\n'
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("모듈 04 공통 준비", result.stderr)
 
+    def test_firewall_diagnostics_explains_missing_common_preparation(self):
+        result = run(blocks(DOCS[4])["firewall-diagnostics"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("모듈 04 공통 준비", result.stderr)
+
     def test_prerequisite_lookup_failures_stop_before_mutation(self):
         for module, cases in ((2, foundation_cases()), (3, connectivity_cases())):
             for name, calls in cases.items():
@@ -762,7 +771,7 @@ printf 'SHELL_ALIVE\\n'
                     else:
                         expected = {
                             (4, "inspect-firewall"): ["assert_ipv4_in_subnet"] * 2,
-                            (4, "firewall-diagnostics"): ["assert_resource_id"] * 2,
+                            (4, "firewall-diagnostics"): ["assert_resource_id"] * 3,
                             (4, "enforce-peering"): ["assert_forwarded_peerings",
                                                     "assert_connectivity_config_ready",
                                                     "assert_connectivity_config_ready"],
