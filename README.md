@@ -123,7 +123,7 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 | # | 모듈 | 완료하면 할 수 있는 일 | 목표 시간 |
 |---|---|---|---:|
 | 00 | [Azure 첫걸음](docs/00-azure-basics.md) | 구독·RG·리전·Landing Zone의 목적 설명 | 15분 |
-| 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·quota 확인 | 15분 |
+| 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·Provider 등록 | 15분 |
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
 | 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위·Network Group·Hub-and-Spoke 연결 배포 | 25분 |
 | 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–45분 |

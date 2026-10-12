@@ -106,7 +106,6 @@ az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o ta
 만들기 전에 `virtual-network-manager` Azure CLI 확장을 설치합니다.
 정적 Network Group membership은 Azure Policy 정의나 할당 역할이 필요하지 않습니다.
 대신 이 워크숍의 기존 구독 `Contributor` 요구사항은 그대로 유지됩니다.
-`preflight.sh`는 확장을 설치하거나 업데이트하지 않고, 이미 설치되어 있는지만 읽기 전용으로 확인합니다.
 
 🟢 **실행**
 
@@ -217,7 +216,7 @@ VM·NIC·NAT 생성용 Bicep도 보조 도구로 유지하고, 학습 대상인 
 
 👁️ **설명**
 
-명령을 복사한 후 **실습 구독 UUID**를 입력합니다. 아래 블록은 필요한 함수만
+목록에서 사용할 **실습 구독 UUID**를 복사해 입력합니다. 아래 블록은 필요한 함수만
 source하므로 검증 실패가 Cloud Shell 전체를 종료하지 않습니다.
 
 🟢 **실행**
@@ -229,6 +228,8 @@ source scripts/workshop-ipam.sh &&
 # 이전 실습 상태 경로·pool ID가 새 실행의 실패 뒤에 남지 않도록 비웁니다.
 clear_run &&
 unset STATE_FILE &&
+# 구독 이름과 ID를 확인한 뒤 사용할 ID를 복사합니다.
+az account list --query "[].{Name:name,Subscription:id,Default:isDefault}" -o table &&
 read -rp "실습 Azure subscription ID: " SELECTED_SUBSCRIPTION &&
 # 선택 구독의 기존 AVNM·VNet 충돌을 읽기 전용으로 확인한 뒤 새 실습 JSON을 만듭니다.
 az account set --subscription "$SELECTED_SUBSCRIPTION" &&
@@ -262,7 +263,7 @@ Azure가 관리자 생성·pool 할당을 거부하면 오류를 확인하고 �
 상태 JSON(schema 4)에는 구독, 리전, 실행 ID, RG 이름과 정확한 실행별 pool ID만 저장합니다.
 토큰·비밀번호·SSH 개인 키를 추가하지 마세요.
 
-## 4. Provider와 용량 확인
+## 4. Provider 등록
 
 👁️ **설명**
 
@@ -282,20 +283,14 @@ Provider는 Azure 서비스의 리소스 종류를 구독에서 사용할 수 �
   # 서비스 사용을 등록하고 완료까지 기다립니다. VM이나 VNet을 배포하는 명령은 아닙니다.
   az provider register --namespace Microsoft.Network --wait
   az provider register --namespace Microsoft.Compute --wait
-  # 리전·등록 상태·VM 크기·남은 할당량을 조회만 하여 배포 전 제약을 찾습니다.
-  bash scripts/preflight.sh "$STATE_FILE"
 )
 ```
 
 📋 **확인**
 
-`PASS: read-only preflight...`.
-새 배포에서는 Standard_B2als_v2(각 2 vCPU/4 GiB) 3대에 필요한 **총 6 vCPU와 Basv2-family 여유 quota**를 확인합니다.
-재실행 시에는 소유 태그와 기존 VM의 리전·크기·프로비저닝·실행 상태를 확인하고,
-아직 없는 VM 한 대당 2 vCPU의 여유만 요구합니다. 기존 VM이 중지되었거나 배포에
-실패했다면 해당 상태부터 복구해야 합니다. 모듈 05에서 같은 점검을 다시 실행하여
-VM 배포 직전의 상태와 남은 quota를 확인합니다.
-검사 자체는 리소스를 만들지 않습니다. 배포 승인·용량 확보를 보장하지는 않습니다.
+두 Provider 등록 명령이 오류 없이 완료되어야 합니다. VM 크기와 남은 할당량은
+모듈 05에서 VM 배포 직전에 `preflight.sh`로 확인합니다. 등록 성공이
+VM 배포 승인이나 용량 확보를 보장하지는 않습니다.
 
 ## 세션 재연결 시 변수 복구
 

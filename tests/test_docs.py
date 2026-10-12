@@ -31,12 +31,12 @@ class DocsTests(unittest.TestCase):
     def test_published_rehearsal_status_distinguishes_ipam_from_historical_workshop(self):
         readme = (ROOT / "README.md").read_text()
         maintainer = (ROOT / "docs/maintainer-validation.md").read_text()
-        self.assertIn("2026-10-01", readme)
+        self.assertNotIn("진행 전 알아둘 한계", readme)
+        self.assertIn("2026-10-01", maintainer)
         self.assertIn("2026-09-27", maintainer)
         self.assertIn("edb7827a799c", maintainer)
         self.assertIn("이전 아키텍처의 실제 Azure 리허설 기록", maintainer)
-        self.assertIn("실행별 pool 방식", readme)
-        self.assertIn("실환경 배포는 아직 검증하지 않았습니다", readme)
+        self.assertIn("실행별 pool 방식", maintainer)
         self.assertIn("미검증", maintainer)
 
     def test_module_navigation_reaches_firewall_routing_and_cleanup_in_order(self):
