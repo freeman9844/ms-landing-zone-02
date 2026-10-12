@@ -735,14 +735,12 @@ B collection은 B Group만 대상으로 합니다.
 <!-- exec:routing-rule-spokea-other -->
 ```bash
 fw_ip=$(firewall_ready_ip) &&
-next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
-destination=$(jq -cn --arg prefix "$SPOKEB_VNET_CIDR" \
-  '{type:"AddressPrefix",destinationAddress:$prefix}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokea -n to-other-spoke \
-  --destination "$destination" \
-  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+  --destination "type=AddressPrefix destination-address=$SPOKEB_VNET_CIDR" \
+  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokea to-other-spoke "$SPOKEB_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
 ```
@@ -758,12 +756,12 @@ A의 `$SPOKEB_VNET_CIDR → VirtualAppliance (Firewall 사설 IP)`입니다.
 <!-- exec:routing-rule-spokea-internet -->
 ```bash
 fw_ip=$(firewall_ready_ip) &&
-next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokea -n to-internet \
-  --destination '{"type":"AddressPrefix","destinationAddress":"0.0.0.0/0"}' \
-  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+  --destination "type=AddressPrefix destination-address=0.0.0.0/0" \
+  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokea to-internet 0.0.0.0/0 "$fw_ip" &&
 printf '%s\n' "$created"
 ```
@@ -779,14 +777,12 @@ A의 default route는 같은 Firewall 사설 IP입니다.
 <!-- exec:routing-rule-spokeb-other -->
 ```bash
 fw_ip=$(firewall_ready_ip) &&
-next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
-destination=$(jq -cn --arg prefix "$SPOKEA_VNET_CIDR" \
-  '{type:"AddressPrefix",destinationAddress:$prefix}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokeb -n to-other-spoke \
-  --destination "$destination" \
-  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+  --destination "type=AddressPrefix destination-address=$SPOKEA_VNET_CIDR" \
+  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokeb to-other-spoke "$SPOKEA_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
 ```
@@ -802,12 +798,12 @@ B의 `$SPOKEA_VNET_CIDR → VirtualAppliance`는 A→B의 **응답 경로**입�
 <!-- exec:routing-rule-spokeb-internet -->
 ```bash
 fw_ip=$(firewall_ready_ip) &&
-next_hop=$(jq -cn --arg ip "$fw_ip" '{nextHopType:"VirtualAppliance",nextHopAddress:$ip}') &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokeb -n to-internet \
-  --destination '{"type":"AddressPrefix","destinationAddress":"0.0.0.0/0"}' \
-  --next-hop "$next_hop" -o json --subscription "$SUBSCRIPTION_ID") &&
+  --destination "type=AddressPrefix destination-address=0.0.0.0/0" \
+  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokeb to-internet 0.0.0.0/0 "$fw_ip" &&
 printf '%s\n' "$created"
 ```

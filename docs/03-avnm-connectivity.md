@@ -379,26 +379,20 @@ inspect_avnm_hub
 
 <!-- exec:connectivity-config-create -->
 ```bash
-# 앞 단계에서 확인한 Hub와 Spoke Group의 ID로 새 HubAndSpoke 구성을 만듭니다.
-create_connectivity_config() {
-  local hubs groups
-  hubs=$(jq -cn --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID" \
-    '[{resourceId:$id,resourceType:"Microsoft.Network/virtualNetworks"}]') || return 1
-  groups=$(jq -cn --arg id "$NETWORK_GROUP_ID" \
-    '[{networkGroupId:$id,groupConnectivity:"None",isGlobal:false,useHubGateway:false}]') || return 1
-  az network manager connect-config create \
-    --configuration-name "$CONNECTIVITY_CONFIG" \
-    --description "AVNM managed beginner hub and spoke" \
-    --applies-to-groups "$groups" \
-    --hubs "$hubs" \
-    --connectivity-topology HubAndSpoke \
-    --delete-existing-peering False \
-    --is-global False \
-    --network-manager-name "$AVNM" \
-    --resource-group "$RG_HUB" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-}
-create_connectivity_config
+# 확인한 Hub와 Spoke Group의 ID로 HubAndSpoke 구성을 만듭니다.
+HUB_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
+HUBS=$(jq -cn --arg id "$HUB_ID" \
+  '[{resourceId:$id,resourceType:"Microsoft.Network/virtualNetworks"}]') &&
+SPOKE_GROUPS=$(jq -cn --arg id "$NETWORK_GROUP_ID" \
+  '[{networkGroupId:$id,groupConnectivity:"None",isGlobal:false,useHubGateway:false}]') &&
+az network manager connect-config create \
+  --configuration-name "$CONNECTIVITY_CONFIG" \
+  --description "AVNM managed beginner hub and spoke" \
+  --applies-to-groups "$SPOKE_GROUPS" --hubs "$HUBS" \
+  --connectivity-topology HubAndSpoke \
+  --delete-existing-peering False --is-global False \
+  --network-manager-name "$AVNM" --resource-group "$RG_HUB" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**

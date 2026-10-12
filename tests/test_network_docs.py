@@ -506,18 +506,21 @@ class NetworkDocsTests(unittest.TestCase):
         for zone, remote in (("spokea", "SPOKEB"), ("spokeb", "SPOKEA")):
             with self.subTest(zone=zone):
                 rule = actions[f"routing-rule-{zone}-other"]
-                self.assertIn(f'--arg prefix "${remote}_VNET_CIDR"', rule)
-                self.assertIn('--destination "$destination"', rule)
+                self.assertIn(f'--destination "type=AddressPrefix destination-address=${remote}_VNET_CIDR"', rule)
+                self.assertIn('--next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip"', rule)
                 self.assertIn(f'other-spoke "${remote}_VNET_CIDR"', rule)
         self.assertIn('"$FIREWALL_SUBNET_CIDR"', actions["inspect-firewall"])
         self.assertIn('"$SPOKEB_VNET_CIDR"', blocks(DOCS[5])["effective-vm-routes"])
         self.assertIn('"$HUB_SUBNET_CIDR"', blocks(DOCS[5])["read-vm-ips"])
         self.assertNotRegex("\n".join(actions.values()), r"10\.(?:0|10|20)\.\d+\.\d+/\d+")
 
-    def test_module_03_execution_blocks_do_not_chain_with_and(self):
+    def test_module_03_only_chains_dependent_connectivity_creation_commands(self):
         for name, script in blocks(DOCS[3]).items():
             with self.subTest(step=name):
-                self.assertNotIn("&&", script)
+                if name == "connectivity-config-create":
+                    self.assertIn("&&", script)
+                else:
+                    self.assertNotIn("&&", script)
 
     def test_configuration_waits_for_both_static_members_before_create(self):
         calls = [az([
@@ -543,7 +546,7 @@ class NetworkDocsTests(unittest.TestCase):
         script = blocks(DOCS[3])["connectivity-config-create"]
         self.assertNotIn("static-member list", script)
         self.assertNotIn("network vnet show", script)
-        self.assertNotIn("&&", script)
+        self.assertIn("&&", script)
 
     def test_configuration_creation_follows_member_and_hub_checks(self):
         steps = blocks(DOCS[3])

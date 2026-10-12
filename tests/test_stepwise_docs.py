@@ -235,8 +235,8 @@ def routing_cases():
             {"id": collection, "appliesTo": [{"networkGroupId": group}]})]
         for kind, rule, prefix in (("other", "to-other-spoke", "172.20.32.0/20" if zone == "spokea" else "172.20.16.0/20"),
                                    ("internet", "to-internet", "0.0.0.0/0")):
-            dest = json.dumps({"type": "AddressPrefix", "destinationAddress": prefix}, separators=(",", ":"))
-            hop = json.dumps({"nextHopType": "VirtualAppliance", "nextHopAddress": FW_IP}, separators=(",", ":"))
+            dest = f"type=AddressPrefix destination-address={prefix}"
+            hop = f"next-hop-type=VirtualAppliance next-hop-address={FW_IP}"
             cases[f"routing-rule-{zone}-{kind}"] = [*ready_calls(), az([
                 "network", "manager", "routing-config", "rule-collection", "rule", "create",
                 "-g", rg("hub"), "--manager-name", "avnm-lzbegin-demo123",

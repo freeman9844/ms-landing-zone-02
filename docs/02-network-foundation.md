@@ -204,6 +204,12 @@ Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → `av
 
 ![Azure Portal의 실행별 AVNM IP address pool Overview에 표시된 Succeeded 상태와 172.20.0.0/14 주소 범위](images/02-ipam-pool-overview.png)
 
+아래는 같은 AVNM의 **IP address pools 목록** 예시입니다. 이번 실행의 pool 이름,
+`172.20.0.0/14` 주소 범위와 `Succeeded` 상태를 비교하세요. VNet을 만들기 전이라면
+IP allocation이 `0%`로 보일 수 있습니다.
+
+![Azure Portal의 AVNM IP address pools 목록에 표시된 이번 실행의 pool과 172.20.0.0/14 주소 범위 및 Succeeded 상태](images/02-ipam-pool-list.png)
+
 ### 1-4. Hub NSG
 
 👁️ **설명**
