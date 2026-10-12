@@ -90,7 +90,7 @@ class DocsTests(unittest.TestCase):
 
     def test_avnm_has_three_scopes_and_staged_firewall_routing_security_order(self):
         manager = (ROOT / "docs/02-network-foundation.md").read_text()
-        self.assertIn('networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]', manager)
+        self.assertIn('networkManagerScopeAccesses: ["Connectivity", "SecurityAdmin", "Routing"]', manager)
         module04 = (ROOT / "docs/04-connectivity-nsg.md").read_text()
         module05 = (ROOT / "docs/05-firewall.md").read_text()
         self.assertIn("routing-config", module04)

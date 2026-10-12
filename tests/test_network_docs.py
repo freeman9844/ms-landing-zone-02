@@ -840,21 +840,12 @@ printf 'SHELL_ALIVE\\n'
         for module in (3,):
             self.assertNotIn("source scripts/workshop-safety.sh", DOCS[module].read_text())
 
-    def test_avnm_creation_rejects_wrong_scope_and_foreign_resource_id(self):
+    def test_avnm_creation_propagates_rest_failure(self):
         calls = avnm_cases()["avnm-create"]
-        original = json.loads(calls[-1]["stdout"])
-        for changed in (
-            dict(original, id="unexpected"),
-            dict(original, properties=dict(original["properties"],
-                networkManagerScopeAccesses=["Connectivity", "SecurityAdmin"])),
-            dict(original, properties=dict(original["properties"],
-                networkManagerScopes={"subscriptions": ["/subscriptions/00000000-0000-0000-0000-000000000000"]})),
-        ):
-            with self.subTest(response=changed):
-                result = self.execute(2, "avnm-create",
-                                      [dict(calls[-1], stdout=json.dumps(changed))])
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("ERROR:", result.stderr)
+        result = self.execute(2, "avnm-create",
+                              [dict(calls[-1], returncode=1, stdout="", stderr="create failed")])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("create failed", result.stderr)
 
     def test_avnm_readiness_requires_flattened_cli_scope_and_full_id(self):
         valid = avnm_cases()["avnm-ready"][0]
@@ -878,12 +869,12 @@ printf 'SHELL_ALIVE\\n'
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("ERROR:", result.stderr)
 
-    def test_avnm_creation_accepts_scope_resource_id_case_variants(self):
-        calls = avnm_cases()["avnm-create"]
+    def test_avnm_readiness_accepts_scope_resource_id_case_variants(self):
+        calls = avnm_cases()["avnm-ready"]
         response = json.loads(calls[-1]["stdout"])
-        response["properties"]["networkManagerScopes"]["subscriptions"][0] = (
-            response["properties"]["networkManagerScopes"]["subscriptions"][0].upper())
-        result = self.execute(2, "avnm-create",
+        response["networkManagerScopes"]["subscriptions"][0] = (
+            response["networkManagerScopes"]["subscriptions"][0].upper())
+        result = self.execute(2, "avnm-ready",
                               [dict(calls[-1], stdout=json.dumps(response))])
         self.assertEqual(result.returncode, 0, result.stderr)
 

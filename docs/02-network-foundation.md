@@ -116,39 +116,31 @@ esac
 한 번에 한 실습만 진행합니다.
 새 실행의 AVNM을 바로 생성합니다. `Updating` 응답이면
 다시 생성하지 말고 아래 읽기 전용 확인을 재실행하세요.
+현재 AVNM CLI의 `create` 명령은 `Routing` 접근 범위를 지원하지 않으므로
+세 접근 범위를 함께 지정할 수 있는 `az rest`를 사용합니다.
 
 🟢 **실행**
 
 <!-- exec:avnm-create -->
 ```bash
-create_run_avnm() {
-  local manager_id body result
-  manager_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
-  body=$(jq -cn --arg location "$LOCATION" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '{
-    location:$location,
-    properties:{
-      description:"Beginner Hub and Spoke connectivity",
-      networkManagerScopes:{subscriptions:[$scope]},
-      networkManagerScopeAccesses:["Connectivity","SecurityAdmin","Routing"]
-    }
-  }') || return 1
-  result=$(az rest --method put --url "$manager_id?api-version=2025-01-01" \
-    --body "$body" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$manager_id" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    (.properties.networkManagerScopes.subscriptions | type == "array" and length == 1) and
-    ((.properties.networkManagerScopes.subscriptions[0] | ascii_downcase) == ($scope | ascii_downcase)) and
-    (.properties.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
-  ' <<<"$result" >/dev/null ||
-    { fail "Unexpected AVNM scope or resource ID; inspect the created manager before continuing."; return 1; }
-  printf '%s\n' "$result"
-}
-create_run_avnm
+AVNM_SCOPE="/subscriptions/$SUBSCRIPTION_ID"
+AVNM_ID="$AVNM_SCOPE/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
+AVNM_BODY=$(jq -cn --arg location "$LOCATION" --arg scope "$AVNM_SCOPE" '{
+  location: $location,
+  properties: {
+    description: "Beginner Hub and Spoke connectivity",
+    networkManagerScopes: {subscriptions: [$scope]},
+    networkManagerScopeAccesses: ["Connectivity", "SecurityAdmin", "Routing"]
+  }
+}') &&
+az rest --method put --url "$AVNM_ID?api-version=2025-01-01" \
+  --body "$AVNM_BODY" -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
-정확한 AVNM ID·구독 scope·세 access를 확인하세요. 실패하거나 `Updating`이면
+생성 응답의 ID가 이번 실행의 AVNM인지 확인합니다. 정확한 구독 scope·세 access와
+생성 상태는 다음 읽기 전용 조회에서 검증합니다. 실패하거나 `Updating`이면
 이 쓰기 블록을 다시 실행하지 마세요.
 
 🟢 **실행**
