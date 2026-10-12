@@ -18,22 +18,30 @@
 여러 코드 블록을 합쳐 한꺼번에 붙여 넣지 않습니다. 위에서 아래로 수행하되 각 단계에서 멈춰 확인합니다.
 
 아래 공통 준비에서 함수·상태 파일·구독을 **한 번만** 확인합니다.
-RG 생성 단계에서 같은 이름의 기존 RG를 재사용할 때만 소유권을 확인합니다.
-이후 개별 생성·조회에서는 같은 검사를 반복하지 않습니다.
+모듈 01에서 새 실행 ID와 빈 대상 RG를 확인한 뒤 처음 생성하는 순서입니다.
+RG 생성은 `az group create`가 기존 RG의 태그를 변경할 수 있으므로 예외적으로 기존 이름을 확인합니다.
 `&&`는 앞 검사가 성공해야 **그 블록의 Azure CLI 명령만** 실행되게 합니다.
 현재 Cloud Shell 전체에 `set -e`를 설정하거나 `exit`로 세션을 종료하지 않습니다.
 오류가 나면 **다음 블록을 실행하지 말고 원인을 해결**하세요. 이미 만든 자원은 자동 삭제되지 않습니다.
 
 각 블록은 준비한 같은 Cloud Shell 세션의 구독·실행 ID·RG 이름을 사용합니다.
 재접속, `STATE_FILE` 변경, 다른 실습/구독으로 전환했다면 **공통 준비를 다시 실행**하세요.
-모듈 02를 이어서 진행할 때는 작업할 RG의 생성 단계(1-1·2-1·3-1)도 다시 실행하여 소유권을 확인하세요.
+모듈 02를 이어서 진행할 때는 이미 성공한 생성 단계를 다시 실행하지 마세요.
 명령의 `--subscription`은 상태 파일의 구독을 명시합니다.
 앞 작업의 임시 변수에 의존하지 않지만, **Hub RG → 실행별 AVNM → 실행별 IPAM pool → 각 RG·NSG → IPAM VNet·Subnet** 순서를 지켜야 합니다.
-각 VNet과 Subnet은 별도 블록입니다. 부분 실패 시 **공통 준비 → 해당 RG 생성/소유권 확인 →
-이전 VNet·Subnet 블록부터 재실행**하세요. 각 블록은 조회 결과가 기존 자원과 정확히 일치하면
-생성을 건너뛰고, 없는 자원만 생성합니다. 조회 실패·불완전한 결과·다른 설정은
-없는 것으로 간주하지 않고 중단합니다. 기존 자원을 수정하거나 덮어쓰지 않습니다.
+각 VNet과 Subnet은 별도 블록입니다. 부분 실패 시 **공통 준비 → 실제 자원 상태 조회 →
+아직 생성되지 않은 단계부터 재개**하세요. 생성 결과가 불명확하거나 기존 자원이 있다면
+생성 명령을 다시 실행하지 말고 운영자와 확인합니다. 기존 자원을 수정하거나 덮어쓰지 않습니다.
 JSON 출력의 속성 순서는 달라도 되며, 각 단계 아래의 **확인** 항목을 비교하세요.
+
+부분 실행을 복구할 때는 `source scripts/workshop-foundation.sh` 후
+`assert_owned_rg "$RG_HUB"`처럼 작업할 RG의 소유권을 확인하세요.
+`foundation_vnet_status hub`와 `foundation_subnet_status hub snet-management` 같은
+읽기 전용 명령으로 각 대상이 `ready`인지 `missing`인지 확인할 수 있습니다.
+Spoke에는 `hub` 대신 `spokea` 또는 `spokeb`를, Firewall Subnet에는
+`snet-management` 대신 `AzureFirewallSubnet`을 지정합니다. 조회 실패나 구성 불일치면
+중단하고, `ready`인 단계는 건너뛰며 **`missing`으로 확인된 단계만** 실행하세요.
+Subnet 조회는 부모 VNet이 `ready`일 때만 가능합니다.
 
 ### 공통 준비
 
@@ -77,8 +85,8 @@ Firewall 전용 Subnet `/26`을 할당받습니다.
 
 👁️ **설명**
 
-RG는 관련 자원을 묶는 관리 단위입니다. 같은 이름이 이미 있으면 소유 태그만 검사하고
-새 태그로 덮어쓰지 않습니다. `case`는 이 안전 분기이며 다른 자원까지 생성하는 반복문이 아닙니다.
+RG는 관련 자원을 묶는 관리 단위입니다. 기존 RG의 태그 변경을 막기 위해
+같은 이름이 있으면 소유권만 확인하고 생성하지 않습니다.
 
 🟢 **실행**
 
@@ -88,7 +96,6 @@ exists=$(az group exists --name "$RG_HUB" -o tsv --subscription "$SUBSCRIPTION_I
 case "$exists" in
   true) assert_owned_rg "$RG_HUB" && printf '기존 Hub RG의 소유 확인 완료\n' ;;
   false)
-    # 이번 실습을 식별할 네 가지 태그를 RG에 붙입니다.
     az group create --name "$RG_HUB" --location "$LOCATION" \
       --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID" ;;
   *) fail "Cannot determine whether $RG_HUB exists" ;;
@@ -98,7 +105,6 @@ esac
 📋 **확인**
 
 새 RG의 `name`은 `rg-lzbegin-hub-<실행 ID>`, `tags.runId`는 자신의 실행 ID입니다.
-이미 소유한 RG라면 소유 확인 완료 문구만 출력됩니다.
 
 ### 1-2. 실행별 AVNM 만들기 (VNet보다 먼저)
 
@@ -108,21 +114,15 @@ esac
 다음 단계에서 이 AVNM 아래에 이번 실행의 IPAM pool도 만듭니다.
 같은 구독에서 두 번째 실행별 AVNM을 만들면 기능 범위가 충돌하므로 한 구독에서
 한 번에 한 실습만 진행합니다.
-생성 블록이 직전에 AVNM 목록을 조회해 비어 있을 때만 생성합니다.
-목록 조회에 실패하거나 예상치 못한 자원이 있으면 중단합니다. `Updating` 응답이면
+새 실행의 AVNM을 바로 생성합니다. `Updating` 응답이면
 다시 생성하지 말고 아래 읽기 전용 확인을 재실행하세요.
 
 🟢 **실행**
 
 <!-- exec:avnm-create -->
 ```bash
-create_avnm_if_empty() {
-  local managers manager_id body result
-  managers=$(az network manager list \
-    --resource-group "$RG_HUB" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length == 0' <<<"$managers" >/dev/null ||
-    { fail "Hub RG already contains an AVNM; do not overwrite it."; return 1; }
+create_run_avnm() {
+  local manager_id body result
   manager_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/networkManagers/$AVNM"
   body=$(jq -cn --arg location "$LOCATION" --arg scope "/subscriptions/$SUBSCRIPTION_ID" '{
     location:$location,
@@ -143,7 +143,7 @@ create_avnm_if_empty() {
     { fail "Unexpected AVNM scope or resource ID; inspect the created manager before continuing."; return 1; }
   printf '%s\n' "$result"
 }
-create_avnm_if_empty
+create_run_avnm
 ```
 
 📋 **확인**
@@ -184,35 +184,26 @@ inspect_avnm_ready
 방금 만든 Hub AVNM 아래에 `ipam-lzbegin-<실행 ID>`를 만들고 주소 root
 `172.20.0.0/14`를 등록합니다. 기존 운영자 공유 RG나 pool을 사용하지 않습니다.
 재접속했다면 위 공통 준비와 `avnm-ready` 조회를 먼저 재실행하세요.
-`run_ipam_pool_status`가 Hub RG 소유권·AVNM 준비 상태와 pool 목록을 검사합니다.
-pool이 이미 있다면 생성 명령을 반복하지 않고 정확한 ID·구성·준비 상태만 확인합니다.
-`Updating`이면 조회만 다시 수행하고, 다른 pool이나 조회 실패이면 중단합니다.
+이전 단계에서 AVNM 준비 상태를 확인한 후 새 pool을 생성합니다.
+`Updating`이면 생성 명령을 반복하지 말고 아래 pool 확인만 다시 수행합니다.
 
 🟢 **실행**
 
 <!-- exec:run-ipam-pool -->
 ```bash
-source scripts/workshop-ipam.sh &&
-pool_status=$(run_ipam_pool_status) &&
-if [[ "$pool_status" == missing ]]; then
-  az network manager ipam-pool create \
-    --name "ipam-lzbegin-$RUN_ID" --network-manager-name "$AVNM" \
-    -g "$RG_HUB" --location "$LOCATION" \
-    --address-prefixes '["172.20.0.0/14"]' \
-    -o json --subscription "$SUBSCRIPTION_ID" &&
-  assert_run_ipam_pool
-elif [[ "$pool_status" == ready ]]; then
-  printf '기존 IPAM pool 준비 확인 완료\n'
-else
-  fail "Unexpected IPAM pool status: $pool_status"
-fi
+az network manager ipam-pool create \
+  --name "ipam-lzbegin-$RUN_ID" --network-manager-name "$AVNM" \
+  -g "$RG_HUB" --location "$LOCATION" \
+  --address-prefixes '["172.20.0.0/14"]' \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
 오류 없이 끝나면 `IPAM_POOL_ID`의 마지막 부분은 `ipam-lzbegin-<실행 ID>`입니다.
 pool의 root prefix는 `172.20.0.0/14`, `provisioningState=Succeeded`여야 합니다.
-생성에 실패하면 현재 pool을 조회해 원인을 확인하고 새 실행을 만들지 마세요.
+생성에 실패하거나 상태가 `Updating`이면 `source scripts/workshop-ipam.sh && assert_run_ipam_pool`로
+현재 pool을 조회하세요. 실패한 생성 명령을 반복하거나 새 실행을 만들지 마세요.
 주소 root가 기존 연결망·온프레미스와 겹치면 진행하지 않습니다.
 
 Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → `avnm-lzbegin-<실행 ID>` → IP address pools**에서
@@ -249,33 +240,23 @@ NSG 생성 응답은 `NewNSG` 안에 표시될 수 있습니다. 기본 규칙�
 이번 실행에서 만든 pool ID를 상태 파일에서 가져옵니다. Hub VNet `/20`, 관리
 Subnet `/24`, 정확한 이름의 `AzureFirewallSubnet` `/26`을 순서대로 요청합니다.
 관리 Subnet만 NSG를 연결하고 기본 outbound를 끕니다. 실패·부분 성공 시
-이전 블록부터 다시 실행하면 기존 자원은 읽기 전용으로 검증하고 빠진 것만 생성합니다.
-Azure VNet 이름은 대소문자를 구분하지 않으므로 기존 이름도 대소문자 구분 없이 검사합니다.
+먼저 실제 자원을 조회하고 없는 것으로 확인된 단계만 진행합니다.
 
 🟢 **실행**
 
 <!-- exec:foundation-hub-vnet -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_vnet_status hub) &&
-if [[ "$status" == missing ]]; then
-  az network vnet create --resource-group "$RG_HUB" --name "vnet-lzbegin-hub-$RUN_ID" \
-    --location "$LOCATION" \
-    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
-    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Hub VNet의 IPAM 할당·태그 확인 완료\n'
-else
-  fail "Unexpected VNet status: $status"
-fi
+az network vnet create --resource-group "$RG_HUB" --name "vnet-lzbegin-hub-$RUN_ID" \
+  --location "$LOCATION" \
+  --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
 
 VNet 생성 응답의 `addressSpace.addressPrefixes`가 `/20`, pool ID가 자신의
-`IPAM_POOL_ID`이며 `runId` 태그가 자신의 실행 ID인지 확인하세요. 이미 존재하면
-읽기 전용 검증 완료 메시지가 나옵니다. 다음 블록은 이 VNet이 준비된 경우에만 진행합니다.
+`IPAM_POOL_ID`이며 `runId` 태그가 자신의 실행 ID인지 확인하세요. 다음 블록은 이 VNet이 준비된 경우에만 진행합니다.
 
 #### 1-5-1. 관리 Subnet
 
@@ -283,19 +264,11 @@ VNet 생성 응답의 `addressSpace.addressPrefixes`가 `/20`, pool ID가 자신
 
 <!-- exec:foundation-hub-snet-management -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_subnet_status hub snet-management) &&
-if [[ "$status" == missing ]]; then
-  az network vnet subnet create --resource-group "$RG_HUB" \
-    --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name snet-management \
-    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
-    --network-security-group "nsg-lzbegin-hub-$RUN_ID" \
-    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Hub 관리 Subnet의 IPAM 할당·NSG·outbound 확인 완료\n'
-else
-  fail "Unexpected Subnet status: $status"
-fi
+az network vnet subnet create --resource-group "$RG_HUB" \
+  --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name snet-management \
+  --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+  --network-security-group "nsg-lzbegin-hub-$RUN_ID" \
+  --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -308,18 +281,10 @@ fi
 
 <!-- exec:foundation-hub-azurefirewallsubnet -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_subnet_status hub AzureFirewallSubnet) &&
-if [[ "$status" == missing ]]; then
-  az network vnet subnet create --resource-group "$RG_HUB" \
-    --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name AzureFirewallSubnet \
-    --ipam-allocations "[0].number-of-ip-addresses=64" "[0].id=$IPAM_POOL_ID" \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Hub Firewall Subnet의 IPAM 할당·NSG 없음 확인 완료\n'
-else
-  fail "Unexpected Subnet status: $status"
-fi
+az network vnet subnet create --resource-group "$RG_HUB" \
+  --vnet-name "vnet-lzbegin-hub-$RUN_ID" --name AzureFirewallSubnet \
+  --ipam-allocations "[0].number-of-ip-addresses=64" "[0].id=$IPAM_POOL_ID" \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -374,8 +339,7 @@ Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → `ns
 
 👁️ **설명**
 
-Spoke A의 자원을 Hub와 별도로 관리할 RG를 만듭니다.
-같은 이름의 RG가 이미 있으면 소유 태그를 확인하고 재사용합니다.
+Spoke A의 자원을 Hub와 별도로 관리할 새 RG를 만듭니다.
 
 🟢 **실행**
 
@@ -385,7 +349,6 @@ exists=$(az group exists --name "$RG_SPOKEA" -o tsv --subscription "$SUBSCRIPTIO
 case "$exists" in
   true) assert_owned_rg "$RG_SPOKEA" && printf '기존 Spoke A RG의 소유 확인 완료\n' ;;
   false)
-    # Hub가 아닌 Spoke A의 관리 묶음을 만듭니다.
     az group create --name "$RG_SPOKEA" --location "$LOCATION" \
       --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID" ;;
   *) fail "Cannot determine whether $RG_SPOKEA exists" ;;
@@ -394,7 +357,7 @@ esac
 
 📋 **확인**
 
-`name`은 `rg-lzbegin-spokea-<실행 ID>`입니다. 기존 RG이면 소유 확인 완료 문구가 나옵니다.
+`name`은 `rg-lzbegin-spokea-<실행 ID>`입니다.
 
 ### 2-2. Spoke A NSG
 
@@ -422,25 +385,17 @@ NSG 이름은 `nsg-lzbegin-spokea-<실행 ID>`입니다.
 
 A VNet `/20`과 워크로드 Subnet `/24`를 이번 실행의 pool에서 요청합니다.
 실제 할당 주소가 Hub와 겹치면 중단하세요. 인터넷 출구는 모듈 04에서 준비합니다.
-중간에 실패하면 이전 블록부터 재실행하여 기존 VNet을 읽기 전용 검증하고 빠진 Subnet만 만드세요.
+중간에 실패하면 상태를 조회한 뒤 아직 없는 Subnet부터 진행하세요.
 
 🟢 **실행**
 
 <!-- exec:foundation-spokea-vnet -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_vnet_status spokea) &&
-if [[ "$status" == missing ]]; then
-  az network vnet create --resource-group "$RG_SPOKEA" --name "vnet-lzbegin-spokea-$RUN_ID" \
-    --location "$LOCATION" \
-    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
-    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Spoke A VNet의 IPAM 할당·태그 확인 완료\n'
-else
-  fail "Unexpected VNet status: $status"
-fi
+az network vnet create --resource-group "$RG_SPOKEA" --name "vnet-lzbegin-spokea-$RUN_ID" \
+  --location "$LOCATION" \
+  --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -453,19 +408,11 @@ VNet `/20` pool 할당과 실행 ID 태그를 확인합니다.
 
 <!-- exec:foundation-spokea-snet-workload -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_subnet_status spokea snet-workload) &&
-if [[ "$status" == missing ]]; then
-  az network vnet subnet create --resource-group "$RG_SPOKEA" \
-    --vnet-name "vnet-lzbegin-spokea-$RUN_ID" --name snet-workload \
-    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
-    --network-security-group "nsg-lzbegin-spokea-$RUN_ID" \
-    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Spoke A Subnet의 IPAM 할당·NSG·outbound 확인 완료\n'
-else
-  fail "Unexpected Subnet status: $status"
-fi
+az network vnet subnet create --resource-group "$RG_SPOKEA" \
+  --vnet-name "vnet-lzbegin-spokea-$RUN_ID" --name snet-workload \
+  --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+  --network-security-group "nsg-lzbegin-spokea-$RUN_ID" \
+  --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -511,7 +458,7 @@ Azure Portal에서도 **Resource groups → `rg-lzbegin-spokea-<실행 ID>` → 
 👁️ **설명**
 
 두 번째 워크로드를 관리할 Spoke B RG를 만듭니다.
-Hub·A와 이름을 구분하고 같은 이름의 기존 RG는 소유권 확인 후 재사용합니다.
+Hub·A와 이름을 구분해 새 RG를 만듭니다. 이미 있으면 태그를 변경하지 않습니다.
 
 🟢 **실행**
 
@@ -521,7 +468,6 @@ exists=$(az group exists --name "$RG_SPOKEB" -o tsv --subscription "$SUBSCRIPTIO
 case "$exists" in
   true) assert_owned_rg "$RG_SPOKEB" && printf '기존 Spoke B RG의 소유 확인 완료\n' ;;
   false)
-    # Spoke B를 별도의 RG로 관리합니다.
     az group create --name "$RG_SPOKEB" --location "$LOCATION" \
       --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop -o json --subscription "$SUBSCRIPTION_ID" ;;
   *) fail "Cannot determine whether $RG_SPOKEB exists" ;;
@@ -530,7 +476,7 @@ esac
 
 📋 **확인**
 
-`name`은 `rg-lzbegin-spokeb-<실행 ID>`입니다. 기존 RG이면 소유 확인 완료 문구가 나옵니다.
+`name`은 `rg-lzbegin-spokeb-<실행 ID>`입니다.
 
 ### 3-2. Spoke B NSG
 
@@ -559,25 +505,17 @@ NSG 이름은 `nsg-lzbegin-spokeb-<실행 ID>`입니다.
 B VNet `/20`과 `/24` Subnet을 할당하고 B NSG를 연결합니다.
 Hub·A와 겹치지 않는 주소는 서비스가 같은 pool에서 선택합니다.
 A와 Subnet 이름은 같지만 VNet과 주소 범위가 다른 별도 자원입니다.
-중간에 실패하면 이전 블록부터 재실행하여 기존 VNet을 읽기 전용 검증하고 빠진 Subnet만 만드세요.
+중간에 실패하면 상태를 조회한 뒤 아직 없는 Subnet부터 진행하세요.
 
 🟢 **실행**
 
 <!-- exec:foundation-spokeb-vnet -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_vnet_status spokeb) &&
-if [[ "$status" == missing ]]; then
-  az network vnet create --resource-group "$RG_SPOKEB" --name "vnet-lzbegin-spokeb-$RUN_ID" \
-    --location "$LOCATION" \
-    --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
-    --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
-    -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Spoke B VNet의 IPAM 할당·태그 확인 완료\n'
-else
-  fail "Unexpected VNet status: $status"
-fi
+az network vnet create --resource-group "$RG_SPOKEB" --name "vnet-lzbegin-spokeb-$RUN_ID" \
+  --location "$LOCATION" \
+  --ipam-allocations "[0].number-of-ip-addresses=4096" "[0].id=$IPAM_POOL_ID" \
+  --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
+  -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**
@@ -590,19 +528,11 @@ VNet `/20` pool 할당과 실행 ID 태그를 확인합니다.
 
 <!-- exec:foundation-spokeb-snet-workload -->
 ```bash
-source scripts/workshop-foundation.sh &&
-status=$(foundation_subnet_status spokeb snet-workload) &&
-if [[ "$status" == missing ]]; then
-  az network vnet subnet create --resource-group "$RG_SPOKEB" \
-    --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" --name snet-workload \
-    --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
-    --network-security-group "nsg-lzbegin-spokeb-$RUN_ID" \
-    --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
-elif [[ "$status" == ready ]]; then
-  printf '기존 Spoke B Subnet의 IPAM 할당·NSG·outbound 확인 완료\n'
-else
-  fail "Unexpected Subnet status: $status"
-fi
+az network vnet subnet create --resource-group "$RG_SPOKEB" \
+  --vnet-name "vnet-lzbegin-spokeb-$RUN_ID" --name snet-workload \
+  --ipam-allocations "[0].number-of-ip-addresses=256" "[0].id=$IPAM_POOL_ID" \
+  --network-security-group "nsg-lzbegin-spokeb-$RUN_ID" \
+  --default-outbound-access false -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**

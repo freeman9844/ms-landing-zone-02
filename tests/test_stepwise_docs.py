@@ -80,8 +80,8 @@ def support_verification_calls():
 
 def support_cases():
     cases = {
-        "support-preview": support_inventory(),
-        "support-deploy": support_inventory() + [
+        "support-preview": [],
+        "support-deploy": [
             az(["network", "public-ip", "create", "-g", rg("hub"), "-n", "pip-lzbegin-hub-demo123",
                 "-l", "koreacentral", "--sku", "Standard", "--allocation-method", "Static",
                 "--version", "IPv4", *TAGS, "-o", "json"]),
@@ -274,8 +274,6 @@ def route_configuration_calls():
                 "-o", "json"], [{"resourceId": netid(zone, "virtualNetworks", vnet(zone)),
                                 "provisioningState": "Succeeded"}])]
     calls += [
-        az(["network", "manager", "routing-config", "list", "-g", rg("hub"),
-            "--manager-name", "avnm-lzbegin-demo123", "-o", "json"], []),
         az(["network", "manager", "routing-config", "create", "-g", rg("hub"),
             "--manager-name", "avnm-lzbegin-demo123", "-n", "rc-lzbegin-spokes-demo123",
             "--description", "Spoke routes via Hub Firewall", "-o", "json"],
@@ -729,6 +727,10 @@ class StepwiseDocsTests(unittest.TestCase):
                 invalid[-1]["stdout"] = json.dumps(payload)
                 self.assertNotEqual(self.execute(4, "routing-config-create", invalid).returncode, 0)
 
+    def test_first_run_routing_config_does_not_list_existing_names(self):
+        calls = route_configuration_calls()
+        self.assertEqual(self.execute(4, "routing-config-create", calls).returncode, 0)
+
     def test_routing_collections_and_rules_reject_wrong_targets_next_hops_and_full_ids(self):
         for zone in ("spokea", "spokeb"):
             for step, field, wrong in (
@@ -826,19 +828,6 @@ class StepwiseDocsTests(unittest.TestCase):
             result = run(script, preparation_calls(5), files=self.keyfile, input_text="CREATE\n")
             self.assertNotEqual(result.returncode, 0, result.stderr)
 
-    def test_support_preview_rejects_existing_targets_without_mutation(self):
-        for index, name in ((0, "nat-lzbegin-hub-demo123"),
-                            (1, "vm-lzbegin-spokea-demo123"),
-                            (2, "nic-lzbegin-spokeb-demo123"),
-                            (0, "vm-lzbegin-hub-demo123_OsDisk_1_leftover"),
-                            (0, "vm-lzbegin-hub-demo123_disk1_2628fd89665b46e5a3110aef30244cdf")):
-            with self.subTest(name=name):
-                calls = support_inventory()[:index + 1]
-                calls[index] = dict(calls[index], stdout=json.dumps([{"name": name}]))
-                result = self.execute(5, "support-preview", calls, files=self.keyfile)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("ERROR:", result.stderr)
-
     def test_support_recovery_and_post_create_gate_are_executable(self):
         steps = blocks(DOCS[5])
         self.assertIn("support-recovery", steps)
@@ -851,6 +840,12 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertIn("verify_support_all", steps["verify-support"])
         self.assertLess(DOCS[5].read_text().index("<!-- exec:verify-support -->"),
                         DOCS[5].read_text().index("<!-- exec:attach-nat-hub -->"))
+
+    def test_first_run_support_preview_and_deploy_do_not_inventory_names(self):
+        self.assertEqual(self.execute(5, "support-preview", [], files=self.keyfile).returncode, 0)
+        self.assertEqual(self.execute(
+            5, "support-deploy", support_cases()["support-deploy"],
+            files=self.keyfile, input_text="CREATE\n").returncode, 0)
 
     def test_support_recovery_rejects_inventory_failure_without_create(self):
         steps = blocks(DOCS[5])
@@ -896,7 +891,7 @@ class StepwiseDocsTests(unittest.TestCase):
                   'recover_support() {' + steps["support-recovery"].split("recover_support() {", 1)[1].rsplit("\ninspect_support_slots", 1)[0] +
                   '\nrecover_support pip hub')
         calls = [support_inventory()[0],
-                 support_cases()["support-deploy"][3]]
+                 support_cases()["support-deploy"][0]]
         self.assertEqual(run(script, preparation_calls(5) + calls, files=self.keyfile).returncode, 0)
         bad = copy.deepcopy(calls[:1])
         bad[0]["stdout"] = json.dumps([support_resource("pip", "hub")])
@@ -961,7 +956,7 @@ class StepwiseDocsTests(unittest.TestCase):
         ]
         self.assertNotEqual(run(script, preparation_calls(5) + calls,
                                 files=self.keyfile, input_text="NO\n").returncode, 0)
-        approved = calls + [support_cases()["support-deploy"][6]]
+        approved = calls + [support_cases()["support-deploy"][3]]
         self.assertEqual(run(script, preparation_calls(5) + approved,
                              files=self.keyfile, input_text="CREATE\n").returncode, 0)
 
@@ -1079,6 +1074,8 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_final_cli_failure_is_not_hidden_and_does_not_exit_the_participant_shell(self):
         for module, cases in self.cases():
             for name, calls in cases.items():
+                if not calls:
+                    continue
                 with self.subTest(step=name):
                     failed = copy.deepcopy(calls)
                     failed[-1].update(returncode=1, stdout="")
@@ -1108,7 +1105,7 @@ class StepwiseDocsTests(unittest.TestCase):
                 result = self.execute(4, name, firewall_cases()[name], input_text="")
                 self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotEqual(self.execute(5, "support-deploy",
-                                        support_inventory(), input_text="NO\n",
+                                        [], input_text="NO\n",
                                         files=self.keyfile).returncode, 0)
 
     def test_missing_key_stops_preview_and_deploy_without_cloud_mutation(self):

@@ -54,69 +54,26 @@ class SharedPoolTests(unittest.TestCase):
         self.assertNotEqual(run(script, [group("hub"),
                                          call(pool_rest, code=3, stderr="Forbidden")]).returncode, 0)
 
-    def test_module_two_creates_only_missing_run_pool(self):
+    def test_module_two_creates_new_run_pool_without_listing_names(self):
         from harness import POOL_ID as run_pool
         doc = (ROOT / "docs/02-network-foundation.md").read_text()
         block = re.search(r"<!-- exec:run-ipam-pool -->\s*```bash\n(.*?)\n```", doc, re.S).group(1)
         self.assertLessEqual(len(block.splitlines()), 18, "Participant pool creation must stay concise")
-        manager_id = run_pool.split("/ipamPools/")[0]
-        hub = "rg-lzbegin-hub-demo123"
-        manager = {"id": manager_id, "location": "koreacentral", "provisioningState": "Succeeded",
-                   "networkManagerScopes": {"subscriptions": [f"/subscriptions/{SUB}"]},
-                   "networkManagerScopeAccesses": ["Connectivity", "SecurityAdmin", "Routing"]}
-        parent = {"id": manager_id, "location": "koreacentral", "properties": {
-            "provisioningState": "Succeeded", "networkManagerScopes": {
-                "subscriptions": [f"/subscriptions/{SUB}"], "managementGroups": []},
-            "networkManagerScopeAccesses": manager["networkManagerScopeAccesses"]}}
-        pool = {"id": run_pool, "location": "koreacentral", "properties": {
-            "addressPrefixes": ["172.20.0.0/14"], "provisioningState": "Succeeded"}}
-        listing = ["rest", "--method", "get", "--url",
-                   manager_id + "/ipamPools?api-version=2024-05-01",
-                   "--subscription", SUB, "-o", "json"]
-        manager_show = ["network", "manager", "show", "--name", "avnm-lzbegin-demo123",
-                        "-g", hub, "--subscription", SUB, "-o", "json"]
-        pool_read = ["rest", "--method", "get", "--url",
-                     run_pool + "?api-version=2024-05-01", "--subscription", SUB, "-o", "json"]
-        parent_read = ["rest", "--method", "get", "--url",
-                       manager_id + "?api-version=2024-05-01",
-                       "--subscription", SUB, "-o", "json"]
-        prefix = [group("hub"), call(manager_show, manager)]
-        checks = [group("hub"), call(pool_read, pool), call(parent_read, parent)]
-        result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": [pool]})] + checks)
-        self.assertEqual(result.returncode, 0, result.stderr)
         create = ["network", "manager", "ipam-pool", "create",
                   "--name", "ipam-lzbegin-demo123",
                   "--network-manager-name", "avnm-lzbegin-demo123",
-                  "-g", hub, "--location", "koreacentral",
+                  "-g", "rg-lzbegin-hub-demo123", "--location", "koreacentral",
                   "--address-prefixes", '["172.20.0.0/14"]',
                   "-o", "json", "--subscription", SUB]
+        pool = {"id": run_pool, "location": "koreacentral", "properties": {
+            "addressPrefixes": ["172.20.0.0/14"], "provisioningState": "Succeeded"}}
         result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": []}),
-                               call(create, pool)] +
-                     checks)
+                     [call(create, pool)])
         self.assertEqual(result.returncode, 0, result.stderr)
         result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": []}),
-                               call(create, code=1, stderr="pool creation failed")])
+                     [call(create, code=1, stderr="pool creation failed")])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("pool creation failed", result.stderr)
-        result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": [{"id": "foreign"}]})] +
-                     [group("hub"), call(pool_read, code=3, stderr="not found")])
-        self.assertNotEqual(result.returncode, 0)
-        result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": [], "nextLink": "more"})])
-        self.assertNotEqual(result.returncode, 0)
-        result = run(SOURCE + 'load_run state.json && ' + block,
-                     [group("hub"), call(manager_show, dict(manager, provisioningState="Updating"))])
-        self.assertNotEqual(result.returncode, 0)
-        result = run(SOURCE + 'load_run state.json && ' + block,
-                     prefix + [call(listing, {"value": [dict(pool, properties=dict(
-                         pool["properties"], provisioningState="Updating"))]})] +
-                     [group("hub"), call(pool_read, dict(pool, properties=dict(
-                         pool["properties"], provisioningState="Updating")))])
-        self.assertNotEqual(result.returncode, 0)
 
     def test_new_run_preflight_rejects_feature_conflicts_and_address_overlap(self):
         manager = {"networkManagerScopeAccesses": ["Connectivity"],

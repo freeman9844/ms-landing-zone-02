@@ -143,7 +143,7 @@ prepare_support_key
 
 새 키 fingerprint가 나오거나 기존 키 쌍이 유지됩니다. 개인 키를 배포 인수에 넣지 않습니다.
 
-### 2-2. 유료 자원 생성 전 충돌 확인
+### 2-2. 유료 자원 생성 전 대상 확인
 
 🟢 **실행**
 
@@ -153,8 +153,6 @@ preview_support() {
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
   check_vm_network || return 1
-  source scripts/workshop-support.sh || return 1
-  assert_support_slots_empty || return 1
   printf '예정: Hub NAT·Public IP, Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크\n'
 }
 preview_support
@@ -163,8 +161,9 @@ preview_support
 📋 **확인**
 
 Hub NAT·Hub Public IP **각 1개**, Hub/Spoke A/Spoke B VM·NIC·디스크가 생성될 예정입니다.
-대상 이름의 자원이 이미 있거나 목록 조회가 실패하면 중단합니다.
-이 읽기 전용 충돌 검사는 ARM what-if가 아니므로 용량·할당 성공을 보장하지 않습니다.
+모듈 01에서 새 실행 ID를 만들고 앞 단계를 처음부터 수행했다는 전제입니다.
+기존 실행을 재개하는 경우에는 이 생성 절차 대신 아래 **2-3a 단계별 복구**를 사용하세요.
+이 대상 확인은 용량·할당 성공을 보장하지 않습니다.
 Spoke NAT/Public IP는 만들지 않으며 기존 VNet·Subnet을 변경하지 않습니다.
 
 ### 2-3. 비용 확인 후 배포
@@ -183,8 +182,6 @@ deploy_support() {
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
   check_vm_network || return 1
-  source scripts/workshop-support.sh || return 1
-  assert_support_slots_empty || return 1
   read -rp "유료 VM 3대와 Hub NAT 1개를 배포합니다. CREATE 입력: " confirm || return 1
   [[ "$confirm" == CREATE ]] || { fail "Cancelled"; return 1; }
   az network public-ip create -g "$RG_HUB" -n "pip-lzbegin-hub-$RUN_ID" \

@@ -71,8 +71,9 @@ IPAM 조회 응답은 요청 본문의 `pool.id` 대신 `id`와
 VNet·Subnet·NSG는 모듈 02, AVNM Connectivity·Routing 대상 Group은 모듈 03,
 Firewall과 중앙 경로는 모듈 04, VM·Hub NAT·Security Admin은 모듈 05에서 다룹니다.
 참가자가 구독·RG·전체 자원 ID·Group 범위·주소를 비교할 수 있도록
-생성 직전의 목록 조회는 생성 블록 안에서 한 번만 수행하고, 배포 후 상태·적용 결과
-확인은 별도로 유지합니다. 특히 **Routing 적용 전 Firewall이 준비**돼야 하고,
+최초 생성 블록에서는 같은 이름의 자원 목록 조회를 반복하지 않고, RG 덮어쓰기 방지와
+배포 전제 조건 검사 및 배포 후 상태·적용 결과 확인은 별도로 유지합니다.
+특히 **Routing 적용 전 Firewall이 준비**돼야 하고,
 **VM 생성 전 두 Spoke의 AVNM 경로와 `/0` 출구**가 준비돼야 합니다.
 대상별 실습 동작을 숨기지 않되, 안전 함수·검증기의 내부 반복은 유지합니다.
 
@@ -93,7 +94,9 @@ Firewall과 중앙 경로는 모듈 04, VM·Hub NAT·Security Admin은 모듈 05
 재접속·상태 파일 변경·실습/구독 전환 시 준비를 다시 수행하도록 안내합니다.
 직접 Azure 자원 명령은 `--subscription "$SUBSCRIPTION_ID"`로 대상을 고정합니다.
 모듈 03–06은 공통 준비에서 세 RG의 소유권을 한 번 확인하고, 일반 작업의 중복 `assert`는 생략합니다.
-모듈 02는 RG 생성 분기에서 기존 RG의 소유권을 확인합니다. 중간 재개 시에도 해당 RG 생성 단계를 다시 실행합니다.
+모듈 02는 RG 생성 분기에서 기존 RG의 소유권을 확인합니다. 최초 생성의 AVNM·pool·VNet·Subnet,
+모듈 03의 Group·정적 멤버·Connectivity, 모듈 05의 유료 자원은 이름 목록을 반복 조회하지 않습니다.
+중간 재개 시 기존 자원과 RG 소유권을 조회하고 성공한 생성 명령은 다시 실행하지 않습니다.
 Peering과 진단 설정의 전체 ID, Security Admin 규칙의 실제 NIC IP는 명시적인
 구독·RG·이름으로 조회합니다. 실패를 빈 응답이나 배포 완료로 해석하지 않습니다.
 Hub NAT만 모듈 05의 Hub 관리 Subnet에 연결합니다. **Spoke NAT·Public IP는
@@ -209,9 +212,9 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | 파일 | 읽을 때 확인할 내용 |
 |---|---|
 | `workshop-common.sh` | 상태 JSON 생성·복구, schema 4 실행별·schema 3 기존 pool ID 검증과 schema 2 거부, 구독·RG 소유 확인 |
-| `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 생성 전 상태·준비 확인 및 실제 VNet·Subnet CIDR 재조회 |
-| `workshop-foundation.sh` | 모듈 02의 VNet·Subnet 부분 생성 복구 시 기존 IPAM 할당과 설정을 읽기 전용으로 확인 |
-| `workshop-support.sh` | 모듈 05의 유료 CLI 생성 전 이름 충돌 검사, 부분 생성 복구와 실제 Hub NAT·NIC·VM 설정 확인 |
+| `workshop-ipam.sh` | 새 구독 AVNM·VNet 충돌 검사, 실행별 pool 상태 확인 및 실제 VNet·Subnet CIDR 재조회 |
+| `workshop-foundation.sh` | 모듈 02 부분 생성 복구 시 기존 IPAM VNet·Subnet 할당과 설정을 읽기 전용으로 확인 |
+| `workshop-support.sh` | 모듈 05 부분 생성 복구와 실제 Hub NAT·NIC·VM 설정 확인; 정상 최초 생성 흐름에서는 이름 목록 조회 안 함 |
 | `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
 | `preflight.sh` | 모듈 01·05 VM SKU/quota 및 필수 Provider 사전 점검 |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
@@ -239,7 +242,7 @@ VM 보안 설정 및 **Hub NAT 연결만** 별도 단계인 이유를 설명합�
 참고 템플릿은 네트워크 뼈대를 다시 만들지 않습니다. VNet·NSG·Subnet은
 모듈 02, AVNM Connectivity는 03, Firewall·AVNM Routing은 04에서 관리합니다.
 보조 템플릿에는 Spoke NAT/PIP와 수동 route table을 추가하지 않습니다.
-모듈 05의 읽기 전용 충돌 검사는 ARM what-if를 대체하지 않으며,
+모듈 05의 최초 생성은 새 실행의 빈 자원을 전제로 하며,
 CLI 명령 중 하나가 실패하면 실제 자원의 ID·설정을 읽어 확인하고
 누락된 단계만 명시적으로 실행한 뒤 전체 구성을 다시 검증합니다.
 

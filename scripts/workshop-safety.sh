@@ -58,7 +58,7 @@ assert_peering_forwarded() {
 }
 
 assert_routing_creation_ready() {
-  local manager groups members zone group expected existing
+  local manager groups members zone group expected
   assert_enforced_connectivity || return 1
   manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
@@ -85,10 +85,6 @@ assert_routing_creation_ready() {
       (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
     ' <<< "$members" >/dev/null || { fail "Unexpected routing group member: $zone"; return 1; }
   done
-  existing=$(az network manager routing-config list -g "$RG_HUB" --manager-name "$AVNM" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e 'type == "array" and length == 0' <<< "$existing" >/dev/null ||
-    { fail "Routing configuration already exists; inspect before changing it."; return 1; }
 }
 
 assert_routing_creation_result() {

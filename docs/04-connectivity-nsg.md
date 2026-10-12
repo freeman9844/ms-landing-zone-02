@@ -656,9 +656,9 @@ table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 
 
 👁️ **설명**
 
-모듈 03의 manager 세 범위와 A/B Group의 **정확한 멤버**를 다시 읽고,
-기존 Routing Configuration이 없을 때만 만듭니다. 예상 밖의 자원을
-덮어쓰지 않습니다.
+모듈 03의 manager 세 범위와 A/B Group의 **정확한 멤버**를 확인한 뒤
+이번 실행의 Routing Configuration을 처음 생성합니다. 이미 생성됐다면
+이 명령을 재실행하지 말고 현재 상태를 조회하세요.
 
 🟢 **실행**
 
