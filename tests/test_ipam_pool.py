@@ -7,6 +7,8 @@ from harness import LEGACY_POOL_ID, POOL_ID as RUN_POOL_ID, ROOT, SUB, call, gro
 POOL_ID = LEGACY_POOL_ID
 
 SOURCE = 'source "$WORKSHOP_ROOT/scripts/workshop-common.sh"; source "$WORKSHOP_ROOT/scripts/workshop-ipam.sh"; '
+ACCOUNT_LIST = ["account", "list", "--query",
+                "[].{Name:name,Subscription:id,Default:isDefault}", "-o", "table"]
 REST = ["rest", "--method", "get", "--url", POOL_ID + "?api-version=2024-05-01",
         "--subscription", SUB, "-o", "json"]
 MANAGER_ID = POOL_ID.split("/ipamPools/")[0]
@@ -113,7 +115,8 @@ class SharedPoolTests(unittest.TestCase):
                           {"addressSpace": {"addressPrefixes": ["172.20.0.0/20"]}}])]):
             with self.subTest(calls=calls):
                 result = run(block + '\nrc=$?; test ! -e .workshop-state || exit 9; exit "$rc"',
-                             [call(["account", "set", "--subscription", SUB]),
+                             [call(ACCOUNT_LIST),
+                              call(["account", "set", "--subscription", SUB]),
                               call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
                               call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
                               *calls], input_text=SUB + "\n")
@@ -163,7 +166,8 @@ class SharedPoolTests(unittest.TestCase):
                      if 'STATE_FILE=$(new_run ' in block)
         result = run('STATE_FILE=previous.json; IPAM_POOL_ID="' + POOL_ID + '"\n' +
                      block + '\n[[ ! -v STATE_FILE && ! -v IPAM_POOL_ID ]]',
-                     [call(["account", "set", "--subscription", SUB]),
+                     [call(ACCOUNT_LIST),
+                      call(["account", "set", "--subscription", SUB]),
                       call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
                       call(["account", "show", "--query", "id", "-o", "tsv"], SUB),
                       call(["network", "manager", "list", "--subscription", SUB, "-o", "json"],

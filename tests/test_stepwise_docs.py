@@ -887,6 +887,17 @@ class StepwiseDocsTests(unittest.TestCase):
                                 {"value": [malformed], "skipToken": ""}) for _ in range(12)]
                     self.assertNotEqual(self.execute(5, step, attempts).returncode, 0)
 
+    def test_admin_flow_reports_missing_vm_ips_before_retrying(self):
+        steps = blocks(DOCS[5])
+        script = ('source "$WORKSHOP_ROOT/scripts/workshop-common.sh"\n'
+                  'admin_proof() { printf "unexpected probe\\n" >&2; return 1; }\n' +
+                  steps["admin-flow-check"] +
+                  '\ncheck_admin_flow spokea "" "" Allow hub-to-a')
+        result = run(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("read-vm-ips", result.stderr)
+        self.assertNotIn("unexpected probe", result.stderr)
+
     def test_security_admin_rules_reject_wrong_action_priority_ip_target_and_full_ids(self):
         for step in ("inspect-security-rules",):
             calls = security_cases()[step]

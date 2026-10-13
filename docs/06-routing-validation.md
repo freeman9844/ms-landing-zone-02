@@ -113,6 +113,27 @@ PASS: 172.67.74.152 /0 -> VirtualAppliance
 PASS: extension allowed has matching AVNM routes, admin rules, HTTP, Firewall log and egress evidence.
 ```
 
+### 현재 구성과 allowed 흐름 결과
+
+```mermaid
+flowchart LR
+  H["Hub 관리 VM"]
+  A["Spoke A VM"]
+  FW["Hub Azure Firewall<br/>lab-http: Allow"]
+  B["Spoke B VM"]
+  NET["인터넷"]
+
+  H -->|"Hub→A: HTTP spokea PASS<br/>Peering · AlwaysAllow"| A
+  H -->|"Hub→B: HTTP spokeb PASS<br/>Peering · AlwaysAllow"| B
+  A -->|"A→B TCP/8080<br/>B /20: VirtualAppliance"| FW
+  FW -->|"새 AZFWNetworkRule Allow<br/>HTTP spokeb PASS"| B
+  B -->|"B→A 응답<br/>A /20: VirtualAppliance"| FW
+  FW -->|"응답 반환"| A
+  A -.->|"/0: VirtualAppliance"| FW
+  B -.->|"/0: VirtualAppliance"| FW
+  FW -->|"Public IP egress PASS"| NET
+```
+
 상대 Spoke `/20`·`/0`의 `VirtualAppliance`는 Spoke 왕복·인터넷 경로가 Firewall을 향함을,
 `VNetPeering`은 Hub→Spoke 직접 경로를 뜻합니다. `AlwaysAllow`와 HTTP 응답은
 중앙 규칙 적용 및 실제 통신을, 새 `AZFWNetworkRule`의 A→B `Allow`는 Firewall

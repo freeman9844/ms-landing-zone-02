@@ -542,6 +542,8 @@ Security admin configurations → `sc-lzbegin-http-<실행 ID>` → Rules**에�
 주소·포트가 적용됐는지 확인합니다. 새 연결마다 출발지 포트가 달라도 규칙의
 출발지 포트 범위 `0-65535`가 적용됩니다. 전파 중에는 이전 규칙이 보일 수 있어
 최대 약 3분 기다립니다. 실제 HTTP 연결은 별도로 확인합니다.
+`hub_ip`·`a_ip`·`b_ip`가 비어 있다면 4단계의 `read-vm-ips` 블록을 같은 셸에서
+다시 실행한 뒤 확인하세요. 규칙을 다시 생성하거나 배포할 필요는 없습니다.
 이 리허설에서는 Network Watcher IP Flow Verify가 effective `AlwaysAllow`와 실제
 HTTP 성공에도 NSG의 `Deny`를 반환했으므로, 단독으로 AVNM 허용 여부의 근거로
 사용하지 않습니다.
@@ -552,6 +554,10 @@ HTTP 성공에도 NSG의 `Deny`를 반환했으므로, 단독으로 AVNM 허용 
 ```bash
 check_admin_flow() {
   local zone="$1" destination="$2" source="$3" expected="$4" rule="$5" attempt
+  if [[ -z "$destination" || -z "$source" ]]; then
+    fail "VM IP variables are empty; rerun module 05 step 4 read-vm-ips in this shell."
+    return 1
+  fi
   for attempt in {1..12}; do
     if admin_proof "$zone" "$destination" "$source" "$expected" "$rule"; then return 0; fi
     if (( attempt < 12 )); then sleep 15; fi
