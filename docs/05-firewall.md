@@ -299,6 +299,14 @@ check_vm_effective_routes
 
 📋 **확인**
 
+실제 실습의 성공 출력 예시입니다. `/20` CIDR과 Firewall 사설 IP는 실행별
+IPAM 할당에 따라 다를 수 있습니다.
+
+```text
+PASS: spokea NIC 172.20.32.0/20 and /0 -> Firewall 172.20.1.4
+PASS: spokeb NIC 172.20.16.0/20 and /0 -> Firewall 172.20.1.4
+```
+
 Spoke A에는 `$SPOKEB_VNET_CIDR`, Spoke B에는 `$SPOKEA_VNET_CIDR`, 양쪽에는
 `0.0.0.0/0`이 `Active`·`VirtualAppliance`·동일 Firewall 사설 IP입니다.
 다른 next hop이나 비활성 경로를 통과로 해석하지 않습니다.
