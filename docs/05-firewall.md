@@ -59,7 +59,7 @@ Spoke의 기본 outbound는 꺼져 있으며 **Spoke NAT나 Public IP는 만들�
 VM Agent의 HTTPS 관리 통신을 위해 모듈 04에서 Firewall 정책과 두 Spoke의
 상대편 실제 `/20`·기본 `/0` AVNM 경로가 이미 배포·적용되어 있어야 합니다.
 모듈 04의 5절에서 두 Subnet의 경로를 확인했습니다. 여기서 별도 검사 단계를
-반복하지 않고, 유료 자원을 생성하는 2-3에서만 현재 네트워크 상태를 다시
+반복하지 않고, 유료 자원을 생성하는 2-2에서만 현재 네트워크 상태를 다시
 확인합니다. Firewall은 NAT의 주소 변환과 달리 FQDN 규칙·로그도 제공합니다.
 Hub 관리 VM에만 별도 Hub NAT를 사용합니다.
 
@@ -106,34 +106,16 @@ prepare_support_key
 
 새 키 fingerprint가 나오거나 기존 키 쌍이 유지됩니다. 개인 키를 배포 인수에 넣지 않습니다.
 
-### 2-2. 유료 자원 생성 전 대상 확인
-
-🟢 **실행**
-
-<!-- exec:support-preview -->
-```bash
-preview_support() {
-  public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
-  [[ -n "$public_key" ]] || return 1
-  printf '예정: Hub NAT·Public IP, Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크\n'
-}
-preview_support
-```
-
-📋 **확인**
-
-Hub NAT·Hub Public IP **각 1개**, Hub/Spoke A/Spoke B VM·NIC·디스크가 생성될 예정입니다.
-모듈 01에서 새 실행 ID를 만들고 앞 단계를 처음부터 수행했다는 전제입니다.
-기존 실행을 재개할 때는 생성 블록을 반복하지 말고 아래 배포 결과를 확인하세요.
-자원이 불완전하면 모듈 07에서 이번 실행만 정리합니다.
-이 대상 확인은 용량·할당 성공을 보장하지 않습니다.
-Spoke NAT/Public IP는 만들지 않으며 기존 VNet·Subnet을 변경하지 않습니다.
-
-### 2-3. 비용 확인 후 배포
+### 2-2. 비용 확인 후 배포
 
 👁️ **설명**
 
+Hub NAT·Public IP 각 1개와 Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크를
+생성합니다. Spoke NAT/Public IP와 기존 VNet·Subnet은 변경하지 않습니다.
 유료 VM 3대와 Hub NAT 하나의 배포에 동의할 때만 `CREATE`를 입력합니다.
+기존 실행을 재개할 때는 생성 블록을 반복하지 말고 아래 배포 결과를 확인하세요.
+자원이 불완전하면 모듈 07에서 이번 실행만 정리합니다. 사전 검사는 용량·할당
+성공을 보장하지 않습니다.
 각 VM 생성의 45분 timeout은 로컬 대기만 끝냅니다. 시간 초과 시 Azure Portal의 VM 상태를 먼저 확인하세요.
 
 🟢 **실행**
@@ -150,6 +132,7 @@ deploy_support() {
   assert_avnm_routes_ready "$firewall_ip" || return 1
   assert_no_spoke_nat || return 1
   # CREATE 입력 전에는 Azure 자원을 생성하지 않습니다.
+  printf '예정: Hub NAT·Public IP, Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크\n'
   read -rp "유료 VM 3대와 Hub NAT 1개를 배포합니다. CREATE 입력: " confirm || return 1
   [[ "$confirm" == CREATE ]] || { fail "Cancelled"; return 1; }
   # Hub 관리 VM 전용 Public IP와 NAT를 만듭니다. Spoke의 인터넷 출구는 Firewall입니다.
@@ -195,7 +178,7 @@ deploy_support
 
 📋 **확인**
 
-**아래 배포 결과 확인에 성공하기 전에는 2-4로 진행하지 않습니다.** Hub에만 NAT Gateway와
+**아래 배포 결과 확인에 성공하기 전에는 2-3으로 진행하지 않습니다.** Hub에만 NAT Gateway와
 Public IP가 있으며, Spoke에는 사설 NIC·VM·OS 디스크만 있습니다.
 실제 사설 IP는 4절에서 조회합니다. NAT는 아직 관리 Subnet에 붙지 않았습니다.
 
@@ -228,19 +211,19 @@ PASS: vm/spokeb exact configuration
 Hub PIP·NAT의 실제 구성과 세 NIC의 정확한 Subnet·IP forwarding 비활성·Public IP 부재,
 세 VM의 NIC·이미지·SKU·SSH 전용/암호 인증 비활성·Trusted Launch/Secure Boot/vTPM·
 Agent·삭제 옵션·관리형 부팅 진단까지 모두 `PASS`여야 합니다. 조회 실패나 하나라도
-불일치하면 2-4로 진행하지 말고 모듈 07에서 이번 실행만 정리하세요.
-재접속 후 2-4를 진행할 때도 이 블록을 재실행합니다.
+불일치하면 2-3으로 진행하지 말고 모듈 07에서 이번 실행만 정리하세요.
+재접속 후 2-3을 진행할 때도 이 블록을 재실행합니다.
 
 생성된 자원은 Azure Portal의 **Resource groups → 이번 실행의 Spoke A RG → Overview →
-Resources**에서도 확인할 수 있습니다. 아래 예시의 NIC·VM·OS 디스크는 2-3에서
+Resources**에서도 확인할 수 있습니다. 아래 예시의 NIC·VM·OS 디스크는 2-2에서
 생성됐고, NSG·VNet은 앞 모듈에서 만든 자원입니다. Portal 목록만으로 구성의
 정확성을 판단하지 말고 위 `verify_support_all` 결과를 확인하세요.
 
 ![Azure Portal의 Spoke A 리소스 그룹에 표시된 NIC, NSG, VM, OS 디스크 및 VNet](images/05-spokea-vm-resources-portal.png)
 
-### 2-4. Hub 관리 Subnet에 NAT 연결
+### 2-3. Hub 관리 Subnet에 NAT 연결
 
-2-3의 **배포 결과 확인에서 8개 항목 모두 PASS**인 경우에만 진행합니다.
+2-2의 **배포 결과 확인에서 8개 항목 모두 PASS**인 경우에만 진행합니다.
 재접속했다면 해당 읽기 전용 블록을 다시 실행하세요.
 
 🟢 **실행**
@@ -315,7 +298,7 @@ Spoke A에는 `$SPOKEB_VNET_CIDR`, Spoke B에는 `$SPOKEA_VNET_CIDR`, 양쪽에�
 
 👁️ **설명**
 
-2-3에서 생성한 Ubuntu VM에는 HTTP 서버가 없습니다. 5-7의 VM 간 HTTP 통신을
+2-2에서 생성한 Ubuntu VM에는 HTTP 서버가 없습니다. 5-7의 VM 간 HTTP 통신을
 시험할 수 있도록 Spoke A/B VM에 Python HTTP 8080 서비스를 설치·시작합니다.
 Cloud Shell에서 사설 IP로 SSH하는 대신 `run-vm.sh`가 `guest-server.sh`를
 VM Agent의 Run Command로 전달합니다. 각 VM 내부의 `localhost:8080` 응답과

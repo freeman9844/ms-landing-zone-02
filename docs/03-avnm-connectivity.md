@@ -200,7 +200,7 @@ Azure Portal의 **Virtual Network Manager → 이번 실행의 AVNM → Network 
 
 ![Azure Portal의 AVNM Network Group에 정적으로 등록된 Spoke A와 B의 Group members 목록](images/03-spoke-group-members.png)
 
-### 4-3. Spoke A 전용 Routing Group 생성
+### 4-2. Spoke A 전용 Routing Group 생성
 
 👁️ **설명**
 
@@ -219,11 +219,11 @@ az network manager group create --name "ng-lzbegin-route-spokea-$RUN_ID" \
 
 연결용 Spoke Group과 새 A Routing Group이 별도로 표시됩니다.
 
-### 4-4. Spoke B 전용 Routing Group 생성
+### 4-3. Spoke B 전용 Routing Group 생성
 
 👁️ **설명**
 
-B는 A와 반대쪽 `/16` 경로를 사용하므로 별도 Group이 필요합니다.
+B는 A의 `/20`으로 향하는 경로를 사용하므로 별도 Group이 필요합니다.
 
 🟢 **실행**
 
@@ -238,7 +238,7 @@ az network manager group create --name "ng-lzbegin-route-spokeb-$RUN_ID" \
 
 이제 연결용 Group 하나와 A/B Routing Group 두 개가 있습니다.
 
-### 4-5. A Routing Group에 Spoke A 등록
+### 4-4. A Routing Group에 Spoke A 등록
 
 👁️ **설명**
 
@@ -260,7 +260,7 @@ az network manager group static-member create --name spokea \
 
 A Routing Group의 유일한 정적 멤버가 Spoke A VNet입니다.
 
-### 4-6. B Routing Group에 Spoke B 등록
+### 4-5. B Routing Group에 Spoke B 등록
 
 👁️ **설명**
 
@@ -287,9 +287,9 @@ B Routing Group의 유일한 정적 멤버가 Spoke B VNet입니다. A/B를 서�
 👁️ **설명**
 
 이 단계가 수동 Peering 생성 대신 AVNM이 연결을 관리하도록 선언하는 부분입니다.
-먼저 정적 멤버가 **정확히 A/B 두 개**로 반영됐는지 기다린 뒤 Hub VNet ID를
-조회합니다. 매번 새 실습을 시작하므로 생성 단계에서는 앞의 두 확인을
-반복하지 않고, 이번 상태 파일의 ID로 구성 값을 만듭니다. 이미 구성이 알려진
+먼저 정적 멤버가 **정확히 A/B 두 개**로 반영됐는지 기다립니다. Hub VNet의 전체
+ID는 공통 준비의 `load_ipam_cidrs`에서 확인했습니다. 생성 단계에서는 이 검사를
+반복하지 않고 이번 상태 파일의 ID로 구성 값을 만듭니다. 이미 구성이 알려진
 부분 재시도라면 생성 블록을 다시 실행하지 말고 기존 구성의 소유권·내용을 확인하세요.
 
 ### 5-1. 두 Spoke의 정적 멤버 반영 확인
@@ -338,40 +338,12 @@ wait_static_members
 오류 없이 프롬프트로 돌아오면 A/B가 반영된 상태입니다. 아직 구성은 만들지 않았습니다.
 다른 멤버가 있으면 원인을 확인하고 다음 블록을 실행하지 마세요.
 
-### 5-2. Hub VNet의 전체 ID 확인
+### 5-2. Connectivity Configuration 최초 생성
 
 👁️ **설명**
 
-Hub는 Network Group 멤버가 아니라 별도로 지정할 VNet입니다. CLI에서 조회한
-전체 ID가 이번 실행의 Hub RG·VNet 이름과 일치하는지 확인합니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm-hub -->
-```bash
-# 생성할 구성의 Hub 대상이 이번 실행의 VNet인지 읽기 전용으로 확인합니다.
-inspect_avnm_hub() {
-  local hub_id expected_hub_id
-  hub_id=$(az network vnet show -g "$RG_HUB" -n "vnet-lzbegin-hub-$RUN_ID" \
-    --query id -o tsv --subscription "$SUBSCRIPTION_ID") || return 1
-  expected_hub_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_HUB/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-hub-$RUN_ID"
-  [[ "${hub_id,,}" == "${expected_hub_id,,}" ]] ||
-    { fail "Unexpected Hub VNet ID: $hub_id"; return 1; }
-  printf '%s\n' "$hub_id"
-}
-inspect_avnm_hub
-```
-
-📋 **확인**
-
-전체 ID에 자신의 구독, Hub RG, `vnet-lzbegin-hub-<실행 ID>`가 표시됩니다.
-
-### 5-3. Connectivity Configuration 최초 생성
-
-👁️ **설명**
-
-**5-1의 두 멤버와 5-2의 Hub ID 확인을 마친 뒤** 실행합니다. 앞 블록의
-임시 변수 대신 상태 파일의 ID를 사용해 최초 생성합니다. 이미 구성이 있다면
+**5-1의 두 멤버 확인을 마친 뒤** 실행합니다. Hub VNet ID는 공통 준비에서
+검증했으며, 상태 파일의 ID를 사용해 최초 생성합니다. 이미 구성이 있다면
 다시 생성하지 말고 기존 구성의 소유권·Hub·Group·속성을 확인하세요.
 오류가 났다면 처음부터 붙여 넣지 말고 현재 상태를 확인하세요.
 

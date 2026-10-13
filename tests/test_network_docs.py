@@ -511,31 +511,35 @@ class NetworkDocsTests(unittest.TestCase):
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_configuration_preflight_checks_hub_separately_and_create_uses_verified_ids(self):
-        hub_call = az(["network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
-                       "--query", "id", "-o", "tsv"], netid("hub", "virtualNetworks", vnet("hub")))
-        result = self.execute(3, "inspect-avnm-hub", [hub_call])
+    def test_configuration_reuses_hub_identity_validated_during_preparation(self):
+        steps = blocks(DOCS[3])
+        self.assertNotIn("inspect-avnm-hub", steps)
+        members = az([
+            "network", "manager", "group", "static-member", "list",
+            "--network-group", network_group_name(), "--network-manager", avnm_name(),
+            "--resource-group", rg("hub"), "-o", "json",
+        ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])
+        script = 'export STATE_FILE=state.json\n' + " || exit 1\n".join(
+            steps[name] for name in ("prepare-03", "inspect-static-members", "connectivity-config-create"))
+        result = run(script, [*preparation_calls(3), members,
+                              *avnm_cases()["connectivity-config-create"]])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(netid("hub", "virtualNetworks", vnet("hub")), result.stdout)
-        result = self.execute(3, "inspect-avnm-hub", [dict(hub_call, stdout="unexpected")])
-        self.assertNotEqual(result.returncode, 0)
-        script = blocks(DOCS[3])["connectivity-config-create"]
-        self.assertNotIn("static-member list", script)
-        self.assertNotIn("network vnet show", script)
-        self.assertIn("&&", script)
+        bad_calls = copy.deepcopy(preparation_calls(3))
+        bad_hub = json.loads(bad_calls[4]["stdout"])
+        bad_hub["id"] = netid("spokea", "virtualNetworks", vnet("spokea"))
+        bad_calls[4]["stdout"] = json.dumps(bad_hub)
+        self.assertNotEqual(run(script, bad_calls).returncode, 0)
 
-    def test_configuration_creation_follows_member_and_hub_checks(self):
+    def test_configuration_creation_follows_member_reflection_check(self):
         steps = blocks(DOCS[3])
         members = az([
             "network", "manager", "group", "static-member", "list",
             "--network-group", network_group_name(), "--network-manager", avnm_name(),
             "--resource-group", rg("hub"), "-o", "json",
         ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])
-        hub = az(["network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
-                  "--query", "id", "-o", "tsv"], netid("hub", "virtualNetworks", vnet("hub")))
-        actions = ["prepare-03", "inspect-static-members", "inspect-avnm-hub", "connectivity-config-create"]
+        actions = ["prepare-03", "inspect-static-members", "connectivity-config-create"]
         script = 'export STATE_FILE=state.json\n' + " || exit 1\n".join(steps[action] for action in actions)
-        result = run(script, [*preparation_calls(3), members, hub,
+        result = run(script, [*preparation_calls(3), members,
                               *avnm_cases()["connectivity-config-create"]])
         self.assertEqual(result.returncode, 0, result.stderr)
         result = run(script, [*preparation_calls(3),

@@ -3,8 +3,8 @@ import unittest
 
 from harness import run
 from test_network_docs import (
-    DOCS, avnm_cases, avnm_name, az, blocks, netid, network_group_name,
-    preparation_calls, rg, static_member, vnet,
+    DOCS, avnm_cases, avnm_name, az, blocks, network_group_name,
+    preparation_calls, rg, static_member,
 )
 
 
@@ -56,7 +56,7 @@ class Module03FirstRunTests(unittest.TestCase):
         failed = self.execute(steps, [not_ready])
         self.assertNotEqual(failed.returncode, 0)
 
-    def test_required_member_and_hub_checks_still_gate_configuration_creation(self):
+    def test_required_member_check_still_gates_configuration_creation(self):
         cases = avnm_cases()
         members = az([
             "network", "manager", "group", "static-member", "list",
@@ -64,18 +64,11 @@ class Module03FirstRunTests(unittest.TestCase):
             "--network-manager", avnm_name(),
             "--resource-group", rg("hub"), "-o", "json",
         ], [static_member("spokea", "spokea"), static_member("spokeb", "spokeb")])
-        hub = az([
-            "network", "vnet", "show", "-g", rg("hub"), "-n", vnet("hub"),
-            "--query", "id", "-o", "tsv",
-        ], netid("hub", "virtualNetworks", vnet("hub")))
-        steps = ("prepare-03", "inspect-static-members", "inspect-avnm-hub",
-                 "connectivity-config-create")
-        good = self.execute(steps, [members, hub, cases["connectivity-config-create"][-1]])
+        steps = ("prepare-03", "inspect-static-members", "connectivity-config-create")
+        good = self.execute(steps, [members, cases["connectivity-config-create"][-1]])
         self.assertEqual(good.returncode, 0, good.stderr)
         bad_members = dict(members, stdout=json.dumps([static_member("hub", "hub")]))
         failed = self.execute(steps, [bad_members])
-        self.assertNotEqual(failed.returncode, 0)
-        failed = self.execute(steps, [members, dict(hub, stdout="unexpected")])
         self.assertNotEqual(failed.returncode, 0)
 
 if __name__ == "__main__":

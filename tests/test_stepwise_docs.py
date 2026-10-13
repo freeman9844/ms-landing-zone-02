@@ -75,7 +75,6 @@ def support_verification_calls():
 
 def support_cases():
     cases = {
-        "support-preview": [],
         "support-deploy": [
             az(["network", "public-ip", "create", "-g", rg("hub"), "-n", "pip-lzbegin-hub-demo123",
                 "-l", "koreacentral", "--sku", "Standard", "--allocation-method", "Static",
@@ -523,7 +522,7 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertIn("attach-nat-hub", steps)
         self.assertNotIn("inspect-nat-hub", steps)
         self.assertNotIn("inspect-no-spoke-nat", steps)
-        self.assertNotIn("assert_avnm_routes_ready", steps["support-preview"])
+        self.assertNotIn("support-preview", steps)
         self.assertIn("assert_no_spoke_nat", steps["support-deploy"])
 
     def test_module_06_allowed_result_example_covers_route_http_and_fresh_log(self):
@@ -786,11 +785,22 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotIn("verify_support_all", steps["attach-nat-hub"])
         self.assertNotIn("source scripts/workshop-support.sh", steps["attach-nat-hub"])
 
-    def test_first_run_support_preview_and_deploy_do_not_inventory_names(self):
-        self.assertEqual(self.execute(5, "support-preview", [], files=self.keyfile).returncode, 0)
+    def test_first_run_support_deploy_does_not_inventory_names(self):
         self.assertEqual(self.execute(
             5, "support-deploy", support_cases()["support-deploy"],
             files=self.keyfile, input_text="CREATE\n").returncode, 0)
+
+    def test_cost_consent_lists_resources_before_any_creation(self):
+        steps = blocks(DOCS[5])
+        self.assertNotIn("support-preview", steps)
+        calls = support_cases()["support-deploy"]
+        first_mutation = next(i for i, item in enumerate(calls)
+                              if item["argv"][:3] == ["network", "public-ip", "create"])
+        result = self.execute(5, "support-deploy", calls[:first_mutation],
+                              files=self.keyfile, input_text="NO\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Hub NAT·Public IP", result.stdout)
+        self.assertIn("사설 NIC·VM·OS 디스크", result.stdout)
 
     def test_support_verifier_can_check_pip_with_nounset(self):
         steps = blocks(DOCS[5])
@@ -953,10 +963,8 @@ class StepwiseDocsTests(unittest.TestCase):
                                         calls[:first_mutation], input_text="NO\n",
                                         files=self.keyfile).returncode, 0)
 
-    def test_missing_key_stops_preview_and_deploy_without_cloud_mutation(self):
-        for name in ("support-preview", "support-deploy"):
-            with self.subTest(step=name):
-                self.assertNotEqual(self.execute(5, name, input_text="CREATE\n").returncode, 0)
+    def test_missing_key_stops_deploy_without_cloud_mutation(self):
+        self.assertNotEqual(self.execute(5, "support-deploy", input_text="CREATE\n").returncode, 0)
 
     def test_module05_effective_routes_need_no_watcher_activation(self):
         steps = blocks(DOCS[5])

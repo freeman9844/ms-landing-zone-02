@@ -290,7 +290,7 @@ az network vnet subnet create --resource-group "$RG_HUB" \
 각 블록의 출력과 5-1 및 5-4 조회 블록에서 `/20`·`/24`·`/26` 실제 할당 주소와 pool 연결,
 관리 Subnet의 `defaultOutboundAccess=false` 및 Hub NSG ID를 확인합니다.
 `AzureFirewallSubnet`에는 NSG가 없어야 합니다. 불일치하면 다음 블록을 실행하지 마세요.
-암묵적 인터넷 출구는 사용하지 않으며 모듈 04에서 NAT를 명시적으로 연결합니다.
+암묵적 인터넷 출구는 사용하지 않으며 모듈 05에서 Hub NAT를 명시적으로 연결합니다.
 
 Azure Portal에서도 **Resource groups → `rg-lzbegin-hub-<실행 ID>` → IPAM pool → Allocations**에서
 Hub VNet `/20`과 두 Subnet `/24`·`/26`의 할당을 확인할 수 있습니다.
