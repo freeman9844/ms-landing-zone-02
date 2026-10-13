@@ -794,7 +794,7 @@ printf 'SHELL_ALIVE\\n'
                             (4, "routing-commit"): ["assert_unattached_workload_subnets"],
                             (4, "inspect-avnm-routing-subnets"): ["assert_avnm_routes_ready",
                                                                    "assert_no_spoke_nat"],
-                            (5, "vm-route-gate"): ["assert_enforced_connectivity",
+                            (5, "support-deploy"): ["assert_enforced_connectivity",
                                                     "assert_avnm_routes_ready", "assert_no_spoke_nat"],
                             (5, "read-vm-ips"): ["assert_ipv4_in_subnet"] * 3,
                             (5, "inspect-security-rules"): ["assert_admin_rules_ready"],

@@ -109,6 +109,10 @@ def support_cases():
                 "--enable-vtpm", "true", "--enable-agent", "true", *TAGS, "-o", "json"]),
             az(["vm", "boot-diagnostics", "enable", "-g", rg(zone), "-n", name, "-o", "json"]),
         ])
+    cases["support-deploy"] = [
+        *enforced_connectivity_calls(), *ready_calls(), *deployed_route_calls(),
+        *no_spoke_nat_calls(), *cases["support-deploy"],
+    ]
     return cases
 
 
@@ -490,10 +494,6 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=test_network_docs.STATE):
         steps = blocks(DOCS[module])
-        if (module, name) == (5, "vm-route-gate"):
-            calls = [*enforced_connectivity_calls(), *calls]
-        if module == 5 and name in ("support-preview", "support-deploy"):
-            prefix += "check_vm_network() { :; }\n"
         if module == 5 and name in ("allow-hub-spokea", "allow-hub-spokeb",
                                      "allow-spokea-spokeb",
                                      "inspect-security-rules"):
@@ -543,12 +543,12 @@ class StepwiseDocsTests(unittest.TestCase):
     def test_module_05_uses_hub_nat_update_result_without_duplicate_inspection(self):
         steps = blocks(DOCS[5])
         self.assertNotIn("vm-preflight", steps)
-        self.assertIn("### 1-1. 현재 Firewall·AVNM 경로 재검사", DOCS[5].read_text())
+        self.assertNotIn("vm-route-gate", steps)
         self.assertIn("attach-nat-hub", steps)
-        self.assertIn("vm-route-gate", steps)
         self.assertNotIn("inspect-nat-hub", steps)
         self.assertNotIn("inspect-no-spoke-nat", steps)
-        self.assertIn("assert_no_spoke_nat", steps["vm-route-gate"])
+        self.assertNotIn("assert_avnm_routes_ready", steps["support-preview"])
+        self.assertIn("assert_no_spoke_nat", steps["support-deploy"])
         self.assertIn("assert_no_spoke_nat", blocks(DOCS[6])["firewall-deny"])
 
     def test_module_06_allowed_result_example_covers_route_http_and_fresh_log(self):
@@ -790,12 +790,16 @@ class StepwiseDocsTests(unittest.TestCase):
                 self.assertNotEqual(self.execute(4, "inspect-avnm-routing-subnets", call_list, prefix=prefix).returncode, 0)
 
     def test_support_deployment_refuses_failed_routing_gate_before_any_mutation(self):
-        for name in ("support-preview", "support-deploy"):
-            steps = blocks(DOCS[5])
-            script = ('export STATE_FILE=state.json\n' + steps["prepare-05"] +
-                      '\ncheck_vm_network() { return 1; }\n' + steps[name])
-            result = run(script, preparation_calls(5), files=self.keyfile, input_text="CREATE\n")
-            self.assertNotEqual(result.returncode, 0, result.stderr)
+        calls = support_cases()["support-deploy"]
+        first_mutation = next(i for i, call in enumerate(calls)
+                              if call["argv"][:3] == ["network", "public-ip", "create"])
+        self.assertGreater(first_mutation, 0)
+        for index in (0, first_mutation - 1):
+            with self.subTest(failure=index):
+                failed = copy.deepcopy(calls[:index + 1])
+                failed[-1].update(returncode=1, stdout="")
+                self.assertNotEqual(self.execute(
+                    5, "support-deploy", failed, files=self.keyfile, input_text="CREATE\n").returncode, 0)
 
     def test_support_post_create_gate_remains_required_without_recovery_step(self):
         steps = blocks(DOCS[5])
@@ -916,12 +920,7 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotEqual(self.execute(5, "inspect-security-rules", altered).returncode, 0)
 
     def test_vm_and_validation_gates_require_deployed_avnm_routes_and_no_spoke_nat(self):
-        for module, step, calls in (
-            (5, "vm-route-gate", [*ready_calls(), *deployed_route_calls(), *no_spoke_nat_calls()]),
-        ):
-            with self.subTest(step=step):
-                result = self.execute(module, step, calls)
-                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("assert_avnm_routes_ready", blocks(DOCS[5])["support-deploy"])
         for index, field, value in (
             (6, "id", avnm_id() + "/routingConfigurations/other"),
             (8, "appliesTo", [{"networkGroupId": routing_group_id("spokeb")}]),

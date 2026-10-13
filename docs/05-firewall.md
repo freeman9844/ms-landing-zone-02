@@ -51,39 +51,17 @@ prepare_vm_session
 세션을 다시 열면 준비 블록부터 재실행하고, VM이 이미 있다면 위에서 안내한
 `read-vm-ips` 및 필요 시 `admin-flow-check`도 다시 실행하세요.
 
-## 1. VM 배포 전 경로 확인
+## 1. VM 배포 전 네트워크 전제
 
 👁️ **설명**
 
 Spoke의 기본 outbound는 꺼져 있으며 **Spoke NAT나 Public IP는 만들지 않습니다**.
 VM Agent의 HTTPS 관리 통신을 위해 모듈 04에서 Firewall 정책과 두 Spoke의
 상대편 실제 `/20`·기본 `/0` AVNM 경로가 이미 배포·적용되어 있어야 합니다.
-Subnet의 유효 경로까지 확인한 뒤에만 VM을 배포합니다. Firewall은 NAT의 주소 변환과
-달리 FQDN 규칙·로그도 제공합니다. Hub 관리 VM에만 별도 Hub NAT를 사용합니다.
-
-### 1-1. 현재 Firewall·AVNM 경로 재검사
-
-🟢 **실행**
-
-<!-- exec:vm-route-gate -->
-```bash
-check_vm_network() {
-  assert_enforced_connectivity || return 1
-  firewall_ip=$(firewall_ready_ip) || return 1
-  assert_avnm_routes_ready "$firewall_ip" || return 1
-  assert_no_spoke_nat
-}
-check_vm_network
-```
-
-📋 **확인**
-
-AVNM 피어링 강제 구성이 두 Spoke에 적용되고 네 방향 전달 허용이 유지됩니다.
-Firewall 사설 IP가 `AzureFirewallSubnet` 범위이고, **두 Spoke 워크로드 Subnet 모두**
-해당 IP를 next hop으로 하는 상대 Spoke 실제 `/20`과 `/0` AVNM 경로가 적용됐습니다.
-Spoke Subnet에 NAT가 없고 Spoke NAT/Public IP도 없습니다.
-검사가 실패했다면 모듈 04에서 배포·전파·Subnet 유효 경로를 먼저 확인합니다.
-**VM 배포 직전**에도 같은 검사를 반복합니다. 명령 한 번의 성공을 나중 작업의 승인으로 저장하지 않습니다.
+모듈 04의 5절에서 두 Subnet의 경로를 확인했습니다. 여기서 별도 검사 단계를
+반복하지 않고, 유료 자원을 생성하는 2-3에서만 현재 네트워크 상태를 다시
+확인합니다. Firewall은 NAT의 주소 변환과 달리 FQDN 규칙·로그도 제공합니다.
+Hub 관리 VM에만 별도 Hub NAT를 사용합니다.
 
 ## 2. VM 3대와 Hub NAT만 배포
 
@@ -137,7 +115,6 @@ prepare_support_key
 preview_support() {
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
-  check_vm_network || return 1
   printf '예정: Hub NAT·Public IP, Hub/Spoke A/Spoke B의 사설 NIC·VM·OS 디스크\n'
 }
 preview_support
@@ -164,12 +141,18 @@ Spoke NAT/Public IP는 만들지 않으며 기존 VNet·Subnet을 변경하지 �
 <!-- exec:support-deploy -->
 ```bash
 deploy_support() {
-  local public_key confirm zone rg subnet subnet_id
+  local public_key confirm zone rg subnet subnet_id firewall_ip
   public_key=$(cat ".workshop-keys/$RUN_ID/id_ed25519.pub") || return 1
   [[ -n "$public_key" ]] || return 1
-  check_vm_network || return 1
+  # 유료 자원을 만들기 직전에 피어링·Firewall·양쪽 Subnet 경로와 Spoke NAT 부재를 확인합니다.
+  assert_enforced_connectivity || return 1
+  firewall_ip=$(firewall_ready_ip) || return 1
+  assert_avnm_routes_ready "$firewall_ip" || return 1
+  assert_no_spoke_nat || return 1
+  # CREATE 입력 전에는 Azure 자원을 생성하지 않습니다.
   read -rp "유료 VM 3대와 Hub NAT 1개를 배포합니다. CREATE 입력: " confirm || return 1
   [[ "$confirm" == CREATE ]] || { fail "Cancelled"; return 1; }
+  # Hub 관리 VM 전용 Public IP와 NAT를 만듭니다. Spoke의 인터넷 출구는 Firewall입니다.
   az network public-ip create -g "$RG_HUB" -n "pip-lzbegin-hub-$RUN_ID" \
     -l "$LOCATION" --sku Standard --allocation-method Static --version IPv4 \
     --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
@@ -179,6 +162,7 @@ deploy_support() {
     --idle-timeout 4 --sku Standard \
     --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
     -o json --subscription "$SUBSCRIPTION_ID" || return 1
+  # 기존 Hub 관리 Subnet과 두 Spoke 워크로드 Subnet에 각각 사설 NIC·VM을 만듭니다.
   for zone in hub spokea spokeb; do
     case "$zone" in
       hub) rg=$RG_HUB; subnet=snet-management ;;
@@ -191,6 +175,7 @@ deploy_support() {
       --ip-forwarding false \
       --tags workshop=lz-beginner environment=lab "runId=$RUN_ID" managedBy=workshop \
       -o json --subscription "$SUBSCRIPTION_ID" || return 1
+    # timeout은 CLI 대기만 끝냅니다. 시간 초과 시 VM 상태를 확인하고 재생성하지 마세요.
     timeout 2700 az vm create -g "$rg" -n "vm-lzbegin-$zone-$RUN_ID" \
       -l "$LOCATION" --nics "nic-lzbegin-$zone-$RUN_ID" \
       --image Canonical:ubuntu-24_04-lts:server:latest --size Standard_B2als_v2 \
