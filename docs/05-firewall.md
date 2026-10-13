@@ -526,6 +526,14 @@ az network manager post-commit -g "$RG_HUB" --network-manager-name "$AVNM" \
 이번 구성 ID와 리전의 SecurityAdmin 배포가 접수됩니다. 완료 응답과 실제 VM 적용은
 다릅니다. 아래 effective Security Admin 규칙과 실제 HTTP로 적용 여부를 확인합니다.
 
+생성된 규칙은 Azure Portal의 **Virtual Network Manager → 이번 AVNM →
+Security admin configurations → `sc-lzbegin-http-<실행 ID>` → Rules**에서도
+확인할 수 있습니다. 아래 예시에서는 `spokea`의 `hub-to-a`와 `spokeb`의
+`hub-to-b`·`a-to-b`가 `Always Allow`로 표시됩니다. Portal에 규칙이 보이는
+것만으로 VM 적용이 완료됐다는 뜻은 아닙니다.
+
+![Azure Portal Security Admin 구성의 Rules 화면에 표시된 Spoke A/B 컬렉션과 세 Always Allow 규칙](images/05-security-admin-rules-portal.png)
+
 ### 5-7. 적용된 규칙과 새 HTTP 연결
 
 👁️ **설명**
