@@ -339,7 +339,7 @@ az network firewall policy rule-collection-group collection add-filter-collectio
 📋 **확인**
 
 `lab-http`가 Allow·200·TCP/8080이며 A→B 방향입니다. 모듈 06에서
-**이 collection만** Deny/Allow로 전환합니다.
+새 HTTP 요청과 Firewall Allow 로그로 실제 적용을 확인합니다.
 
 ### 2-10. 외부 출구 확인용 FQDN
 

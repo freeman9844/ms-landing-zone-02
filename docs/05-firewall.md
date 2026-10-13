@@ -1,6 +1,6 @@
 # 05. VM과 AVNM 중앙 보안
 
-> 목표 시간 25–35분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙의 HTTP 허용을 확인합니다. 차단·복구는 모듈 06에서 Firewall Policy로 한 번만 실습합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
+> 목표 시간 25–35분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙의 HTTP 허용을 확인합니다. 모듈 06에서는 경로·HTTP·Firewall Allow 로그를 검증합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
 
 ## 공통 준비
 
@@ -647,7 +647,7 @@ VirtualAppliance IP를 확인하세요.
 - VM보다 먼저 Firewall·AVNM 경로를 확인했고 Spoke NAT/Public IP를 만들지 않았습니다.
 - Hub NAT만 연결하고 양쪽 Spoke NIC의 실제 상대 Spoke `/20`·`/0` 경로를 확인했습니다.
 - 좁은 세 AlwaysAllow의 effective 규칙과 Hub→A/B·A→B HTTP 성공을 확인했습니다.
-- Firewall Policy 차단·복구 실습은 모듈 06에서 한 번만 수행합니다.
+- 모듈 06에서 경로·HTTP·Firewall Allow 로그와 인터넷 출구를 확인합니다.
 
 ## 다음 단계
 

@@ -25,7 +25,7 @@ class DocsTests(unittest.TestCase):
         text = (ROOT / "docs/maintainer-validation.md").read_text()
         section = text.split("## 단일 실행 리허설과 새 구조의 검증 경계", 1)[1].split("\n## ", 1)[0]
         for term in ("승인", "단일 실행", "pool", "Subnet", "03–06",
-                     "Deny", "로그", "07", "Hub RG", "실환경 미검증"):
+                     "Allow", "로그", "07", "Hub RG", "실환경 미검증"):
             self.assertIn(term, section)
 
     def test_published_rehearsal_status_distinguishes_ipam_from_historical_workshop(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 모듈 06의 Firewall allowed/denied/restored 상태를 AVNM 경로·보안·HTTP·로그·출구로 검증합니다.
+# 모듈 06은 allowed 검증을 실행합니다. denied/restored는 이전 실습의 보조 진단 모드입니다.
 # 정책·경로는 변경하지 않습니다. 현재 상태를 실제 요청과 조회로 확인합니다.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/verify-common.sh"

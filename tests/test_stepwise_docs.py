@@ -243,18 +243,6 @@ def routing_cases():
                 {"id": collection + "/rules/" + rule,
                  "destination": {"type": "AddressPrefix", "destinationAddress": prefix},
                  "nextHop": {"nextHopType": "VirtualAppliance", "nextHopAddress": FW_IP}})]
-    for name, action in (("firewall-deny", "Deny"), ("firewall-restore", "Allow")):
-        prerequisites = [*effective_route_calls(), *no_spoke_nat_calls()] if action == "Deny" else []
-        policy = json.loads(ready_calls()[-1]["stdout"])
-        next(collection for collection in policy["ruleCollections"]
-             if collection["name"] == "lab-http")["action"]["type"] = (
-                 "Allow" if action == "Deny" else "Deny")
-        cases[name] = [*prerequisites, az(["network", "firewall", "policy", "rule-collection-group", "show", "-g", rg("hub"),
-                           "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop", "-o", "json"],
-                          policy),
-                       az(["network", "firewall", "policy", "rule-collection-group", "update", "-g", rg("hub"),
-                           "--policy-name", "fwpol-lzbegin-demo123", "-n", "workshop",
-                           "--set", f"ruleCollections[1].action.type={action}", "-o", "json"])]
     return cases
 
 
@@ -510,7 +498,7 @@ class StepwiseDocsTests(unittest.TestCase):
             with self.subTest(step=name):
                 self.assertNotIn("&&", script)
 
-    def test_only_module_06_has_a_deny_restore_exercise(self):
+    def test_module_06_has_only_the_allowed_validation(self):
         steps05 = blocks(DOCS[5])
         for name in ("deny-hub", "security-deploy-deny", "verify-admin-deny",
                      "verify-admin-http-denied", "security-undeploy-for-restore",
@@ -519,26 +507,14 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertNotIn(name, steps05)
         self.assertIn("inspect-security-rules", steps05)
         self.assertIn("verify-admin-http-baseline", steps05)
-        steps06 = blocks(DOCS[6])
-        for name in ("firewall-deny", "verify-denied", "firewall-restore", "verify-restored"):
-            self.assertIn(name, steps06)
+        self.assertEqual(set(blocks(DOCS[6])), {"prepare-06", "verify-allowed"})
+        self.assertNotIn("## 2.", DOCS[6].read_text())
 
     def test_module_06_uses_one_comprehensive_baseline_instead_of_separate_route_checks(self):
         steps = blocks(DOCS[6])
         self.assertNotIn("validate-avnm-subnets", steps)
         self.assertNotIn("validate-effective-nic-routes", steps)
         self.assertIn("verify-allowed", steps)
-        self.assertIn("validate_effective_nic_routes", steps["firewall-deny"])
-        self.assertIn("assert_no_spoke_nat", steps["firewall-deny"])
-
-    def test_firewall_deny_validates_routes_in_a_fresh_prepared_shell(self):
-        calls = routing_cases()["firewall-deny"]
-        self.assertEqual(self.execute(6, "firewall-deny", calls).returncode, 0)
-        invalid = copy.deepcopy(calls[:len(effective_route_calls())])
-        routes = json.loads(invalid[-1]["stdout"])
-        routes["value"][0]["nextHopIpAddress"] = ["172.20.1.5"]
-        invalid[-1]["stdout"] = json.dumps(routes)
-        self.assertNotEqual(self.execute(6, "firewall-deny", invalid).returncode, 0)
 
     def test_module_05_uses_hub_nat_update_result_without_duplicate_inspection(self):
         steps = blocks(DOCS[5])
@@ -549,11 +525,10 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotIn("inspect-no-spoke-nat", steps)
         self.assertNotIn("assert_avnm_routes_ready", steps["support-preview"])
         self.assertIn("assert_no_spoke_nat", steps["support-deploy"])
-        self.assertIn("assert_no_spoke_nat", blocks(DOCS[6])["firewall-deny"])
 
     def test_module_06_allowed_result_example_covers_route_http_and_fresh_log(self):
         doc = DOCS[6].read_text()
-        example = doc.split("<!-- exec:verify-allowed -->", 1)[1].split("## 4.", 1)[0]
+        example = doc.split("<!-- exec:verify-allowed -->", 1)[1].split("## Portal 확인", 1)[0]
         for evidence in ("Waiting for current flow logs", "VirtualAppliance",
                          "VNetPeering", "effective AVNM rule", "PASS: HTTP spokeb",
                          '"Action": "Allow"', '"SourceIp": "<Spoke A 사설 IP>"',
@@ -638,8 +613,7 @@ class StepwiseDocsTests(unittest.TestCase):
                     or k.startswith("routing-collection-") or k.startswith("routing-rule-")
                     }
                  | enforcement_cases()),
-                (5, support_cases() | security_cases()),
-                (6, {k: v for k, v in routing_cases().items() if k.startswith("firewall-")}))
+                (5, support_cases() | security_cases()))
 
     def test_each_action_runs_after_only_preparation_with_explicit_targets(self):
         for module, cases in self.cases():
@@ -925,39 +899,9 @@ class StepwiseDocsTests(unittest.TestCase):
         altered[-1]["stdout"] = json.dumps(rules)
         self.assertNotEqual(self.execute(5, "inspect-security-rules", altered).returncode, 0)
 
-    def test_vm_and_validation_gates_require_deployed_avnm_routes_and_no_spoke_nat(self):
+    def test_vm_deploy_gate_requires_deployed_avnm_routes_and_no_spoke_nat(self):
         self.assertIn("assert_avnm_routes_ready", blocks(DOCS[5])["support-deploy"])
-        for index, field, value in (
-            (6, "id", avnm_id() + "/routingConfigurations/other"),
-            (8, "appliesTo", [{"networkGroupId": routing_group_id("spokeb")}]),
-            (9, "destination", {"type": "AddressPrefix", "destinationAddress": "172.20.16.0/20"}),
-            (9, "nextHop", {"nextHopType": "VirtualAppliance", "nextHopAddress": "172.20.1.5"}),
-            (11, "id", netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")),
-            (12, "id", netid("spokeb", "routeTables", "avnm-managed-spokeb")),
-            (12, "routes", [{"provisioningState": "Succeeded", "addressPrefix": "0.0.0.0/0",
-                             "nextHopType": "VirtualAppliance", "nextHopIpAddress": FW_IP}]),
-        ):
-            with self.subTest(index=index, field=field):
-                calls = [*ready_calls(), *deployed_route_calls()]
-                altered = copy.deepcopy(calls[:index + 1])
-                data = json.loads(altered[-1]["stdout"])
-                data[field] = value
-                altered[-1]["stdout"] = json.dumps(data)
-                self.assertNotEqual(self.execute(6, "firewall-deny", altered).returncode, 0)
-        calls = effective_route_calls()
-        for index in (-2, -1):
-            altered = copy.deepcopy(calls if index == -1 else calls[:-1])
-            route = json.loads(altered[-1]["stdout"])
-            route["value"][0]["nextHopIpAddress"] = ["172.20.1.5"]
-            altered[-1]["stdout"] = json.dumps(route)
-            self.assertNotEqual(self.execute(6, "firewall-deny", altered).returncode, 0)
-        for index, payload in ((1, {"natGateway": {"id": "foreign"}}),
-                               (2, [{"name": "unexpected-nat"}]), (3, [{"name": "unexpected-pip"}])):
-            calls = no_spoke_nat_calls()
-            altered = copy.deepcopy(calls[:2] if index == 1 else calls[:4])
-            altered[index]["stdout"] = json.dumps(payload)
-            self.assertNotEqual(self.execute(6, "firewall-deny",
-                                            [*effective_route_calls(), *altered]).returncode, 0)
+        self.assertIn("assert_no_spoke_nat", blocks(DOCS[5])["support-deploy"])
 
     def test_each_action_stops_after_any_failed_dependency_lookup(self):
         for module, cases in self.cases():
@@ -1036,8 +980,6 @@ class StepwiseDocsTests(unittest.TestCase):
             (5, "service-spokea", "scripts/run-vm.sh", ["spokea", "scripts/guest-server.sh"]),
             (5, "service-spokeb", "scripts/run-vm.sh", ["spokeb", "scripts/guest-server.sh"]),
             (6, "verify-allowed", "scripts/verify-extension.sh", ["allowed"]),
-            (6, "verify-denied", "scripts/verify-extension.sh", ["denied"]),
-            (6, "verify-restored", "scripts/verify-extension.sh", ["restored"]),
             (7, "cleanup", "scripts/cleanup.sh", []),
         ]
         for module, name, script, args in cases:
@@ -1046,14 +988,6 @@ class StepwiseDocsTests(unittest.TestCase):
                     result = self.execute(module, name, prefix=verifier(script, args, code))
                     self.assertEqual(result.returncode, code, result.stderr)
                     self.assertEqual(result.stdout.count("VERIFY:"), 1)
-
-    def test_http_rule_changes_reject_ambiguous_collections(self):
-        for name in ("firewall-deny", "firewall-restore"):
-            for collections in ([], [{"name": "lab-http"}, {"name": "lab-http"}], None,
-                                {"not-an-array": {"name": "lab-http"}}):
-                calls = routing_cases()[name][:-1]
-                calls[-1]["stdout"] = json.dumps({"ruleCollections": collections})
-                self.assertNotEqual(self.execute(6, name, calls).returncode, 0)
 
     def test_diagnostics_reject_unsupported_categories_and_wrong_saved_workspace(self):
         for name in ("firewall-diagnostics",):
