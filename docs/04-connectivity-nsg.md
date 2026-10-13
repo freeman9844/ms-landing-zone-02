@@ -874,6 +874,13 @@ access에 Spoke VM agent의 인터넷 접속을 맡기지 않습니다.
 **Virtual network → Subnets → snet-workload → Route table** 연결을
 확인하세요. 스크린샷의 이전 VM/NAT 구성은 새 실습의 증거가 아닙니다.
 
+아래는 Azure Portal의 **Virtual Network Manager → Network groups → Spoke A Routing Group →
+Routing** 화면 예시입니다. Group 멤버와 워크로드 Subnet을 찾는 데 참고하세요.
+화면의 빈 경로 표시는 Routing 적용 완료를 증명하지 않으므로, 실제 배포 결과와
+두 Subnet의 경로는 위 5절 검사로 확인합니다.
+
+![Azure Portal Spoke A Routing Group의 Routing 탭에 표시된 워크로드 Subnet 예시](images/04-spokea-routing-group-portal.png)
+
 | 증상 | 조치 |
 |---|---|
 | Firewall IP 없음/`Updating` | 생성·IP 구성의 실제 상태와 Activity Log 확인; 사설 IP 확보 전 Routing 금지 |

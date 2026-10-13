@@ -158,9 +158,9 @@ README의 목표 시간 합계는 **175–210분**이며 Azure 배포·AVNM 전�
 
 모듈 04에서는 로그 Provider 등록과 CLI 확장 설치 명령의 결과를 확인합니다.
 별도의 Firewall 사전 점검은 수행하지 않습니다. 모듈 01은 Network·Compute
-Provider를 등록하고, 모듈 05의 `preflight.sh "$STATE_FILE"`이
-실제 VM 수요에 따른 SKU·vCPU quota를 확인합니다.
-성공해도 용량 예약은 아닙니다.
+Provider를 등록하고, 모듈 05는 VM 할당량 사전 점검 없이 진행합니다.
+운영자가 필요할 때 `preflight.sh "$STATE_FILE"`로 SKU·vCPU quota를
+별도 진단할 수 있지만, 성공해도 용량 예약은 아닙니다.
 모듈 05의 Security Admin/HTTP·NIC 경로는 교재의 독립 실행 블록으로 확인합니다.
 `verify-core.sh`의 `admin-denied`·`restored` 모드는 이전 실습의 진단용이며 현재
 진행 순서에서는 사용하지 않습니다. `verify-extension.sh "$STATE_FILE"
@@ -217,7 +217,7 @@ allowed|denied|restored`는 모듈 06의 Firewall 정책·전용 로그·egress 
 | `workshop-foundation.sh` | 모듈 02 부분 생성 복구 시 기존 IPAM VNet·Subnet 할당과 설정을 읽기 전용으로 확인 |
 | `workshop-support.sh` | 모듈 05 실제 Hub NAT·NIC·VM 설정 확인; 불완전한 생성은 재실행하지 않고 모듈 07에서 정리 |
 | `workshop-safety.sh` | 전체 ID 대소문자 비교, generated Peering의 remote-ID 조회, 모듈 04의 직접 `az` 변경 전 Peering·Routing 대상 검사와 생성 응답 검증, `assert_enforced_connectivity`의 구성·배포·Spoke·네 피어링 검사, Firewall/진단 준비, `assert_avnm_routes_ready`의 실제 Subnet 경로, `assert_no_spoke_nat`, Security Admin Group·규칙의 읽기 전용 검사 |
-| `preflight.sh` | 모듈 05 VM SKU/quota 및 필수 Provider 사전 점검 |
+| `preflight.sh` | 운영자 선택 진단용 VM SKU/quota 및 필수 Provider 점검(모듈 05 실행 단계에서는 사용하지 않음) |
 | `run-vm.sh` | Bash 실행 지정, stdout/stderr 분리, 게스트 종료 마커 검증 |
 | `guest-server.sh` | 비특권 HTTP 서비스 설치와 VM 내부 준비 상태 확인 |
 | `verify-common.sh`, `assert-route.py` | IP·effective Security Admin 규칙·HTTP 증거와 최장 접두사 NIC 유효 경로 판정 |

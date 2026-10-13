@@ -542,6 +542,8 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def test_module_05_uses_hub_nat_update_result_without_duplicate_inspection(self):
         steps = blocks(DOCS[5])
+        self.assertNotIn("vm-preflight", steps)
+        self.assertIn("### 1-1. 현재 Firewall·AVNM 경로 재검사", DOCS[5].read_text())
         self.assertIn("attach-nat-hub", steps)
         self.assertIn("vm-route-gate", steps)
         self.assertNotIn("inspect-nat-hub", steps)
@@ -1025,7 +1027,6 @@ class StepwiseDocsTests(unittest.TestCase):
         cases = [
             (5, "service-spokea", "scripts/run-vm.sh", ["spokea", "scripts/guest-server.sh"]),
             (5, "service-spokeb", "scripts/run-vm.sh", ["spokeb", "scripts/guest-server.sh"]),
-            (5, "vm-preflight", "scripts/preflight.sh", []),
             (6, "verify-allowed", "scripts/verify-extension.sh", ["allowed"]),
             (6, "verify-denied", "scripts/verify-extension.sh", ["denied"]),
             (6, "verify-restored", "scripts/verify-extension.sh", ["restored"]),

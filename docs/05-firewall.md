@@ -51,7 +51,7 @@ prepare_vm_session
 세션을 다시 열면 준비 블록부터 재실행하고, VM이 이미 있다면 위에서 안내한
 `read-vm-ips` 및 필요 시 `admin-flow-check`도 다시 실행하세요.
 
-## 1. VM 배포 전 경로·용량 확인
+## 1. VM 배포 전 경로 확인
 
 👁️ **설명**
 
@@ -61,22 +61,7 @@ VM Agent의 HTTPS 관리 통신을 위해 모듈 04에서 Firewall 정책과 두
 Subnet의 유효 경로까지 확인한 뒤에만 VM을 배포합니다. Firewall은 NAT의 주소 변환과
 달리 FQDN 규칙·로그도 제공합니다. Hub 관리 VM에만 별도 Hub NAT를 사용합니다.
 
-### 1-1. VM 할당량 사전 점검
-
-🟢 **실행**
-
-<!-- exec:vm-preflight -->
-```bash
-bash scripts/preflight.sh "$STATE_FILE"
-```
-
-📋 **확인**
-
-`PASS: read-only preflight`. 옵션 없이 실행해 새 VM 3대의
-`Standard_B2als_v2` 계열 및 지역 전체
-vCPU 여유(총 6개)를 확인합니다. 기존 VM이 있으면 실행 상태와 크기를 확인합니다.
-
-### 1-2. 현재 Firewall·AVNM 경로 재검사
+### 1-1. 현재 Firewall·AVNM 경로 재검사
 
 🟢 **실행**
 
