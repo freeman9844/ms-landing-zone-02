@@ -311,13 +311,15 @@ Spoke A에는 `$SPOKEB_VNET_CIDR`, Spoke B에는 `$SPOKEA_VNET_CIDR`, 양쪽에�
 `0.0.0.0/0`이 `Active`·`VirtualAppliance`·동일 Firewall 사설 IP입니다.
 다른 next hop이나 비활성 경로를 통과로 해석하지 않습니다.
 
-## 4. 응답 서비스와 VM 사설 IP
+## 4. Spoke VM에 HTTP 테스트 서버 설치와 사설 IP 조회
 
 👁️ **설명**
 
-Spoke VM에서만 Python HTTP 8080 서비스를 실행합니다. Cloud Shell이 VM 사설 IP에 SSH하는
-방식이 아닙니다. `run-vm.sh`가 신뢰하는 `guest-server.sh`를 VM Agent로 전달하고
-게스트의 종료 코드를 검사합니다. NSG·경로·Firewall은 이 스크립트로 변경하지 않습니다.
+2-3에서 생성한 Ubuntu VM에는 HTTP 서버가 없습니다. 5-7의 VM 간 HTTP 통신을
+시험할 수 있도록 Spoke A/B VM에 Python HTTP 8080 서비스를 설치·시작합니다.
+Cloud Shell에서 사설 IP로 SSH하는 대신 `run-vm.sh`가 `guest-server.sh`를
+VM Agent의 Run Command로 전달합니다. 각 VM 내부의 `localhost:8080` 응답과
+게스트 종료 코드를 확인하며, NSG·경로·Firewall은 변경하지 않습니다.
 Run Command가 실패하면 Firewall의 관리용 Azure HTTPS 규칙과 두 NIC의 `/0`을 먼저 확인하세요.
 
 🟢 **실행**
@@ -329,7 +331,8 @@ bash scripts/run-vm.sh "$STATE_FILE" spokea scripts/guest-server.sh
 
 📋 **확인**
 
-`PASS: local service spokea`. A 내부 서비스 성공이지 Hub→A 통신 성공은 아닙니다.
+`PASS: local service spokea`는 Spoke A의 HTTP 서버가 설치·실행 중이고,
+VM 내부에서 `spokea`를 응답한다는 뜻입니다.
 
 🟢 **실행**
 
@@ -340,7 +343,8 @@ bash scripts/run-vm.sh "$STATE_FILE" spokeb scripts/guest-server.sh
 
 📋 **확인**
 
-`PASS: local service spokeb`. 각 응답은 비민감 문자열이며 운영 HTTP 보안을 대신하지 않습니다.
+`PASS: local service spokeb`는 Spoke B의 HTTP 서버가 설치·실행 중이고,
+VM 내부에서 `spokeb`를 응답한다는 뜻입니다. 다른 VM에서의 접속은 5-7에서 시험합니다.
 
 🟢 **실행**
 
@@ -362,6 +366,12 @@ read_vm_ips
 ```
 
 📋 **확인**
+
+실제 실습의 사설 IP 조회 결과 예시입니다.
+
+```text
+Hub=172.20.0.4 A=172.20.16.4 B=172.20.32.4
+```
 
 세 NIC의 **현재** 사설 IP를 확인했습니다. `.4`와 같은 고정 주소를 가정하지 않습니다.
 VM NIC를 재생성해 IP가 바뀌었다면 이전 규칙을 그대로 배포하지 말고 새 실행으로 시작하세요.
