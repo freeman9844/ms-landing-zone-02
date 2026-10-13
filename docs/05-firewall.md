@@ -211,25 +211,44 @@ verify_support_all
 
 📋 **확인**
 
+실제 실습에서 확인한 성공 출력 예시입니다. Hub의 PIP·NAT와 세 VM의 NIC·VM,
+**총 8개 항목 모두** `PASS`여야 합니다.
+
+```text
+PASS: pip/hub exact configuration
+PASS: nat/hub exact configuration
+PASS: nic/hub exact configuration
+PASS: vm/hub exact configuration
+PASS: nic/spokea exact configuration
+PASS: vm/spokea exact configuration
+PASS: nic/spokeb exact configuration
+PASS: vm/spokeb exact configuration
+```
+
 Hub PIP·NAT의 실제 구성과 세 NIC의 정확한 Subnet·IP forwarding 비활성·Public IP 부재,
 세 VM의 NIC·이미지·SKU·SSH 전용/암호 인증 비활성·Trusted Launch/Secure Boot/vTPM·
 Agent·삭제 옵션·관리형 부팅 진단까지 모두 `PASS`여야 합니다. 조회 실패나 하나라도
 불일치하면 2-4로 진행하지 말고 모듈 07에서 이번 실행만 정리하세요.
 재접속 후 2-4를 진행할 때도 이 블록을 재실행합니다.
 
+생성된 자원은 Azure Portal의 **Resource groups → 이번 실행의 Spoke A RG → Overview →
+Resources**에서도 확인할 수 있습니다. 아래 예시의 NIC·VM·OS 디스크는 2-3에서
+생성됐고, NSG·VNet은 앞 모듈에서 만든 자원입니다. Portal 목록만으로 구성의
+정확성을 판단하지 말고 위 `verify_support_all` 결과를 확인하세요.
+
+![Azure Portal의 Spoke A 리소스 그룹에 표시된 NIC, NSG, VM, OS 디스크 및 VNet](images/05-spokea-vm-resources-portal.png)
+
 ### 2-4. Hub 관리 Subnet에 NAT 연결
+
+2-3의 **배포 결과 확인에서 8개 항목 모두 PASS**인 경우에만 진행합니다.
+재접속했다면 해당 읽기 전용 블록을 다시 실행하세요.
 
 🟢 **실행**
 
 <!-- exec:attach-nat-hub -->
 ```bash
-attach_verified_nat() {
-  source scripts/workshop-support.sh || return 1
-  verify_support_all || return 1
-  az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
-    --nat-gateway "nat-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
-}
-attach_verified_nat
+az network vnet subnet update -g "$RG_HUB" --vnet-name "vnet-lzbegin-hub-$RUN_ID" -n snet-management \
+  --nat-gateway "nat-lzbegin-hub-$RUN_ID" -o json --subscription "$SUBSCRIPTION_ID"
 ```
 
 📋 **확인**

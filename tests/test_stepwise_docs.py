@@ -85,7 +85,7 @@ def support_cases():
                 "--public-ip-addresses", "pip-lzbegin-hub-demo123", "--idle-timeout", "4",
                 "--sku", "Standard", *TAGS, "-o", "json"]),
         ],
-        "attach-nat-hub": support_verification_calls() + [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
+        "attach-nat-hub": [az(["network", "vnet", "subnet", "update", *subnet_args("hub"),
                               "--nat-gateway", "nat-lzbegin-hub-demo123", "-o", "json"])],
         "read-vm-ips": [nic("hub", "172.20.0.4"), nic("spokea", "172.20.16.4"), nic("spokeb", "172.20.32.4")],
     }
@@ -809,6 +809,8 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertIn("verify_support_all", steps["verify-support"])
         self.assertLess(DOCS[5].read_text().index("<!-- exec:verify-support -->"),
                         DOCS[5].read_text().index("<!-- exec:attach-nat-hub -->"))
+        self.assertNotIn("verify_support_all", steps["attach-nat-hub"])
+        self.assertNotIn("source scripts/workshop-support.sh", steps["attach-nat-hub"])
 
     def test_first_run_support_preview_and_deploy_do_not_inventory_names(self):
         self.assertEqual(self.execute(5, "support-preview", [], files=self.keyfile).returncode, 0)
@@ -856,13 +858,6 @@ class StepwiseDocsTests(unittest.TestCase):
                 calls = [az(["resource", "list", "--resource-group", rg("hub"), "-o", "json"], inventory)]
                 self.assertNotEqual(run(script, preparation_calls(5) + calls,
                                         files=self.keyfile).returncode, 0)
-
-    def test_attach_nat_is_blocked_by_failed_post_creation_verification(self):
-        calls = support_verification_calls()
-        calls[3]["stdout"] = json.dumps(dict(support_resource("nat", "hub"),
-                                                idleTimeoutInMinutes=5))
-        result = self.execute(5, "attach-nat-hub", calls[:4], files=self.keyfile)
-        self.assertNotEqual(result.returncode, 0)
 
     def test_participant_modules_do_not_run_arm_deployments(self):
         for module, path in DOCS.items():
