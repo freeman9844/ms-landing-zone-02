@@ -1015,17 +1015,12 @@ key.with_suffix('.pub').write_text('fixture-public-key')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotEqual(self.execute(5, "support-key", files=self.keyfile).returncode, 0)
 
-    def test_cleanup_recovery_actions_are_separate_and_do_not_delete_anything(self):
-        originals = ('ORIGINAL_RUN_ID=demo123\nORIGINAL_SUBSCRIPTION=' + SUB +
-                     '\nORIGINAL_LOCATION=koreacentral\nORIGINAL_SCHEMA=4\n')
-        self.assertEqual(self.execute(7, "recovery-input", input_text=f"demo123\n{SUB}\nkoreacentral\n4\n").returncode, 0)
-        self.assertEqual(self.execute(7, "recovery-subscription",
-                                     [call(["account", "set", "--subscription", SUB])], prefix=originals).returncode, 0)
-        self.assertEqual(self.execute(7, "recovery-state", prefix=originals).returncode, 0)
-        result = self.execute(7, "recovery-state", prefix=originals,
-                              files={".workshop-state/demo123.json": "do-not-overwrite"})
+    def test_cleanup_requires_existing_state_without_a_recreation_step(self):
+        steps = blocks(DOCS[7])
+        self.assertEqual(set(steps), {"prepare-07", "cleanup"})
+        result = run('STATE_FILE=missing.json\n' + steps["prepare-07"])
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("State exists", result.stderr)
+        self.assertIn("Invalid or unreadable state file", result.stderr)
 
     def test_prepared_session_targets_state_subscription_even_after_active_subscription_switch(self):
         other = "99999999-9999-9999-9999-999999999999"

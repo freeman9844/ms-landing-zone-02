@@ -1,6 +1,7 @@
 .workshop-state/
 .workshop-keys/
 evidence/
+docs/maintainer-validation.md
 infra/*.json
 infra/modules/*.json
 __pycache__/

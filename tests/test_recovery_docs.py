@@ -18,8 +18,7 @@ class RecoveryDocsTests(unittest.TestCase):
                      files={"state.json": json.dumps(legacy)})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("workshop-pre-ipam-8d4781f", result.stderr)
-        for name in ("README.md", "docs/07-cleanup-production.md",
-                     "docs/maintainer-validation.md"):
+        for name in ("README.md", "docs/07-cleanup-production.md"):
             text = (ROOT / name).read_text()
             self.assertIn("workshop-pre-ipam-8d4781f", text, name)
             self.assertIn("8d4781f", text, name)

@@ -21,23 +21,10 @@ class DocsTests(unittest.TestCase):
             self.assertIn("IPAM", text, name)
             self.assertIn("/20", text, name)
 
-    def test_operator_rehearsal_requires_single_run_and_cleans_owned_pool(self):
-        text = (ROOT / "docs/maintainer-validation.md").read_text()
-        section = text.split("## 단일 실행 리허설과 새 구조의 검증 경계", 1)[1].split("\n## ", 1)[0]
-        for term in ("승인", "단일 실행", "pool", "Subnet", "03–06",
-                     "Allow", "로그", "07", "Hub RG", "실환경 미검증"):
-            self.assertIn(term, section)
-
-    def test_published_rehearsal_status_distinguishes_ipam_from_historical_workshop(self):
+    def test_published_readme_does_not_claim_a_legacy_rehearsal_is_current(self):
         readme = (ROOT / "README.md").read_text()
-        maintainer = (ROOT / "docs/maintainer-validation.md").read_text()
         self.assertNotIn("진행 전 알아둘 한계", readme)
-        self.assertIn("2026-10-01", maintainer)
-        self.assertIn("2026-09-27", maintainer)
-        self.assertIn("edb7827a799c", maintainer)
-        self.assertIn("이전 아키텍처의 실제 Azure 리허설 기록", maintainer)
-        self.assertIn("실행별 pool 방식", maintainer)
-        self.assertIn("미검증", maintainer)
+        self.assertIn("한 구독에서 동시에 한 실행만", readme)
 
     def test_module_navigation_reaches_firewall_routing_and_cleanup_in_order(self):
         readme = (ROOT / "README.md").read_text()
@@ -52,7 +39,7 @@ class DocsTests(unittest.TestCase):
                 self.assertIn(f"]({MODULES[index - 1]})", navigation)
 
     def test_entry_and_all_modules_exist(self):
-        for relative in ["README.md", "docs/maintainer-validation.md"] + ["docs/" + p for p in MODULES]:
+        for relative in ["README.md"] + ["docs/" + p for p in MODULES]:
             self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_shell_examples_parse(self):
@@ -65,7 +52,6 @@ class DocsTests(unittest.TestCase):
 
     def test_local_navigation_resolves_files_and_anchors(self):
         paths = [ROOT / "README.md", *(ROOT / "docs" / name for name in MODULES)]
-        paths.append(ROOT / "docs/maintainer-validation.md")
         for path in paths:
             self.assertTrue(path.is_file(), path)
             text = re.sub(r"```.*?```", "", path.read_text(), flags=re.S)
@@ -158,9 +144,9 @@ class DocsTests(unittest.TestCase):
         self.assertLess(install.start(), text.index('new_run "$SELECTED_SUBSCRIPTION" koreacentral'))
 
     def test_guidance_identifies_run_owned_pool_and_single_run_scope(self):
-        text = (ROOT / "docs/maintainer-validation.md").read_text()
+        text = (ROOT / "docs/01-prerequisites.md").read_text()
         for phrase in ("schema 4", "ipam-lzbegin-<실행 ID>", "172.20.0.0/14",
-                       "Spoke RG를 먼저", "온프레미스", "한 구독에서 동시에 하나의 실행"):
+                       "Spoke RG를 먼저", "온프레미스"):
             self.assertIn(phrase, text)
         readme = (ROOT / "README.md").read_text()
         self.assertNotIn("운영자가 같은 구독 Korea Central에", readme)
