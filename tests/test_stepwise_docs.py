@@ -258,23 +258,8 @@ def route_configuration_calls():
     return routing_cases()["routing-config-create"]
 
 
-def routing_group_calls():
-    calls = []
-    for zone in ("spokea", "spokeb"):
-        group_id = routing_group_id(zone)
-        calls += [
-            az(["network", "manager", "group", "show", "--ids", group_id, "-o", "json"],
-               {"id": group_id, "provisioningState": "Succeeded"}),
-            az(["network", "manager", "group", "static-member", "list",
-                "--network-group", f"ng-lzbegin-route-{zone}-demo123",
-                "--network-manager", "avnm-lzbegin-demo123", "--resource-group", rg("hub"),
-                "-o", "json"], [{"resourceId": netid(zone, "virtualNetworks", vnet(zone)),
-                                "provisioningState": "Succeeded"}])]
-    return calls
-
-
 def routing_commit_calls():
-    calls = routing_group_calls()
+    calls = []
     for zone in ("spokea", "spokeb"):
         calls.extend([
             group(zone),
@@ -766,10 +751,10 @@ class StepwiseDocsTests(unittest.TestCase):
         result = self.execute(4, "routing-commit", calls)
         self.assertEqual(result.returncode, 0, result.stderr)
         for index, change in (
-            (5, {"routeTable": {"id": "foreign"}}),
-            (5, {"natGateway": {"id": "foreign"}}),
-            (5, {"id": netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")}),
-            (7, {"routeTable": {"id": "foreign"}}),
+            (1, {"routeTable": {"id": "foreign"}}),
+            (1, {"natGateway": {"id": "foreign"}}),
+            (1, {"id": netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")}),
+            (3, {"routeTable": {"id": "foreign"}}),
         ):
             with self.subTest(index=index, change=change):
                 invalid = copy.deepcopy(calls[:index + 1])
@@ -777,16 +762,6 @@ class StepwiseDocsTests(unittest.TestCase):
                 data.update(change)
                 invalid[-1]["stdout"] = json.dumps(data)
                 self.assertNotEqual(self.execute(4, "routing-commit", invalid).returncode, 0)
-
-    def test_routing_commit_rejects_wrong_group_member_before_deployment(self):
-        calls = routing_commit_calls()
-        for index in (1, 3):
-            invalid = copy.deepcopy(calls)
-            invalid[index]["stdout"] = json.dumps([{
-                "resourceId": netid("hub", "virtualNetworks", vnet("hub")),
-                "provisioningState": "Succeeded",
-            }])
-            self.assertNotEqual(self.execute(4, "routing-commit", invalid[:index + 1]).returncode, 0)
 
     def test_routing_deployment_requires_latest_successful_exact_configuration(self):
         valid = routing_cases()["inspect-avnm-routing-subnets"]

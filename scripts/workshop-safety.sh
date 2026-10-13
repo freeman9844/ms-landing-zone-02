@@ -57,28 +57,6 @@ assert_peering_forwarded() {
   printf 'PASS: %s/%s -> %s\n' "$local_rg" "$local_vnet" "$remote_vnet"
 }
 
-assert_routing_groups_ready() {
-  local groups members zone group expected
-  [[ "${ROUTE_GROUP_A_ID,,}" != "${ROUTE_GROUP_B_ID,,}" ]] ||
-    { fail "Routing target groups must differ."; return 1; }
-  for zone in spokea spokeb; do
-    if [[ "$zone" == spokea ]]; then group="$ROUTE_GROUP_A_ID"; expected="$RG_SPOKEA"
-    else group="$ROUTE_GROUP_B_ID"; expected="$RG_SPOKEB"; fi
-    groups=$(az network manager group show --ids "$group" \
-      -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "$group" '(.id | ascii_downcase) == ($id | ascii_downcase) and
-      .provisioningState == "Succeeded"' <<< "$groups" >/dev/null ||
-      { fail "Routing group not ready: $zone"; return 1; }
-    members=$(az network manager group static-member list \
-      --network-group "ng-lzbegin-route-$zone-$RUN_ID" --network-manager "$AVNM" \
-      --resource-group "$RG_HUB" -o json --subscription "$SUBSCRIPTION_ID") || return 1
-    jq -e --arg id "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$expected/providers/Microsoft.Network/virtualNetworks/vnet-lzbegin-$zone-$RUN_ID" '
-      type == "array" and length == 1 and .[0].provisioningState == "Succeeded" and
-      (.[0].resourceId | ascii_downcase) == ($id | ascii_downcase)
-    ' <<< "$members" >/dev/null || { fail "Unexpected routing group member: $zone"; return 1; }
-  done
-}
-
 assert_routing_creation_result() {
   jq -e --arg id "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" '
     (.id | ascii_downcase) == ($id | ascii_downcase)

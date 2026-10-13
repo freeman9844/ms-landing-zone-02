@@ -741,15 +741,14 @@ B의 default route도 같은 Firewall 사설 IP입니다.
 
 AVNM의 **Routing만** commit합니다. 이 manager/리전에는 한 번에 하나의
 Routing Configuration만 배포할 수 있으므로 A/B collection 둘을 **한 구성**
-안에서 함께 적용합니다. 생성 후 이미 확인한 규칙은 반복하지 않지만, A/B Group
-멤버와 기존 route table/NAT가 없는 Subnet은 배포 직전에 확인합니다.
+안에서 함께 적용합니다. 생성 후 확인한 A/B Group 멤버와 규칙은 반복 조회하지
+않습니다. 기존 route table/NAT가 없는 Subnet만 배포 직전에 확인합니다.
 배포 요청 성공만으로 Subnet 적용을 가정하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:routing-commit -->
 ```bash
-assert_routing_groups_ready &&
 assert_unattached_workload_subnets &&
 az network manager post-commit --network-manager-name "$AVNM" \
   --commit-type Routing \
