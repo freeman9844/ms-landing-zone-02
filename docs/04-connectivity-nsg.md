@@ -735,6 +735,14 @@ printf '%s\n' "$created"
 
 B의 default route도 같은 Firewall 사설 IP입니다.
 
+Azure Portal의 **Spoke B VNet → Subnets → snet-workload → Route table**에서
+AVNM이 생성한 관리형 route table과 `/20`·`/0` 경로를 확인할 수 있습니다.
+아래 이미지는 **4-8 배포와 5절 적용 확인을 마친 후**의 예시입니다.
+4-7에서 규칙만 생성한 직후에는 관리형 route table이 아직 없을 수 있으며,
+실행마다 route table 이름·리소스 그룹·주소가 다릅니다.
+
+![Azure Portal의 Spoke B AVNM 관리형 route table에 표시된 상대 Spoke /20 및 인터넷 /0 경로와 Firewall next hop](images/04-spokeb-avnm-managed-routes.png)
+
 ### 4-8. koreacentral에 Routing 배포
 
 👁️ **설명**
@@ -804,10 +812,12 @@ Spoke NAT 연결/리소스 및 Public IP 부재를 확인합니다. AVNM 배포 
 ```bash
 inspect_avnm_routing_subnets() {
   local fw_ip result
+  # 이번 리전의 AVNM Routing 배포 기록을 조회합니다.
   result=$(az rest --method post \
     --url "$AVNM_ID/listDeploymentStatus?api-version=2025-05-01" \
     --body "$(jq -cn --arg loc "$LOCATION" '{deploymentTypes:["Routing"],regions:[$loc]}')" \
     -o json --subscription "$SUBSCRIPTION_ID") || return 1
+  # 과거의 성공이나 다른 구성은 제외하고 최신 배포가 이번 구성의 Deployed인지 확인합니다.
   jq -e --arg id "$AVNM_ID/routingConfigurations/rc-lzbegin-spokes-$RUN_ID" \
     --arg region "$LOCATION" '
     if type == "array" then .
@@ -821,8 +831,10 @@ inspect_avnm_routing_subnets() {
     (.configurationIds[0] | ascii_downcase) == ($id | ascii_downcase)
   ' <<< "$result" >/dev/null ||
     { fail "Routing deployment has not reached Deployed in koreacentral."; return 1; }
+  # 현재 Firewall IP를 기준으로 두 Subnet의 관리형 route table과 /20·/0 경로를 검사합니다.
   fw_ip=$(firewall_ready_ip) || return 1
   assert_avnm_routes_ready "$fw_ip" || return 1
+  # Spoke의 NAT 연결이나 Public IP가 경로 실습에 섞이지 않았는지 확인합니다.
   assert_no_spoke_nat || return 1
   printf 'PASS: A %s + /0 and B %s + /0 use Firewall %s; no Spoke NAT\n' \
     "$SPOKEB_VNET_CIDR" "$SPOKEA_VNET_CIDR" "$fw_ip"
@@ -831,6 +843,14 @@ inspect_avnm_routing_subnets
 ```
 
 📋 **확인**
+
+실제 실습에서 확인한 성공 출력 예시입니다. IPAM 할당 주소와 Firewall 사설 IP는
+실행마다 다를 수 있으므로 숫자 자체보다 **A/B 상대 Spoke 경로, `/0`, Firewall IP,
+Spoke NAT 부재**를 확인하세요.
+
+```text
+PASS: A 172.20.32.0/20 + /0 and B 172.20.16.0/20 + /0 use Firewall 172.20.1.4; no Spoke NAT
+```
 
 **두 Spoke 모두** PASS여야 다음 모듈의 VM/Hub NAT를 배포할 수 있습니다.
 검사 실패/한쪽만 반영/CLI 조회 오류는 성공이 아닙니다. 수동 테이블을 만들어
