@@ -996,8 +996,11 @@ class StepwiseDocsTests(unittest.TestCase):
             with self.subTest(step=name):
                 result = self.execute(4, name, firewall_cases()[name], input_text="")
                 self.assertEqual(result.returncode, 0, result.stderr)
+        calls = support_cases()["support-deploy"]
+        first_mutation = next(i for i, call in enumerate(calls)
+                              if call["argv"][:3] == ["network", "public-ip", "create"])
         self.assertNotEqual(self.execute(5, "support-deploy",
-                                        [], input_text="NO\n",
+                                        calls[:first_mutation], input_text="NO\n",
                                         files=self.keyfile).returncode, 0)
 
     def test_missing_key_stops_preview_and_deploy_without_cloud_mutation(self):
