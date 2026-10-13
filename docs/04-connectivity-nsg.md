@@ -763,6 +763,29 @@ Routing commit 요청이 성공해야 합니다. timeout/오류는 배포 취소
 뜻하지 않습니다. 배포가 비동기이므로 5절의 읽기 전용 검사를 1–2분 간격으로
 재실행할 수 있습니다.
 
+### UDR 적용 후 트래픽 흐름
+
+```mermaid
+flowchart LR
+  A["Spoke A<br/>snet-workload"]
+  FW["Hub<br/>Azure Firewall (사설 IP)"]
+  B["Spoke B<br/>snet-workload"]
+  NET["인터넷"]
+
+  A -->|"B VNet /20: 요청<br/>0.0.0.0/0: 외부<br/>next hop: Firewall"| FW
+  B -->|"A VNet /20: 응답<br/>0.0.0.0/0: 외부<br/>next hop: Firewall"| FW
+  FW -->|"허용된 요청<br/>Hub → B Peering"| B
+  FW -->|"허용된 응답<br/>Hub → A Peering"| A
+  FW -->|"허용된 외부 요청<br/>Firewall Public IP"| NET
+```
+
+Spoke A에서 B의 `/20`으로 보내는 요청은 Hub Firewall을 거쳐 B로 전달되고,
+B에서 A의 `/20`으로 보내는 응답도 같은 Firewall을 거칩니다. 인터넷 목적지는
+양쪽 Spoke의 `/0`이 Firewall로 보냅니다. `/20`이 `/0`보다 우선하며,
+**UDR은 경로만 지정**합니다. 실제 통신은 Firewall Policy와 네 방향 Peering의
+전달 허용 상태에 따라 결정됩니다. 두 Spoke 간 직접 Peering이나 Spoke NAT는 없습니다.
+5절에서 이 경로가 실제 Subnet에 적용됐는지 확인합니다.
+
 ## 5. VM 생성 전 실제 적용 확인
 
 👁️ **설명**
