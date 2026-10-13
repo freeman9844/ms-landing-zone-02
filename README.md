@@ -3,7 +3,7 @@
 Azure Virtual Network Manager를 사용하는 독립 저장소
 `jungwoonlee_microsoft/ms-landing-zone-02`의 루트에서 실행합니다.
 
-> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 160–195분** 동안
+> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 155–195분** 동안
 > Cloud Shell과 Portal로 Hub & Spoke를 만들고, AVNM 연결·라우팅·보안 정책과
 > 중앙 Firewall·로그를 확인한 뒤 안전하게 정리합니다.
 
@@ -27,9 +27,10 @@ Azure Virtual Network Manager를 사용하는 독립 저장소
 
 ## 무엇을 배우나요?
 
-구독·리소스 그룹·리전을 구분하고, 실행별 Hub AVNM 아래에 직접 만든 IPAM pool에서 겹치지 않는 주소를 할당받습니다.
-모듈 03에서는 AVNM(Azure Virtual Network Manager)의 세 범위와 Network Group으로
-Hub↔Spoke 연결을 배포합니다. 모듈 04에서는 네 방향 피어링의 전달 허용을 먼저 설정하고
+구독·리소스 그룹·리전을 구분하고, 모듈 02에서 AVNM(Azure Virtual Network Manager)의
+Connectivity·Security Admin·Routing 범위와 실행별 IPAM pool을 만들어 겹치지 않는 주소를 할당받습니다.
+모듈 03에서는 Network Group으로 Hub↔Spoke 연결을 배포합니다.
+모듈 04에서는 네 방향 피어링의 전달 허용을 먼저 설정하고
 AVNM 피어링 강제를 배포한 뒤, VM을 만들기 전에 Firewall과 AVNM Routing으로
 Spoke의 왕복 경로와 인터넷 출구를 준비합니다. 강제 배포 후에는 피어링을 AVNM 외부에서
 직접 변경·삭제할 수 없습니다. 모듈 05에서는 사설 VM과
@@ -42,7 +43,10 @@ AVNM 경로·HTTP 통신, 새 Firewall Allow 로그와 인터넷 출구를 확�
 보안·가용성 인증이나 자동 구축 도구가 아닙니다. 관리 그룹·다중 구독·Policy 상속은
 [운영 전환 대응표](docs/07-cleanup-production.md#운영-landing-zone으로-확장하기)에서 설명합니다.
 
-## 1단계: AVNM 연결과 Firewall 경로 준비
+## 구성 개요: AVNM 연결과 Firewall 경로
+
+아래 그림은 모듈 02–05를 마친 **최종 구성**입니다. VM·Hub NAT는 모듈 05에서
+만들며, 모듈 04에서는 VM보다 먼저 Firewall과 경로를 준비합니다.
 
 ```mermaid
 flowchart LR
@@ -72,12 +76,12 @@ Cloud Shell의 Run Command는 Azure 관리 기능과 VM agent를 이용합니다
 따라서 이전 과정의 “A→B 경로 부재” 실험은 수행하지 않습니다.
 Hub VM은 교육용 검사 도구이며, 운영 애플리케이션을 Hub에 배치하는 권장이 아닙니다.
 
-## 2단계: 중앙 보안 정책과 Firewall 로그 검증
+## 흐름 개요: 중앙 보안 정책과 Firewall 로그 검증
 
 ```mermaid
 flowchart LR
   A["Spoke A VM"] -->|"상대 Spoke 할당 /20 AVNM 경로"| F["Hub Azure Firewall Standard"]
-  F -->|"AVNM Always Allow · Firewall TCP 8080"| B["Spoke B VM"]
+  F -->|"Firewall TCP 8080 Allow"| B["Spoke B VM · AVNM AlwaysAllow"]
   B -->|"응답 할당 /20 AVNM 경로"| F
   F --> A
   A -.->|"default route"| F
@@ -125,12 +129,12 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 | 00 | [Azure 첫걸음](docs/00-azure-basics.md) | 구독·RG·리전·Landing Zone의 목적 설명 | 15분 |
 | 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·Provider 등록 | 15분 |
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
-| 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위·Network Group·Hub-and-Spoke 연결 배포 | 25분 |
-| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–45분 |
+| 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위 확인·Network Group·Hub-and-Spoke 연결 배포 | 20분 |
+| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–50분 |
 | 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·실제 HTTP 확인 | 25–35분 |
 | 06 | [경로와 Firewall 검증](docs/06-routing-validation.md) | 실제 경로·HTTP·새 Allow 로그·egress 검증 | 15–25분 |
 | 07 | [정리와 운영 전환](docs/07-cleanup-production.md) | 정확한 실습 리소스 삭제와 운영 차이 이해 | 10–15분 |
-| | **전체 합계** | | **160–195분** |
+| | **전체 합계** | | **155–195분** |
 
 모듈 04 이후에도 같은 실행 ID와 리소스를 유지한 채 **05 → 06 → 07**로 진행합니다.
 목표 시간은 배포·정책 반영·로그 수집·삭제 대기에 따라 늘어날 수 있습니다.
@@ -145,7 +149,7 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 | NAT Gateway | 없음 | Hub에만 1개 | 유휴 상태에도 시간 과금 |
 | Standard Public IP | Firewall용 1개 | Hub NAT용 1개 추가 | 연결·할당 상태에 따라 비용 발생 |
 | Azure Firewall Standard | 1개 | 동일 | 배포·유휴 시간 및 처리량 과금 |
-| Azure Virtual Network Manager | 모듈 03부터 1개 | 동일 | 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있음 |
+| Azure Virtual Network Manager | 모듈 02부터 1개 | 동일 | 관리 범위와 구성 사용량에 따라 비용이 발생할 수 있음 |
 | Log Analytics | 1개 | 동일 | 수집량과 보존에 따른 비용 |
 | Peering·전송 | 사용량 기반 | 사용량 기반 | 반복/대량 부하 검사는 하지 않기 |
 
@@ -157,7 +161,7 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 [Virtual Network Manager](https://azure.microsoft.com/pricing/details/azure-virtual-network-manager/),
 [Monitor](https://azure.microsoft.com/pricing/details/monitor/)에서 리전·시간을 확인하세요.
 
-**완료·실패 여부와 관계없이 [cleanup](docs/07-cleanup-production.md)을 실행하세요.**
+**완료·실패 여부와 관계없이 원래 상태 파일로 [cleanup](docs/07-cleanup-production.md)을 실행하세요.**
 대상은 `rg-lzbegin-hub-{runId}`, `rg-lzbegin-spokea-{runId}`, `rg-lzbegin-spokeb-{runId}`입니다.
 이번 실행의 pool은 Hub RG와 함께 삭제됩니다. 기존 운영자 소유 공유 IPAM RG
 `rg-lzbegin-ipam`/pool, Network Watcher와 Cloud Shell 저장소는 삭제하지 않습니다.
@@ -169,6 +173,7 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 Cloud Shell 변수는 새 세션에 남지 않습니다. [상태 복구](docs/01-prerequisites.md#세션-재연결-시-변수-복구)로
 `.workshop-state/{runId}.json`을 읽고 **원래 실행 ID**를 사용합니다.
 이 파일과 실습용 키는 Git에서 제외됩니다. 임시 Cloud Shell이면 종료 전에 상태 JSON을 내려받으세요.
+원래 상태 파일을 찾을 수 없으면 임의로 재생성하거나 삭제하지 말고 운영자에게 문의하세요.
 새 실행의 schema 4 JSON은 실행별 pool ID와 세 RG만 저장하며 할당 CIDR을 캐시하지 않습니다.
 재접속할 때마다 모듈 01에서 상태를 다시 읽고, 모듈 03–06은 실제 Azure 할당을 다시
 조회합니다. 중간 실패 시 해당 모듈의 읽기 전용 확인으로 이미 생성된 자원의
