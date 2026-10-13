@@ -187,12 +187,11 @@ def routing_cases():
     manager = avnm_id()
     config = manager + "/routingConfigurations/rc-lzbegin-spokes-demo123"
     cases = {
-        "routing-config-create": [
-            az(["network", "manager", "show", "-g", rg("hub"), "-n", "avnm-lzbegin-demo123",
-                "-o", "json"], {"id": manager, "provisioningState": "Succeeded",
-                               "networkManagerScopeAccesses": ["Connectivity", "SecurityAdmin", "Routing"]}),
-        ],
-        "routing-deploy-status": [az([
+        "routing-config-create": [az(["network", "manager", "routing-config", "create", "-g", rg("hub"),
+            "--manager-name", "avnm-lzbegin-demo123", "-n", "rc-lzbegin-spokes-demo123",
+            "--description", "Spoke routes via Hub Firewall", "-o", "json"],
+           {"id": config})],
+        "inspect-avnm-routing-subnets": [az([
             "rest", "--method", "post", "--url", avnm_id() +
             "/listDeploymentStatus?api-version=2025-05-01",
             "--body", '{"deploymentTypes":["Routing"],"regions":["koreacentral"]}',
@@ -230,8 +229,8 @@ def routing_cases():
             {"id": collection, "appliesTo": [{"networkGroupId": group}]})]
         for kind, rule, prefix in (("other", "to-other-spoke", "172.20.32.0/20" if zone == "spokea" else "172.20.16.0/20"),
                                    ("internet", "to-internet", "0.0.0.0/0")):
-            dest = f"type=AddressPrefix destination-address={prefix}"
-            hop = f"next-hop-type=VirtualAppliance next-hop-address={FW_IP}"
+            dest = json.dumps({"type": "AddressPrefix", "destination_address": prefix}, separators=(",", ":"))
+            hop = json.dumps({"next_hop_type": "VirtualAppliance", "next_hop_address": FW_IP}, separators=(",", ":"))
             cases[f"routing-rule-{zone}-{kind}"] = [*ready_calls(), az([
                 "network", "manager", "routing-config", "rule-collection", "rule", "create",
                 "-g", rg("hub"), "--manager-name", "avnm-lzbegin-demo123",
@@ -256,8 +255,11 @@ def routing_cases():
 
 
 def route_configuration_calls():
-    manager = avnm_id()
-    calls = routing_cases()["routing-config-create"].copy()
+    return routing_cases()["routing-config-create"]
+
+
+def routing_group_calls():
+    calls = []
     for zone in ("spokea", "spokeb"):
         group_id = routing_group_id(zone)
         calls += [
@@ -268,16 +270,11 @@ def route_configuration_calls():
                 "--network-manager", "avnm-lzbegin-demo123", "--resource-group", rg("hub"),
                 "-o", "json"], [{"resourceId": netid(zone, "virtualNetworks", vnet(zone)),
                                 "provisioningState": "Succeeded"}])]
-    calls += [
-        az(["network", "manager", "routing-config", "create", "-g", rg("hub"),
-            "--manager-name", "avnm-lzbegin-demo123", "-n", "rc-lzbegin-spokes-demo123",
-            "--description", "Spoke routes via Hub Firewall", "-o", "json"],
-           {"id": manager + "/routingConfigurations/rc-lzbegin-spokes-demo123"})]
     return calls
 
 
 def routing_commit_calls():
-    calls = []
+    calls = routing_group_calls()
     for zone in ("spokea", "spokeb"):
         calls.extend([
             group(zone),
@@ -508,7 +505,7 @@ class StepwiseDocsTests(unittest.TestCase):
 
     def execute(self, module, name, calls=(), input_text=None, files=None, prefix="", state=test_network_docs.STATE):
         steps = blocks(DOCS[module])
-        if (module, name) in ((4, "routing-config-create"), (5, "vm-route-gate")):
+        if (module, name) == (5, "vm-route-gate"):
             calls = [*enforced_connectivity_calls(), *calls]
         if module == 5 and name in ("support-preview", "support-deploy"):
             prefix += "check_vm_network() { :; }\n"
@@ -652,7 +649,7 @@ class StepwiseDocsTests(unittest.TestCase):
         return ((4, firewall_cases()
                  | {k: v for k, v in routing_cases().items() if k.startswith("forward-")
                     or k.startswith("routing-collection-") or k.startswith("routing-rule-")
-                    or k.startswith("routing-deploy-status")}
+                    }
                  | enforcement_cases()),
                 (5, support_cases() | security_cases()),
                 (6, {k: v for k, v in routing_cases().items() if k.startswith("firewall-")}))
@@ -702,25 +699,12 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("PASS: peeringEnforcement=Enforced saved", result.stdout)
 
-    def test_routing_configuration_rejects_wrong_member_and_full_group_ids(self):
+    def test_routing_configuration_rejects_wrong_full_id(self):
         calls = route_configuration_calls()
         self.assertEqual(self.execute(4, "routing-config-create", calls).returncode, 0)
-        for index, field, wrong in (
-            (1, "id", routing_group_id("spokeb")),
-            (2, "resourceId", netid("spokeb", "virtualNetworks", vnet("spokeb"))),
-            (3, "id", routing_group_id("spokea") + "/staticMembers/spokea"),
-            (4, "resourceId", netid("spokeb", "virtualNetworks", vnet("spokeb")) + "/subnets/snet-workload"),
-            (6, "id", avnm_id() + "/routingConfigurations/other"),
-        ):
-            with self.subTest(index=index, field=field):
-                invalid = copy.deepcopy(calls[:index + 1])
-                payload = json.loads(invalid[-1]["stdout"])
-                if index in (2, 4):
-                    payload[0][field] = wrong
-                else:
-                    payload[field] = wrong
-                invalid[-1]["stdout"] = json.dumps(payload)
-                self.assertNotEqual(self.execute(4, "routing-config-create", invalid).returncode, 0)
+        invalid = copy.deepcopy(calls)
+        invalid[0]["stdout"] = json.dumps({"id": avnm_id() + "/routingConfigurations/other"})
+        self.assertNotEqual(self.execute(4, "routing-config-create", invalid).returncode, 0)
 
     def test_first_run_routing_config_does_not_list_existing_names(self):
         calls = route_configuration_calls()
@@ -760,6 +744,8 @@ class StepwiseDocsTests(unittest.TestCase):
             self.assertIn("az network vnet peering update", steps[name])
             self.assertIn("peering_for_forwarding", steps[name])
             self.assertIn("assert_peering_forwarded", steps[name])
+        self.assertNotIn("assert_routing_creation_ready", steps["routing-config-create"])
+        self.assertNotIn("routing-deploy-status", steps)
         for name in ("routing-config-create", "routing-collection-spokea",
                      "routing-collection-spokeb", "routing-rule-spokea-other",
                      "routing-rule-spokea-internet", "routing-rule-spokeb-other",
@@ -775,15 +761,15 @@ class StepwiseDocsTests(unittest.TestCase):
         self.assertIn("az network manager connect-config update", steps["enforce-peering"])
         self.assertIn("az network manager post-commit", steps["commit-enforced-connectivity"])
 
-    def test_routing_commit_only_checks_subnet_ownership_and_existing_attachments(self):
+    def test_routing_commit_checks_subnet_ownership_and_existing_attachments(self):
         calls = routing_commit_calls()
         result = self.execute(4, "routing-commit", calls)
         self.assertEqual(result.returncode, 0, result.stderr)
         for index, change in (
-            (1, {"routeTable": {"id": "foreign"}}),
-            (1, {"natGateway": {"id": "foreign"}}),
-            (1, {"id": netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")}),
-            (3, {"routeTable": {"id": "foreign"}}),
+            (5, {"routeTable": {"id": "foreign"}}),
+            (5, {"natGateway": {"id": "foreign"}}),
+            (5, {"id": netid("spokeb", "virtualNetworks", vnet("spokeb") + "/subnets/snet-workload")}),
+            (7, {"routeTable": {"id": "foreign"}}),
         ):
             with self.subTest(index=index, change=change):
                 invalid = copy.deepcopy(calls[:index + 1])
@@ -792,15 +778,26 @@ class StepwiseDocsTests(unittest.TestCase):
                 invalid[-1]["stdout"] = json.dumps(data)
                 self.assertNotEqual(self.execute(4, "routing-commit", invalid).returncode, 0)
 
+    def test_routing_commit_rejects_wrong_group_member_before_deployment(self):
+        calls = routing_commit_calls()
+        for index in (1, 3):
+            invalid = copy.deepcopy(calls)
+            invalid[index]["stdout"] = json.dumps([{
+                "resourceId": netid("hub", "virtualNetworks", vnet("hub")),
+                "provisioningState": "Succeeded",
+            }])
+            self.assertNotEqual(self.execute(4, "routing-commit", invalid[:index + 1]).returncode, 0)
+
     def test_routing_deployment_requires_latest_successful_exact_configuration(self):
-        valid = routing_cases()["routing-deploy-status"]
-        self.assertEqual(self.execute(4, "routing-deploy-status", valid).returncode, 0)
+        valid = routing_cases()["inspect-avnm-routing-subnets"]
+        prefix = 'firewall_ready_ip() { printf "172.20.1.4\\n"; }\nassert_avnm_routes_ready() { :; }\nassert_no_spoke_nat() { :; }\n'
+        self.assertEqual(self.execute(4, "inspect-avnm-routing-subnets", valid, prefix=prefix).returncode, 0)
         terminal_page = copy.deepcopy(valid)
         terminal_page[-1]["stdout"] = json.dumps({
             "skipToken": "",
             "value": json.loads(valid[-1]["stdout"]),
         })
-        self.assertEqual(self.execute(4, "routing-deploy-status", terminal_page).returncode, 0)
+        self.assertEqual(self.execute(4, "inspect-avnm-routing-subnets", terminal_page, prefix=prefix).returncode, 0)
         for status in (
             {"deploymentType": "Routing", "region": "koreacentral",
              "commitTime": "2026-01-02T00:00:00Z", "deploymentStatus": "Failed",
@@ -813,7 +810,7 @@ class StepwiseDocsTests(unittest.TestCase):
                 call_list = copy.deepcopy(valid)
                 call_list[-1]["stdout"] = json.dumps([
                     json.loads(valid[-1]["stdout"])[0], status])
-                self.assertNotEqual(self.execute(4, "routing-deploy-status", call_list).returncode, 0)
+                self.assertNotEqual(self.execute(4, "inspect-avnm-routing-subnets", call_list, prefix=prefix).returncode, 0)
 
     def test_support_deployment_refuses_failed_routing_gate_before_any_mutation(self):
         for name in ("support-preview", "support-deploy"):

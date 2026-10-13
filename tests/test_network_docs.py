@@ -480,8 +480,10 @@ class NetworkDocsTests(unittest.TestCase):
         for zone, remote in (("spokea", "SPOKEB"), ("spokeb", "SPOKEA")):
             with self.subTest(zone=zone):
                 rule = actions[f"routing-rule-{zone}-other"]
-                self.assertIn(f'--destination "type=AddressPrefix destination-address=${remote}_VNET_CIDR"', rule)
-                self.assertIn('--next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip"', rule)
+                self.assertIn(f'--arg address "${remote}_VNET_CIDR"', rule)
+                self.assertIn("destination_address:$address", rule)
+                self.assertIn('--arg ip "$fw_ip"', rule)
+                self.assertIn("next_hop_address:$ip", rule)
                 self.assertIn(f'other-spoke "${remote}_VNET_CIDR"', rule)
         self.assertIn('"$FIREWALL_SUBNET_CIDR"', actions["inspect-firewall"])
         self.assertIn('"$SPOKEB_VNET_CIDR"', blocks(DOCS[5])["effective-vm-routes"])
@@ -782,15 +784,15 @@ printf 'SHELL_ALIVE\\n'
                             (4, "forward-hub-to-spokeb"): ["assert_peering_forwarded"],
                             (4, "forward-spokeb-to-hub"): ["assert_peering_forwarded"],
                             (4, "inspect-enforced-connectivity"): ["assert_enforced_connectivity"],
-                            (4, "routing-config-create"): ["assert_routing_creation_ready",
-                                                            "assert_routing_creation_result"],
+                            (4, "routing-config-create"): ["assert_routing_creation_result"],
                             (4, "routing-collection-spokea"): ["assert_routing_collection_result"],
                             (4, "routing-collection-spokeb"): ["assert_routing_collection_result"],
                             (4, "routing-rule-spokea-other"): ["assert_routing_rule_result"],
                             (4, "routing-rule-spokea-internet"): ["assert_routing_rule_result"],
                             (4, "routing-rule-spokeb-other"): ["assert_routing_rule_result"],
                             (4, "routing-rule-spokeb-internet"): ["assert_routing_rule_result"],
-                            (4, "routing-commit"): ["assert_unattached_workload_subnets"],
+                            (4, "routing-commit"): ["assert_routing_groups_ready",
+                                                    "assert_unattached_workload_subnets"],
                             (4, "inspect-avnm-routing-subnets"): ["assert_avnm_routes_ready",
                                                                    "assert_no_spoke_nat"],
                             (5, "vm-route-gate"): ["assert_enforced_connectivity",

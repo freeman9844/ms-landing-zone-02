@@ -57,16 +57,8 @@ assert_peering_forwarded() {
   printf 'PASS: %s/%s -> %s\n' "$local_rg" "$local_vnet" "$remote_vnet"
 }
 
-assert_routing_creation_ready() {
-  local manager groups members zone group expected
-  assert_enforced_connectivity || return 1
-  manager=$(az network manager show -g "$RG_HUB" -n "$AVNM" \
-    -o json --subscription "$SUBSCRIPTION_ID") || return 1
-  jq -e --arg id "$AVNM_ID" '
-    (.id | ascii_downcase) == ($id | ascii_downcase) and
-    .provisioningState == "Succeeded" and
-    (.networkManagerScopeAccesses | sort) == (["Connectivity","SecurityAdmin","Routing"] | sort)
-  ' <<< "$manager" >/dev/null || { fail "AVNM Routing scope is not ready."; return 1; }
+assert_routing_groups_ready() {
+  local groups members zone group expected
   [[ "${ROUTE_GROUP_A_ID,,}" != "${ROUTE_GROUP_B_ID,,}" ]] ||
     { fail "Routing target groups must differ."; return 1; }
   for zone in spokea spokeb; do

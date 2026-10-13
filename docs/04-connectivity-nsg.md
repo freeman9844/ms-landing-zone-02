@@ -24,8 +24,7 @@ ID에 해당하는 경로를 선택하세요. `.workshop-state/<실행 ID>.json`
 마세요**. 함수는 실패를 반환하지만 Cloud Shell 전체를 종료하지 않습니다.
 공통 준비에서 안전 검사 함수도 함께 불러옵니다. 재접속하면 준비 블록만 다시
 실행한 뒤 이전에 만든 자원을 재생성하지 않고 다음 단계를 계속할 수 있습니다.
-5절에서 이전 **읽기 전용 검사 함수**가 재접속으로 없어졌다면
-4-9의 검사 블록을 다시 실행하세요. 생성 블록을 재실행해서 함수를 복구하지 마세요.
+5절의 검사는 재접속 후에도 공통 준비만 다시 실행하면 사용할 수 있습니다.
 
 🟢 **실행**
 
@@ -581,15 +580,14 @@ table을 만들어 Subnet에 연결하므로 수동 route table을 생성하지 
 
 👁️ **설명**
 
-모듈 03의 manager 세 범위와 A/B Group의 **정확한 멤버**를 확인한 뒤
-이번 실행의 Routing Configuration을 처음 생성합니다. 이미 생성됐다면
+이번 실행의 Routing Configuration을 처음 생성합니다. 앞 단계에서 확인한
+Connectivity 상태를 여기서 반복 조회하지 않습니다. 이미 생성됐다면
 이 명령을 재실행하지 말고 현재 상태를 조회하세요.
 
 🟢 **실행**
 
 <!-- exec:routing-config-create -->
 ```bash
-assert_routing_creation_ready &&
 created=$(az network manager routing-config create -g "$RG_HUB" --manager-name "$AVNM" \
   -n "rc-lzbegin-spokes-$RUN_ID" --description "Spoke routes via Hub Firewall" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
@@ -600,7 +598,7 @@ printf '%s\n' "$created"
 📋 **확인**
 
 출력된 전체 ID가 `.../routingConfigurations/rc-lzbegin-spokes-<실행 ID>`인지 확인합니다.
-생성 응답의 전체 ID를 검증하며, 배포 후 5절에서 실제 저장된 구성·경로를 다시 확인합니다.
+생성 응답의 전체 ID를 검증하며, 5절에서 실제 저장된 구성·경로를 다시 확인합니다.
 `Updating`이면 다음 생성 대신 조회·대기하세요.
 
 ### 4-2. A 전용 rule collection
@@ -663,8 +661,8 @@ fw_ip=$(firewall_ready_ip) &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokea -n to-other-spoke \
-  --destination "type=AddressPrefix destination-address=$SPOKEB_VNET_CIDR" \
-  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  --destination "$(jq -cn --arg address "$SPOKEB_VNET_CIDR" '{type:"AddressPrefix",destination_address:$address}')" \
+  --next-hop "$(jq -cn --arg ip "$fw_ip" '{next_hop_type:"VirtualAppliance",next_hop_address:$ip}')" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokea to-other-spoke "$SPOKEB_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
@@ -684,8 +682,8 @@ fw_ip=$(firewall_ready_ip) &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokea -n to-internet \
-  --destination "type=AddressPrefix destination-address=0.0.0.0/0" \
-  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  --destination '{"type":"AddressPrefix","destination_address":"0.0.0.0/0"}' \
+  --next-hop "$(jq -cn --arg ip "$fw_ip" '{next_hop_type:"VirtualAppliance",next_hop_address:$ip}')" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokea to-internet 0.0.0.0/0 "$fw_ip" &&
 printf '%s\n' "$created"
@@ -705,8 +703,8 @@ fw_ip=$(firewall_ready_ip) &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokeb -n to-other-spoke \
-  --destination "type=AddressPrefix destination-address=$SPOKEA_VNET_CIDR" \
-  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  --destination "$(jq -cn --arg address "$SPOKEA_VNET_CIDR" '{type:"AddressPrefix",destination_address:$address}')" \
+  --next-hop "$(jq -cn --arg ip "$fw_ip" '{next_hop_type:"VirtualAppliance",next_hop_address:$ip}')" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokeb to-other-spoke "$SPOKEA_VNET_CIDR" "$fw_ip" &&
 printf '%s\n' "$created"
@@ -726,8 +724,8 @@ fw_ip=$(firewall_ready_ip) &&
 created=$(az network manager routing-config rule-collection rule create \
   -g "$RG_HUB" --manager-name "$AVNM" --config-name "rc-lzbegin-spokes-$RUN_ID" \
   --collection-name spokeb -n to-internet \
-  --destination "type=AddressPrefix destination-address=0.0.0.0/0" \
-  --next-hop "next-hop-type=VirtualAppliance next-hop-address=$fw_ip" \
+  --destination '{"type":"AddressPrefix","destination_address":"0.0.0.0/0"}' \
+  --next-hop "$(jq -cn --arg ip "$fw_ip" '{next_hop_type:"VirtualAppliance",next_hop_address:$ip}')" \
   -o json --subscription "$SUBSCRIPTION_ID") &&
 assert_routing_rule_result "$created" spokeb to-internet 0.0.0.0/0 "$fw_ip" &&
 printf '%s\n' "$created"
@@ -743,14 +741,15 @@ B의 default route도 같은 Firewall 사설 IP입니다.
 
 AVNM의 **Routing만** commit합니다. 이 manager/리전에는 한 번에 하나의
 Routing Configuration만 배포할 수 있으므로 A/B collection 둘을 **한 구성**
-안에서 함께 적용합니다. 중복된 규칙 검사는 반복하지 않지만, 기존 route table이나
-NAT가 붙은 Subnet은 배포 직전에 거부합니다. 배포 요청 성공만으로 Subnet 적용을
-가정하지 않습니다.
+안에서 함께 적용합니다. 생성 후 이미 확인한 규칙은 반복하지 않지만, A/B Group
+멤버와 기존 route table/NAT가 없는 Subnet은 배포 직전에 확인합니다.
+배포 요청 성공만으로 Subnet 적용을 가정하지 않습니다.
 
 🟢 **실행**
 
 <!-- exec:routing-commit -->
 ```bash
+assert_routing_groups_ready &&
 assert_unattached_workload_subnets &&
 az network manager post-commit --network-manager-name "$AVNM" \
   --commit-type Routing \
@@ -762,23 +761,27 @@ az network manager post-commit --network-manager-name "$AVNM" \
 📋 **확인**
 
 Routing commit 요청이 성공해야 합니다. timeout/오류는 배포 취소나 성공을
-뜻하지 않습니다. 배포가 비동기이므로 다음 읽기 전용 조회를 1–2분 간격으로
+뜻하지 않습니다. 배포가 비동기이므로 5절의 읽기 전용 검사를 1–2분 간격으로
 재실행할 수 있습니다.
 
-### 4-9. koreacentral Routing 배포 상태 확인
+## 5. VM 생성 전 실제 적용 확인
 
 👁️ **설명**
 
-Routing을 지원하는 REST `listDeploymentStatus`의 **이번 구성 ID·Routing·koreacentral**의 가장 최근
-commit이 `Deployed`여야 합니다. 전체 배포 성공은 개별 Subnet의 경로가
-준비됐다는 뜻이 아니므로 5절을 이어서 검사합니다.
+관리형 route table의 **이름·RG·태그를 추측하지 않습니다**. 양쪽
+`snet-workload.routeTable.id`를 조회한 뒤 그 **반환된 전체 ID**로 테이블의
+두 경로·next hop을 검증합니다. `assert_avnm_routes_ready`는 구성/대상
+Group/규칙과 Subnet 연결을 함께 검사하고, `assert_no_spoke_nat`는
+Spoke NAT 연결/리소스 및 Public IP 부재를 확인합니다. AVNM 배포 페이지의
+성공 상태만으로 특정 Subnet의 적용을 대신하지 않습니다. 가장 최근 Routing
+배포가 이번 구성 ID로 `Deployed`인지도 이 블록에서 함께 확인합니다.
 
 🟢 **실행**
 
-<!-- exec:routing-deploy-status -->
+<!-- exec:inspect-avnm-routing-subnets -->
 ```bash
-inspect_routing_deployment() {
-  local result
+inspect_avnm_routing_subnets() {
+  local fw_ip result
   result=$(az rest --method post \
     --url "$AVNM_ID/listDeploymentStatus?api-version=2025-05-01" \
     --body "$(jq -cn --arg loc "$LOCATION" '{deploymentTypes:["Routing"],regions:[$loc]}')" \
@@ -796,34 +799,6 @@ inspect_routing_deployment() {
     (.configurationIds[0] | ascii_downcase) == ($id | ascii_downcase)
   ' <<< "$result" >/dev/null ||
     { fail "Routing deployment has not reached Deployed in koreacentral."; return 1; }
-  printf 'PASS: latest Routing deployment in %s is Deployed\n' "$LOCATION"
-}
-inspect_routing_deployment
-```
-
-📋 **확인**
-
-PASS가 나와야 합니다. `Deploying`/`Failed` 또는 다른 구성 ID라면 **VM을
-만들지 마세요**. 실패 원인을 AVNM Deployments에서 확인합니다.
-
-## 5. VM 생성 전 실제 적용 확인
-
-👁️ **설명**
-
-관리형 route table의 **이름·RG·태그를 추측하지 않습니다**. 양쪽
-`snet-workload.routeTable.id`를 조회한 뒤 그 **반환된 전체 ID**로 테이블의
-두 경로·next hop을 검증합니다. `assert_avnm_routes_ready`는 구성/대상
-Group/규칙과 Subnet 연결을 함께 검사하고, `assert_no_spoke_nat`는
-Spoke NAT 연결/리소스 및 Public IP 부재를 확인합니다. AVNM 배포 페이지의
-성공 상태만으로 특정 Subnet의 적용을 대신하지 않습니다.
-
-🟢 **실행**
-
-<!-- exec:inspect-avnm-routing-subnets -->
-```bash
-inspect_avnm_routing_subnets() {
-  local fw_ip
-  inspect_routing_deployment || return 1
   fw_ip=$(firewall_ready_ip) || return 1
   assert_avnm_routes_ready "$fw_ip" || return 1
   assert_no_spoke_nat || return 1
