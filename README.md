@@ -3,7 +3,7 @@
 Azure Virtual Network Manager를 사용하는 독립 저장소
 `jungwoonlee_microsoft/ms-landing-zone-02`의 루트에서 실행합니다.
 
-> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 155–195분** 동안
+> Azure가 처음인 참가자를 위한 한국어 핸즈온입니다. **전체 목표 시간 150분** 동안
 > Cloud Shell과 Portal로 Hub & Spoke를 만들고, AVNM 연결·라우팅·보안 정책과
 > 중앙 Firewall·로그를 확인한 뒤 안전하게 정리합니다.
 
@@ -126,18 +126,18 @@ VNet을 배포합니다. 세 VNet은 각각 동적 `/20`, 관리/워크로드 Su
 
 | # | 모듈 | 완료하면 할 수 있는 일 | 목표 시간 |
 |---|---|---|---:|
-| 00 | [Azure 첫걸음](docs/00-azure-basics.md) | 구독·RG·리전·Landing Zone의 목적 설명 | 15분 |
+| 00 | [Azure 첫걸음](docs/00-azure-basics.md) | 구독·RG·리전·Landing Zone의 목적 설명 | 10분 |
 | 01 | [실습 준비](docs/01-prerequisites.md) | Cloud Shell·권한·상태 복구·Provider 등록 | 15분 |
 | 02 | [네트워크 뼈대](docs/02-network-foundation.md) | Hub·Spoke·Subnet·NSG 준비 | 20분 |
 | 03 | [AVNM 연결 관리](docs/03-avnm-connectivity.md) | 세 범위 확인·Network Group·Hub-and-Spoke 연결 배포 | 20분 |
-| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35–50분 |
-| 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·실제 HTTP 확인 | 25–35분 |
-| 06 | [경로와 Firewall 검증](docs/06-routing-validation.md) | 실제 경로·HTTP·새 Allow 로그·egress 검증 | 15–25분 |
-| 07 | [정리와 운영 전환](docs/07-cleanup-production.md) | 정확한 실습 리소스 삭제와 운영 차이 이해 | 10–15분 |
-| | **전체 합계** | | **155–195분** |
+| 04 | [Firewall·AVNM Routing](docs/04-connectivity-nsg.md) | Firewall·피어링 강제 및 VM 생성 전 왕복 경로 준비 | 35분 |
+| 05 | [VM·AVNM Security Admin](docs/05-firewall.md) | 사설 VM 통신의 중앙 L4 허용·실제 HTTP 확인 | 25분 |
+| 06 | [경로와 Firewall 검증](docs/06-routing-validation.md) | 실제 경로·HTTP·새 Allow 로그·egress 검증 | 15분 |
+| 07 | [정리와 운영 전환](docs/07-cleanup-production.md) | 정확한 실습 리소스 삭제와 운영 차이 이해 | 10분 |
+| | **전체 합계** | | **150분** |
 
 모듈 04 이후에도 같은 실행 ID와 리소스를 유지한 채 **05 → 06 → 07**로 진행합니다.
-목표 시간은 배포·정책 반영·로그 수집·삭제 대기에 따라 늘어날 수 있습니다.
+150분은 진행 목표이며 배포·정책 반영·로그 수집·삭제 대기에 따라 실제 소요 시간은 늘어날 수 있습니다.
 중도 중단 시에는 남은 실습 대신 모듈 07의 정리를 실행하세요.
 
 <a id="비용과정리"></a>

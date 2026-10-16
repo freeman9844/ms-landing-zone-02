@@ -21,7 +21,7 @@ Azure Policy 때문에 특정 리전·SKU·Public IP 생성이 거부될 수 있
 Public IP 1개·Log Analytics 1개부터 비용이 발생할 수 있습니다. 모듈 05에서는
 VM 3대·디스크·Hub NAT Gateway 1개·Hub NAT용 Public IP 1개를 추가합니다.
 Firewall 시간·처리량 및 로그 수집·보존 비용을 포함하여 확인하세요. Spoke NAT는 만들지 않습니다.
-전체 155–195분은 교육 목표이지 무료 사용 시간이나 보장된 배포 시간은 아닙니다.
+전체 150분은 교육 목표이지 무료 사용 시간이나 보장된 배포 시간은 아닙니다.
 [가격 안내](../README.md#비용과정리)를 읽고 실습용 구독을 사용하세요.
 
 ## 2. Cloud Shell과 소스 준비

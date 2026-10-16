@@ -1,6 +1,6 @@
 # 05. VM과 AVNM 중앙 보안
 
-> 목표 시간 25–35분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙의 HTTP 허용을 확인합니다. 모듈 06에서는 경로·HTTP·Firewall Allow 로그를 검증합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
+> 목표 시간 25분. Firewall·AVNM Routing이 준비된 뒤에만 VM을 배포하고, Security Admin 규칙의 HTTP 허용을 확인합니다. 모듈 06에서는 경로·HTTP·Firewall Allow 로그를 검증합니다. VM 배포와 정책 전파에는 시간이 더 걸릴 수 있습니다.
 
 ## 공통 준비
 
