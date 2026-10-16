@@ -114,7 +114,7 @@ class DocsTests(unittest.TestCase):
     def test_prerequisites_clone_the_standalone_workshop_repository(self):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         self.assertIn(
-            'git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \\',
+            'git clone https://github.com/freeman9844/ms-landing-zone-02.git \\',
             text,
         )
         self.assertIn('cd "$HOME/ms-landing-zone-02"', text)
@@ -126,7 +126,7 @@ class DocsTests(unittest.TestCase):
         text = (ROOT / "docs/01-prerequisites.md").read_text()
         self.assertIn("### Cloud Shell 최초 준비", text)
         start = text.index("### Cloud Shell 최초 준비")
-        clone = text.index('git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git')
+        clone = text.index('git clone https://github.com/freeman9844/ms-landing-zone-02.git')
         paths = ["images/01-cloudshell-step4-ready.png",
                  "images/01-cloudshell-step1-bash.png",
                  "images/01-cloudshell-step2-storage.png",

@@ -85,7 +85,7 @@ Bash 프롬프트에서 접근 권한이 있는 GitHub 계정으로 다음 저�
 
 ```bash
 # 이 독립 저장소의 루트가 현재 워크숍 경로입니다.
-git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \
+git clone https://github.com/freeman9844/ms-landing-zone-02.git \
   "$HOME/ms-landing-zone-02"
 cd "$HOME/ms-landing-zone-02"
 # 구독 이름과 UUID를 함께 확인합니다. 이 명령은 구독 선택이나 리소스 생성을 하지 않습니다.

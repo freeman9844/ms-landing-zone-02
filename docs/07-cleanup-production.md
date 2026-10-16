@@ -132,7 +132,7 @@ RG 삭제 완료 뒤에도 비용 화면에는 과거 사용량이 지연 반영
 
 ```bash
 # 기존 작업 디렉터리는 변경하지 않습니다. 태그가 게시된 뒤 별도 clone에서 실행하세요.
-git clone https://github.com/jungwoonlee_microsoft/ms-landing-zone-02.git \
+git clone https://github.com/freeman9844/ms-landing-zone-02.git \
   "$HOME/ms-landing-zone-02-legacy" &&
 cd "$HOME/ms-landing-zone-02-legacy" &&
 git fetch origin tag workshop-pre-ipam-8d4781f &&
