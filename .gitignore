@@ -2,6 +2,7 @@
 .workshop-keys/
 evidence/
 docs/maintainer-validation.md
+.superpowers/sdd/
 infra/*.json
 infra/modules/*.json
 __pycache__/
